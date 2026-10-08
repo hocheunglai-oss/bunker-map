@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
+import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
 import { priceSetterTabs } from "@/data/priceSetterTabs"
 import { chinaReportSections, compactReportSections } from "@/data/reportSections"
 import { hasFormulaForAnyFuel, parseSimpleFormula, resolvePortFuelValue } from "@/lib/portPricing"
-import { loadReportSnapshot, loadReportSnapshots, saveReportSnapshot, type ReportSnapshotKey } from "@/lib/reportSnapshots"
+import { loadReportSnapshots, saveReportSnapshot, type ReportSnapshotKey } from "@/lib/reportSnapshots"
 import { buildChinaReportSections } from "@/lib/chinaReport"
 import { buildTaiwanReportRows, formatReportDate, type TaiwanReportRow } from "@/lib/taiwanReport"
 import { buildHongKongReportRows, type HongKongReportRow } from "@/lib/hongKongReport"
@@ -93,7 +94,8 @@ const reportDateItems: Array<{ key: ReportSnapshotKey; label: string }> = [
 ]
 
 export default function AdminPage() {
-  const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
+  const { loading: adminLoading, authenticated, role, permissions } = useSimpleAdminAuth()
+  const canEdit = isAdminRole(role) || canAccessAdminPage(permissions, "pricesetter", "edit")
   const isMobile = useIsMobile()
 
   const [ports, setPorts] = useState<any[]>([])
@@ -113,6 +115,8 @@ export default function AdminPage() {
   const [publishedHongKong, setPublishedHongKong] = useState(false)
   const [reportDateOverrides, setReportDateOverrides] = useState<ReportDateOverrides>(emptyReportDateOverrides)
   const [reportDates, setReportDates] = useState<ReportDates>(emptyReportDates)
+  const [publishErrors, setPublishErrors] = useState<Partial<Record<ReportSnapshotKey, string>>>({})
+  const publishingAny = publishingChina || publishingCompact || publishingTaiwan || publishingHongKong
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false)
 
   useEffect(() => {
@@ -181,6 +185,7 @@ export default function AdminPage() {
   }, [adminLoading, authenticated])
 
   function updateValue(id: string, field: string, value: any) {
+    if (!canEdit || publishingAny || savingPorts[id]) return
     setPorts((prev) =>
       prev.map((port) => (port.id === id ? { ...port, [field]: value } : port))
     )
@@ -192,6 +197,7 @@ export default function AdminPage() {
   }
 
   async function saveDivider(port: any) {
+    if (!canEdit || publishingAny) return
     await supabase
       .from("ports")
       .update({
@@ -201,6 +207,7 @@ export default function AdminPage() {
   }
 
   async function savePort(port: any) {
+    if (!canEdit || publishingAny || savingPorts[port.id]) return
     setSavingPorts((prev) => ({ ...prev, [port.id]: true }))
     const taiwanDefaults = taiwanBasisFormulaDefaults[String(port.name).toLowerCase()] ?? {}
 
@@ -303,6 +310,7 @@ export default function AdminPage() {
   }
 
   async function deletePort(id: string, name: string) {
+    if (!canEdit || publishingAny || savingPorts[id]) return
     if (!confirm(`Delete ${name} ?`)) return
 
     await supabase.from("ports").delete().eq("id", id)
@@ -310,6 +318,7 @@ export default function AdminPage() {
   }
 
   async function addPort() {
+    if (!canEdit || publishingAny) return
     const { data } = await supabase
       .from("ports")
       .insert({
@@ -324,6 +333,7 @@ export default function AdminPage() {
   }
 
   async function addDivider() {
+    if (!canEdit || publishingAny) return
     const { data } = await supabase
       .from("ports")
       .insert({
@@ -343,6 +353,7 @@ export default function AdminPage() {
   }
 
   async function dragDrop(event: any, index: number) {
+    if (!canEdit || publishingAny || Object.values(savingPorts).some(Boolean)) return
     const from = Number(event.dataTransfer.getData("index"))
     const newPorts = [...ports]
     const item = newPorts.splice(from, 1)[0]
@@ -446,12 +457,14 @@ export default function AdminPage() {
     sections: Array<{ title: string; ports: string[] }>
   ) {
     const includedPorts = Array.from(new Set(sections.flatMap((section) => section.ports)))
-    const { data: portsData } = await supabase
+    const { data: portsData, error } = await supabase
       .from("ports")
       .select("*")
       .in("name", includedPorts)
 
-    if (!portsData) return null
+    if (error || !Array.isArray(portsData) || portsData.length === 0) {
+      throw new Error("Could not load the report prices.")
+    }
 
     const latestUpdated = portsData
       .map((port) => port.updated_at)
@@ -475,7 +488,11 @@ export default function AdminPage() {
   }
 
   function getReportDateForSnapshot(key: ReportSnapshotKey, automaticReportDate: string) {
-    return formatOverrideDate(reportDateOverrides[key]) || automaticReportDate
+    const date = formatOverrideDate(reportDateOverrides[key]) || automaticReportDate
+    if (!date || date.includes("NaN") || date.includes("Invalid")) {
+      throw new Error("A valid report date is required.")
+    }
+    return date
   }
 
   function updateReportDateOverride(key: ReportSnapshotKey, value: string) {
@@ -483,11 +500,15 @@ export default function AdminPage() {
       ...prev,
       [key]: value,
     }))
+    if (key === "china") setPublishedChina(false)
+    if (key === "compact") setPublishedCompact(false)
+    if (key === "taiwan") setPublishedTaiwan(false)
+    if (key === "hongkong") setPublishedHongKong(false)
   }
 
   async function saveReportSnapshotOrThrow<T>(key: ReportSnapshotKey, snapshot: T) {
-    const { error } = await saveReportSnapshot(key, snapshot)
-    if (error) throw error
+    const { data, error } = await saveReportSnapshot(key, snapshot)
+    if (error || !data) throw error || new Error("Report publication was not confirmed.")
   }
 
   async function buildTaiwanSnapshot(): Promise<{
@@ -495,29 +516,40 @@ export default function AdminPage() {
     rows: TaiwanReportRow[]
     remark: string
     specialNotice: string
-  } | null> {
+  }> {
     const portsWanted = ["Kaohsiung", "Keelung", "Taichung", "Suao", "Hualien"]
-    const { data: portsData } = await supabase
+    const { data: portsData, error: portsError } = await supabase
       .from("ports")
       .select("*")
       .in("name", portsWanted)
 
-    if (!portsData) return null
+    if (portsError || !Array.isArray(portsData)
+      || portsWanted.some((name) => !portsData.some((port) => port.name === name))) {
+      throw new Error("Could not load all Taiwan report prices.")
+    }
 
     const portIds = portsData.map((port) => port.id)
-    const { data: historyData } = await supabase
+    const { data: historyData, error: historyError } = await supabase
       .from("price_history")
       .select("*")
       .in("port_id", portIds)
       .order("recorded_at", { ascending: false })
       .order("id", { ascending: false })
 
-    if (!historyData || historyData.length === 0) return null
+    if (historyError || !Array.isArray(historyData) || historyData.length === 0) {
+      throw new Error("Could not load Taiwan price history.")
+    }
 
-    const { data: remarksData } = await supabase
+    const { data: remarksData, error: remarksError } = await supabase
       .from("remarks")
       .select("*")
       .in("id", [1, 2])
+
+    // An unavailable read is not an empty notice. Never overwrite the published
+    // report with blank remarks when the source could not be read.
+    if (remarksError || !Array.isArray(remarksData)) {
+      throw new Error("Could not load Taiwan remarks and notices.")
+    }
 
     const remarkData = remarksData?.find((item) => item.id === 1)
     const noticeData = remarksData?.find((item) => item.id === 2)
@@ -535,24 +567,28 @@ export default function AdminPage() {
   async function buildHongKongSnapshot(): Promise<{
     reportDate: string
     rows: HongKongReportRow[]
-  } | null> {
+  }> {
     const portsWanted = ["Hong Kong"]
-    const { data: portsData } = await supabase
+    const { data: portsData, error: portsError } = await supabase
       .from("ports")
       .select("*")
       .in("name", portsWanted)
 
-    if (!portsData) return null
+    if (portsError || !Array.isArray(portsData) || portsData.length !== 1) {
+      throw new Error("Could not load Hong Kong report prices.")
+    }
 
     const portIds = portsData.map((port) => port.id)
-    const { data: historyData } = await supabase
+    const { data: historyData, error: historyError } = await supabase
       .from("price_history")
       .select("*")
       .in("port_id", portIds)
       .order("recorded_at", { ascending: false })
       .order("id", { ascending: false })
 
-    if (!historyData || historyData.length === 0) return null
+    if (historyError || !Array.isArray(historyData) || historyData.length === 0) {
+      throw new Error("Could not load Hong Kong price history.")
+    }
 
     const automaticReportDate = formatReportDate(historyData[0].recorded_at)
 
@@ -563,7 +599,9 @@ export default function AdminPage() {
   }
 
   async function handlePublishChina() {
+    if (!canPublish("china")) return
     setPublishingChina(true)
+    setPublishedChina(false)
     try {
       const snapshot = await buildSnapshotFromPorts("china", chinaReportSections)
       if (snapshot) setPublishedChina(true)
@@ -571,13 +609,16 @@ export default function AdminPage() {
     } catch (error) {
       console.error(error)
       setPublishedChina(false)
+      setPublishErrors((prev) => ({ ...prev, china: "China report could not be published. Please try again." }))
     } finally {
       setPublishingChina(false)
     }
   }
 
   async function handlePublishCompact() {
+    if (!canPublish("compact")) return
     setPublishingCompact(true)
+    setPublishedCompact(false)
     try {
       const snapshot = await buildSnapshotFromPorts("compact", compactReportSections)
       if (snapshot) setPublishedCompact(true)
@@ -585,13 +626,16 @@ export default function AdminPage() {
     } catch (error) {
       console.error(error)
       setPublishedCompact(false)
+      setPublishErrors((prev) => ({ ...prev, compact: "Compact report could not be published. Please try again." }))
     } finally {
       setPublishingCompact(false)
     }
   }
 
   async function handlePublishTaiwan() {
+    if (!canPublish("taiwan")) return
     setPublishingTaiwan(true)
+    setPublishedTaiwan(false)
     try {
       const snapshot = await buildTaiwanSnapshot()
       if (snapshot) {
@@ -602,13 +646,16 @@ export default function AdminPage() {
     } catch (error) {
       console.error(error)
       setPublishedTaiwan(false)
+      setPublishErrors((prev) => ({ ...prev, taiwan: "Taiwan report could not be published. Please try again." }))
     } finally {
       setPublishingTaiwan(false)
     }
   }
 
   async function handlePublishHongKong() {
+    if (!canPublish("hongkong")) return
     setPublishingHongKong(true)
+    setPublishedHongKong(false)
     try {
       const snapshot = await buildHongKongSnapshot()
       if (snapshot) {
@@ -619,9 +666,21 @@ export default function AdminPage() {
     } catch (error) {
       console.error(error)
       setPublishedHongKong(false)
+      setPublishErrors((prev) => ({ ...prev, hongkong: "Hong Kong report could not be published. Please try again." }))
     } finally {
       setPublishingHongKong(false)
     }
+  }
+
+  function canPublish(key: ReportSnapshotKey) {
+    if (!canEdit || publishingAny) return false
+    if (ports.some((port) => port.type !== "divider" && savedPorts[port.id] === false)
+      || Object.values(savingPorts).some(Boolean)) {
+      setPublishErrors((prev) => ({ ...prev, [key]: "Save changed prices before publishing a report." }))
+      return false
+    }
+    setPublishErrors((prev) => ({ ...prev, [key]: undefined }))
+    return true
   }
 
   const visiblePorts = useMemo(() => {
@@ -686,6 +745,7 @@ export default function AdminPage() {
   }, [ports])
 
   async function setFallback(port: string, fuel: "hsfo" | "vlsfo" | "mgo", value: FallbackValue) {
+    if (!canEdit || publishingAny) return
     const key = buildFallbackKey(port, fuel)
     const next = {
       ...reportFallbacks,
@@ -761,7 +821,7 @@ export default function AdminPage() {
             >
               <button
                 onClick={handlePublishChina}
-                disabled={publishingChina}
+                disabled={!canEdit || publishingAny}
                 style={{
                   ...toolbarButtonStyle,
                   background: "var(--fc-admin-primary-button-bg)",
@@ -787,7 +847,7 @@ export default function AdminPage() {
               </a>
               <button
                 onClick={handlePublishCompact}
-                disabled={publishingCompact}
+                disabled={!canEdit || publishingAny}
                 style={{
                   ...toolbarButtonStyle,
                   background: "var(--fc-admin-primary-button-bg)",
@@ -832,10 +892,10 @@ export default function AdminPage() {
                       zIndex: 30,
                     }}
                   >
-                    <button onClick={() => { setToolsMenuOpen(false); void addPort() }} style={{ ...toolbarButtonStyle, justifyContent: "flex-start", textAlign: "left" }}>
+                    <button disabled={!canEdit || publishingAny} onClick={() => { setToolsMenuOpen(false); void addPort() }} style={{ ...toolbarButtonStyle, justifyContent: "flex-start", textAlign: "left" }}>
                       Add Port
                     </button>
-                    <button onClick={() => { setToolsMenuOpen(false); void addDivider() }} style={{ ...toolbarButtonStyle, justifyContent: "flex-start", textAlign: "left" }}>
+                    <button disabled={!canEdit || publishingAny} onClick={() => { setToolsMenuOpen(false); void addDivider() }} style={{ ...toolbarButtonStyle, justifyContent: "flex-start", textAlign: "left" }}>
                       Add Divider
                     </button>
                     <button onClick={() => { setShowCoords((prev) => !prev); setToolsMenuOpen(false) }} style={{ ...toolbarButtonStyle, justifyContent: "flex-start", textAlign: "left" }}>
@@ -873,7 +933,7 @@ export default function AdminPage() {
             >
               <button
                 onClick={handlePublishTaiwan}
-                disabled={publishingTaiwan}
+                disabled={!canEdit || publishingAny}
                 style={{
                   ...toolbarButtonStyle,
                   background: "var(--fc-admin-primary-button-bg)",
@@ -899,7 +959,7 @@ export default function AdminPage() {
               </a>
               <button
                 onClick={handlePublishHongKong}
-                disabled={publishingHongKong}
+                disabled={!canEdit || publishingAny}
                 style={{
                   ...toolbarButtonStyle,
                   background: "var(--fc-admin-primary-button-bg)",
@@ -1001,6 +1061,10 @@ export default function AdminPage() {
           </div>
         </div>
 
+        {reportDateItems.map((item) => publishErrors[item.key] ? (
+          <p key={item.key} role="alert" style={{ color: "var(--fc-admin-danger-text)" }}>{publishErrors[item.key]}</p>
+        ) : null)}
+
         <div
           style={{
             display: "grid",
@@ -1033,7 +1097,7 @@ export default function AdminPage() {
                   return (
                     <tr
                       key={port.id}
-                      draggable
+                      draggable={canEdit && !publishingAny}
                       onDragStart={(event) => dragStart(event, index)}
                       onDrop={(event) => dragDrop(event, index)}
                       onDragOver={(event) => event.preventDefault()}
@@ -1042,6 +1106,7 @@ export default function AdminPage() {
                       <td style={{ ...td, paddingTop: "8px", paddingBottom: "8px" }} colSpan={showCoords ? 9 : 7}>
                         <input
                           value={port.name}
+                          disabled={!canEdit || publishingAny}
                           onChange={(event) => updateValue(port.id, "name", event.target.value)}
                           onBlur={() => saveDivider(port)}
                           ref={(element) => {
@@ -1058,7 +1123,7 @@ export default function AdminPage() {
                       </td>
                       {showDeleteButtons && (
                         <td style={td}>
-                          <button onClick={() => deletePort(port.id, port.name)} style={dangerButtonStyle}>
+                          <button disabled={!canEdit || publishingAny} onClick={() => deletePort(port.id, port.name)} style={dangerButtonStyle}>
                             Delete
                           </button>
                         </td>
@@ -1079,7 +1144,7 @@ export default function AdminPage() {
                 return (
                   <tr
                     key={port.id}
-                    draggable
+                    draggable={canEdit && !publishingAny && !isSaving}
                     onDragStart={(event) => dragStart(event, index)}
                     onDrop={(event) => dragDrop(event, index)}
                     onDragOver={(event) => event.preventDefault()}
@@ -1106,6 +1171,7 @@ export default function AdminPage() {
                     <td style={td}>
                       <input
                         value={port.name ?? ""}
+                        disabled={!canEdit || publishingAny || isSaving}
                         onChange={(event) => updateValue(port.id, "name", event.target.value)}
                         ref={(element) => {
                           inputRefs.current[`${index}:0`] = element
@@ -1119,6 +1185,7 @@ export default function AdminPage() {
                       <td style={td}>
                         <input
                           value={port.lat ?? ""}
+                          disabled={!canEdit || publishingAny || isSaving}
                           onChange={(event) => updateValue(port.id, "lat", event.target.value)}
                           ref={(element) => {
                             inputRefs.current[`${index}:1`] = element
@@ -1133,6 +1200,7 @@ export default function AdminPage() {
                       <td style={td}>
                         <input
                           value={port.lng ?? ""}
+                          disabled={!canEdit || publishingAny || isSaving}
                           onChange={(event) => updateValue(port.id, "lng", event.target.value)}
                           ref={(element) => {
                             inputRefs.current[`${index}:2`] = element
@@ -1147,6 +1215,7 @@ export default function AdminPage() {
                       <td key={field.priceField} style={td}>
                         <input
                           placeholder={isFormulaPort ? "formula" : "price"}
+                          disabled={!canEdit || publishingAny || isSaving}
                           value={
                             isFormulaPort
                               ? port[field.formulaField] ?? taiwanDefaults[field.formulaField as keyof typeof taiwanDefaults] ?? ""
@@ -1182,7 +1251,7 @@ export default function AdminPage() {
                     <td style={td}>
                       <button
                         onClick={() => savePort(port)}
-                        disabled={isSaving}
+                        disabled={!canEdit || publishingAny || isSaving}
                         style={{
                           ...saveButtonStyle,
                           color: isSaved ? "var(--fc-admin-muted)" : "var(--fc-admin-success-text)",
@@ -1201,7 +1270,7 @@ export default function AdminPage() {
 
                     {showDeleteButtons && (
                       <td style={td}>
-                        <button onClick={() => deletePort(port.id, port.name)} style={dangerButtonStyle}>
+                        <button disabled={!canEdit || publishingAny || isSaving} onClick={() => deletePort(port.id, port.name)} style={dangerButtonStyle}>
                           Delete
                         </button>
                       </td>
@@ -1270,6 +1339,7 @@ export default function AdminPage() {
                 <input
                   type="date"
                   value={reportDateOverrides[item.key]}
+                  disabled={!canEdit || (item.key === "china" ? publishingChina : item.key === "compact" ? publishingCompact : item.key === "taiwan" ? publishingTaiwan : publishingHongKong)}
                   onChange={(event) => updateReportDateOverride(item.key, event.target.value)}
                   style={{
                     ...compactInputStyle,
@@ -1351,6 +1421,7 @@ export default function AdminPage() {
                         return (
                           <select
                             key={fuel}
+                            disabled={!canEdit || publishingAny}
                             value={current}
                             onChange={(event) => {
                               void setFallback(item.port, fuel, event.target.value as FallbackValue)
