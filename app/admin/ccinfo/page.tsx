@@ -1277,6 +1277,8 @@ export default function CountryCompanyInfoPage() {
   const [highlightDraft, setHighlightDraft] = useState<HighlightCard>({ title: "", info: "" })
   const [recordModalOpen, setRecordModalOpen] = useState(false)
   const [recordNameDraft, setRecordNameDraft] = useState("")
+  const [recordRenameError, setRecordRenameError] = useState("")
+  const [recordRenaming, setRecordRenaming] = useState(false)
   const [addPortModalOpen, setAddPortModalOpen] = useState(false)
   const [addPortDraft, setAddPortDraft] = useState({ name: "", notes: "", countryId: "", countryName: "" })
   const [sectionSaving, setSectionSaving] = useState(false)
@@ -1306,11 +1308,45 @@ export default function CountryCompanyInfoPage() {
   const sectionEditStartRef = useRef<Record<number, HighlightCard>>({})
   const mainSectionEditStartRef = useRef<Record<number, HighlightCard>>({})
   const nestedSectionEditStartRef = useRef<Record<string, HighlightCard>>({})
+  const recordRenamePendingRef = useRef(false)
   const recordOwnerRef = useRef(0)
   const [renderOwner, setRenderOwner] = useState(0)
   const setMessage = (value: string) => { if (recordOwnerRef.current === renderOwner) setPageMessage(value) }
   const setSaving = (value: boolean) => { if (recordOwnerRef.current === renderOwner) setPageSaving(value) }
   const saveQueueRef = useRef(createCcinfoSaveQueue(async (target, version, changes) => {
+    if (target.kind === "country" && Object.keys(changes).length === 1 && typeof changes.name === "string") {
+      const uncertainMessage = "The rename could not be confirmed. Your text is still here. Please try Save again before reopening this entry."
+      const controller = new AbortController()
+      const timeout = window.setTimeout(() => controller.abort(), 30_000)
+      try {
+        let response: Response
+        try {
+          response = await fetch("/api/ccinfo/rename-country", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: target.id, expectedUpdatedAt: version, name: changes.name }),
+            signal: controller.signal,
+          })
+        } catch { throw new Error(uncertainMessage) }
+        if (response.status === 400 || response.status === 409) {
+          const failure = await response.json().catch(() => null) as { message?: unknown } | null
+          const serverMessage = typeof failure?.message === "string" && failure.message.length <= 240 && !/[\u0000-\u001f\u007f-\u009f]/.test(failure.message) ? failure.message.trim() : ""
+          if (response.status === 409) {
+            const conflict = new CcinfoSaveConflict()
+            if (serverMessage) conflict.message = serverMessage
+            throw conflict
+          }
+          throw new Error(serverMessage || "Please enter a valid country name.")
+        }
+        if (response.status === 401) throw new Error("Your sign-in expired. Please sign in again. Your text is still here.")
+        if (response.status === 403) throw new Error("You do not have permission to rename this country. Your text is still here.")
+        if (!response.ok) throw new Error("Unable to rename. Your text is still here. Please try Save again.")
+        const result = await response.json().catch(() => null) as { record?: { id?: unknown; name?: unknown; updated_at?: unknown } } | null
+        const saved = result?.record
+        if (!saved || saved.id !== target.id || saved.name !== changes.name || typeof saved.updated_at !== "string" || saved.updated_at === version || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(saved.updated_at) || !Number.isFinite(Date.parse(saved.updated_at))) throw new Error(uncertainMessage)
+        return { id: saved.id, name: saved.name, updated_at: saved.updated_at }
+      } finally { window.clearTimeout(timeout) }
+    }
     const table = target.kind === "company" ? "cc_companies" : target.kind === "country" ? "cc_countries" : "cc_ports"
     const { data, error } = await supabase.from(table).update(changes).eq("id", target.id).eq("updated_at", version).select("*").single()
     if (error?.code === "PGRST116" || (!error && !data)) throw new CcinfoSaveConflict()
@@ -2326,16 +2362,25 @@ export default function CountryCompanyInfoPage() {
   }
 
   function openRecordModal() {
-    if (!selectedId || !selectedKind) return
+    if (!selectedId || !selectedKind || recordLoading || currentRecord.id !== selectedId || recordOwnerRef.current !== renderOwner || recordRenamePendingRef.current) return
+    setRecordRenameError("")
     setRecordNameDraft(currentRecord.name.trim())
     setRecordModalOpen(true)
   }
 
+  function closeRecordModal() {
+    if (recordRenamePendingRef.current) return
+    setRecordModalOpen(false)
+  }
+
   async function saveRecordNameFromModal() {
-    if (!selectedId || !selectedKind) return
+    if (!selectedId || !selectedKind || recordLoading || currentRecord.id !== selectedId || recordOwnerRef.current !== renderOwner || recordRenamePendingRef.current) return
     const currentName = currentRecord.name.trim()
     const nextName = recordNameDraft.trim().toUpperCase()
     if (!nextName || nextName === currentName) return
+    recordRenamePendingRef.current = true
+    setRecordRenaming(true)
+    setRecordRenameError("")
     setSaving(true)
     try {
       const saved = await saveQueueRef.current.save({ kind: selectedKind, id: selectedId }, { name: nextName })
@@ -2346,18 +2391,17 @@ export default function CountryCompanyInfoPage() {
           setCountryOptions((previous) => previous.map((country) => country.id === selectedId ? { ...country, name: nextName } : country).sort((left, right) => left.name.localeCompare(right.name)))
         }
       }
-      if (selectedKind === "country") {
-        const byId = await supabase.from("cc_ports").update({ country_name: nextName }).eq("country_id", selectedId)
-        if (byId.error) throw byId.error
-        const byName = await supabase.from("cc_ports").update({ country_name: nextName }).eq("country_name", currentName)
-        if (byName.error) throw byName.error
-      }
       if (recordOwnerRef.current !== renderOwner) return
       setMessage("Renamed.")
       setRecordModalOpen(false)
     } catch (error) {
-      setMessage(error instanceof CcinfoSaveConflict ? error.message : "Unable to complete the rename. Reopen this entry to check its name and linked ports.")
+      const failure = error instanceof Error ? error.message : "Unable to rename. Your text is still here. Please try Save again."
+      if (recordOwnerRef.current === renderOwner) setRecordRenameError(failure)
+      setMessage(failure)
     } finally {
+      recordRenamePendingRef.current = false
+      setRecordRenaming(false)
+      if (recordOwnerRef.current === renderOwner) setSectionSaving(saveQueueRef.current.pending())
       setSaving(false)
     }
   }
@@ -2411,11 +2455,13 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function saveRecord() {
+    if (recordRenamePendingRef.current) return
     if (!selectedId || !selectedKind) return
     setSaving(true)
     setMessage("")
     try {
-      const changes: CcinfoRecordChanges = { name: currentRecord.name.trim().toUpperCase(), notes: blocksToText(contentDraftRef.current.mainInfoBlocks) || null }
+      const changes: CcinfoRecordChanges = { notes: blocksToText(contentDraftRef.current.mainInfoBlocks) || null }
+      if (selectedKind !== "country") changes.name = currentRecord.name.trim().toUpperCase()
       if (selectedKind === "port") {
         const matchedCountry = countryOptions.find((country) => country.name.toUpperCase() === currentCountry.name.trim().toUpperCase())
         if (!matchedCountry && currentCountry.name.trim()) {
@@ -2435,6 +2481,7 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function deleteRecord() {
+    if (recordRenamePendingRef.current) return
     if (!selectedId || !selectedKind) return
     if (!confirm(`Delete ${currentRecord.name}?`)) return
     try {
@@ -2512,6 +2559,7 @@ export default function CountryCompanyInfoPage() {
   async function persistContent(parts: Partial<typeof contentState>, changes: CcinfoRecordChanges = {}) {
     if (!selectedId || !selectedKind || recordLoading || currentRecord.id !== selectedId || recordOwnerRef.current !== renderOwner) throw new Error("Wait for this entry to finish loading before saving.")
     const owner = recordOwnerRef.current
+    const countryAtSave = { id: currentCountry.id, name: currentCountry.name }
     Object.assign(contentDraftRef.current, parts)
     const draft = contentDraftRef.current
     const payload = { ...changes, summary: serializeSummaryMeta(draft.highlights, draft.mainInfoLineUpdates, draft.mainInfoBlocks, draft.mainSections) }
@@ -2521,6 +2569,14 @@ export default function CountryCompanyInfoPage() {
       const saved = await saveQueueRef.current.save({ kind: selectedKind, id: selectedId }, payload)
       if (recordOwnerRef.current === owner) {
         setCurrentRecord((previous) => previous.id === selectedId ? { ...previous, updated_at: saved.updated_at } : previous)
+        if (selectedKind === "port" && (typeof saved.country_id === "string" || saved.country_id === null) && (typeof saved.country_name === "string" || saved.country_name === null)) {
+          const countryId = saved.country_id || ""
+          const countryName = saved.country_name || ""
+          // The database may have corrected a cached label after a country rename.
+          // Install its acknowledged relation, but not over a newer local selection.
+          setCurrentCountry((previous) => previous.id === countryAtSave.id && previous.name === countryAtSave.name ? { ...previous, id: countryId, name: countryName } : previous)
+          if (countryId && countryName) setCountryOptions((previous) => previous.map((country) => country.id === countryId ? { ...country, name: countryName } : country).sort((a, b) => a.name.localeCompare(b.name)))
+        }
         void loadRecentAuditLogs()
       }
     } catch (error) {
@@ -3923,8 +3979,8 @@ export default function CountryCompanyInfoPage() {
                       ) : null}
                     </div>
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: isMobile ? "flex-start" : "flex-end" }}>
-                      <button onClick={saveRecord} disabled={saving || sectionSaving || recordLoading || !selectedId} style={{ ...buttonStyle, minWidth: "96px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)", border: "1px solid var(--fc-admin-success-border)" }}>
-                        {saving || sectionSaveState === "saving" ? "Saving" : "Save"}
+                      <button onClick={saveRecord} disabled={recordRenaming || saving || sectionSaving || recordLoading || !selectedId} style={{ ...buttonStyle, minWidth: "96px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)", border: "1px solid var(--fc-admin-success-border)" }}>
+                        {recordRenaming || saving || sectionSaveState === "saving" ? "Saving" : "Save"}
                       </button>
                     </div>
                   </div>
@@ -4541,9 +4597,9 @@ export default function CountryCompanyInfoPage() {
       {recordModalOpen && (
         <div
           style={{ position: "fixed", inset: 0, background: "#1d1d1f", display: "grid", placeItems: "center", padding: "20px", zIndex: 42 }}
-          onClick={() => setRecordModalOpen(false)}
+          onClick={closeRecordModal}
         >
-          <div style={{ ...panelStyle, width: "min(520px, 100%)", padding: "18px", display: "grid", gap: "12px" }} onClick={(event) => event.stopPropagation()}>
+          <div role="dialog" aria-modal="true" aria-label={`Edit ${mainLabel}`} style={{ ...panelStyle, width: "min(520px, 100%)", padding: "18px", display: "grid", gap: "12px" }} onClick={(event) => event.stopPropagation()}>
             <div style={{ fontSize: "13px", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fc-admin-link)", fontWeight: 800 }}>
               Edit {mainLabel}
             </div>
@@ -4551,33 +4607,35 @@ export default function CountryCompanyInfoPage() {
               <div style={{ fontSize: "12px", color: "var(--fc-admin-muted)", marginBottom: "6px" }}>{mainLabel}</div>
               <input
                 value={recordNameDraft}
+                disabled={recordRenaming}
                 onChange={(event) => setRecordNameDraft(event.target.value.toUpperCase())}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
                     event.preventDefault()
                     void saveRecordNameFromModal()
                   }
-                  if (event.key === "Escape") setRecordModalOpen(false)
+                  if (event.key === "Escape") closeRecordModal()
                 }}
                 style={inputStyle}
                 autoFocus
               />
             </div>
+            {recordRenameError && <div role="alert" style={{ color: "var(--fc-admin-danger-text)", fontSize: "12px", lineHeight: 1.5 }}>{recordRenameError}</div>}
             <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
               <button
                 type="button"
                 onClick={() => void deleteRecord()}
-                disabled={!selectedId}
+                disabled={!selectedId || recordRenaming}
                 style={{ ...buttonStyle, background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}
               >
                 {recordDeleteLabel}
               </button>
               <div style={{ display: "flex", gap: "8px" }}>
-                <button type="button" onClick={() => setRecordModalOpen(false)} style={buttonStyle}>Cancel</button>
+                <button type="button" onClick={closeRecordModal} disabled={recordRenaming} style={buttonStyle}>Cancel</button>
                 <button
                   type="button"
                   onClick={() => void saveRecordNameFromModal()}
-                  disabled={saving || !recordNameDraft.trim()}
+                  disabled={recordRenaming || saving || !recordNameDraft.trim()}
                   style={{ ...buttonStyle, background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)", border: "1px solid var(--fc-admin-success-border)" }}
                 >
                   {saving ? "Saving" : "Save"}
