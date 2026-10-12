@@ -5,7 +5,7 @@ import test from "node:test"
 import { setupNativeCcinfo } from "./fixtures/native-postgres-ccinfo.mjs"
 import { CREATION_MIGRATION, RECOVERY_MIGRATION, pricingBackupSchemaFromInventory, pricingBackupSchemaVersion } from "../lib/backupPricingSchema.mjs"
 
-const migration = readFileSync(new URL("../supabase/migrations/20261012111738_explicit_backup_schema_capabilities.sql", import.meta.url), "utf8")
+const migration = readFileSync(new URL("../supabase/migrations/20261012114540_explicit_backup_schema_capabilities.sql", import.meta.url), "utf8")
 const extensionStart = migration.indexOf("  ) || pg_catalog.jsonb_build_object(")
 assert.ok(extensionStart > 0)
 // The migration retains the exact hosted catalog/fence body. Running that body

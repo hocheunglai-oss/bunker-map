@@ -7,7 +7,7 @@ import * as adminPages from "../lib/adminPages.ts"
 import { priceSetterSnapshot } from "../lib/priceSetterMutation.ts"
 import { setup,basis,linked,chained } from "./fixtures/price-setter-sql.mjs"
 
-const migration=readFileSync(new URL("../supabase/migrations/20261009025254_atomic_market_history_changes.sql",import.meta.url),"utf8")
+const migration=readFileSync(new URL("../supabase/migrations/20261012114634_atomic_market_history_changes.sql",import.meta.url),"utf8")
 async function harness() {
   const f=await setup(),calls=[],headers=[],permissions=[]
   await f.db.exec(`update ports set hsfo_formula=null,vlsfo_formula=null,mgo_formula=null;

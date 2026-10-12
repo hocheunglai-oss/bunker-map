@@ -1,6 +1,6 @@
 {
   "schema": "fcuno.pricing-clean-source-assembly/v1",
-  "scope": "Initial pricing-only copy; not final freeze or production certification",
+  "scope": "Historical initial pricing-only copy before hosted migration-version alignment; old paths and hashes record the original source, not current paths, final freeze or production certification. Current paths are in the final manifest and metadata-alignment proof.",
   "baseCommit": "ab9d32de82295baf69fd7336658b4c5c2a59d716",
   "sourceDirectory": "/Users/ottolai/Documents/Codex/bunker-map",
   "candidateDirectory": "/private/tmp/fcuno-public-reader-release-FYIfQC/site",

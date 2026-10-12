@@ -3,14 +3,14 @@ import { priceSetterSnapshot, buildPriceSetterChanges } from "../../lib/priceSet
 
 // Mandatory isolated PostgreSQL execution; no live data or quiet skips.
 const { PGlite } = await import(process.env.PGLITE_MODULE_PATH || "@electric-sql/pglite")
-const migration = readFileSync(new URL("../../supabase/migrations/20261008112629_atomic_price_setter_save.sql", import.meta.url), "utf8")
-const deletionMigration = readFileSync(new URL("../../supabase/migrations/20261009044514_protect_price_setter_port_deletion.sql", import.meta.url), "utf8")
-const identityMigration = readFileSync(new URL("../../supabase/migrations/20261009045645_protect_required_report_port_identity.sql", import.meta.url), "utf8")
-const creationMigration = readFileSync(new URL("../../supabase/migrations/20261009050520_idempotent_price_setter_port_creation.sql", import.meta.url), "utf8")
-const inventoryMigration = readFileSync(new URL("../../supabase/migrations/20261009051842_complete_price_setter_inventory.sql", import.meta.url), "utf8")
-const creationRecoveryMigration = readFileSync(new URL("../../supabase/migrations/20261009054830_durable_price_setter_creation_recovery.sql", import.meta.url), "utf8")
-const creationCutoverMigration = readFileSync(new URL("../../supabase/migrations/20261009070459_fence_legacy_price_setter_creation.sql", import.meta.url), "utf8")
-const dividerLockMigration = readFileSync(new URL("../../supabase/migrations/20261009110700_order_divider_rename_locks.sql", import.meta.url), "utf8")
+const migration = readFileSync(new URL("../../supabase/migrations/20261012114603_atomic_price_setter_save.sql", import.meta.url), "utf8")
+const deletionMigration = readFileSync(new URL("../../supabase/migrations/20261012114649_protect_price_setter_port_deletion.sql", import.meta.url), "utf8")
+const identityMigration = readFileSync(new URL("../../supabase/migrations/20261012114654_protect_required_report_port_identity.sql", import.meta.url), "utf8")
+const creationMigration = readFileSync(new URL("../../supabase/migrations/20261012114712_idempotent_price_setter_port_creation.sql", import.meta.url), "utf8")
+const inventoryMigration = readFileSync(new URL("../../supabase/migrations/20261012114717_complete_price_setter_inventory.sql", import.meta.url), "utf8")
+const creationRecoveryMigration = readFileSync(new URL("../../supabase/migrations/20261012114722_durable_price_setter_creation_recovery.sql", import.meta.url), "utf8")
+const creationCutoverMigration = readFileSync(new URL("../../supabase/migrations/20261012115008_fence_legacy_price_setter_creation.sql", import.meta.url), "utf8")
+const dividerLockMigration = readFileSync(new URL("../../supabase/migrations/20261012114726_order_divider_rename_locks.sql", import.meta.url), "utf8")
 // Execute the actual backup mutation/fence functions, without the later
 // project-wide inventory/catalog RPC (which needs the complete hosted schema).
 const epochFunctions = readFileSync(new URL("../../supabase/migrations/20260723101257_add_backup_export_epoch.sql", import.meta.url), "utf8").split("do $$")[0]
@@ -34,8 +34,8 @@ export async function setup({ creationRecovery = false, creationCutover = false 
     ${creationMigration}
     ${inventoryMigration}
     ${creationRecovery || creationCutover ? creationRecoveryMigration : ""}
-    ${creationCutover ? creationCutoverMigration : ""}
     ${dividerLockMigration}
+    ${creationCutover ? creationCutoverMigration : ""}
   `)
   async function row(id = basis) {
     return (await db.query("select to_jsonb(p) as port from public.ports p where id=$1::uuid", [id])).rows[0].port

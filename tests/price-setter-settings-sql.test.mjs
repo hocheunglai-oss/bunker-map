@@ -98,7 +98,7 @@ test("failed remark writes roll back and the two settings functions are invoker-
 test("append-only divider repair changes only lock order and acquires the table before the row", async () => {
   const app = await setup()
   try {
-    const original = readFileSync(new URL("../supabase/migrations/20261008112629_atomic_price_setter_save.sql", import.meta.url), "utf8")
+    const original = readFileSync(new URL("../supabase/migrations/20261012114603_atomic_price_setter_save.sql", import.meta.url), "utf8")
     const start = original.indexOf("create or replace function public.rename_price_setter_divider(")
     assert.ok(start >= 0)
     const previousBody = original.slice(start).split("as $$")[1].split("$$;")[0]

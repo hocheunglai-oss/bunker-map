@@ -1,6 +1,6 @@
 {
   "formatVersion": 1,
-  "scope": "Read-only hosted pricing preflight and isolated candidate regression proof; not a release certification",
+  "scope": "Historical read-only hosted pricing preflight and isolated candidate regression proof before hosted migration-version alignment; old version/path/hash facts are retained, not current migration references or a release certification. Current paths are in the final manifest and metadata-alignment proof.",
   "hostedWrites": 0,
   "businessDataWrites": 0,
   "browserIsolation": "Dedicated headless isolated contexts only; external requests blocked; no personal Chrome control",

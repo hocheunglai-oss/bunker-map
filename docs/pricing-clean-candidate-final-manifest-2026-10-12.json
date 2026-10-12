@@ -1,8 +1,8 @@
 {
-  "schemaVersion": 1,
-  "scope": "Clean local pricing, history, publication and explicit backup-capability release candidate; not a live-business-data or hosted-runtime certification.",
+  "schemaVersion": 2,
+  "scope": "Complete pricing/history/publication/backup-capability release file manifest after metadata-only hosted-version alignment; local synthetic proof is distinct from parent-owned live verification.",
   "checkout": "/private/tmp/fcuno-public-reader-release-FYIfQC/site",
-  "baseCommit": "ab9d32de82295baf69fd7336658b4c5c2a59d716",
+  "baseCommit": "8cf7b4dc97d9fc2c11cd3beb883e9a58db13ed5c",
   "manifestSelfExcluded": "docs/pricing-clean-candidate-final-manifest-2026-10-12.json",
   "excludedPrefixes": [
     "supabase/.temp/"
@@ -40,7 +40,7 @@
       "sessionTimezone": "UTC",
       "includes": "14 pricing checks with all 12 pricing migrations plus 1 exact catalog/backup capability check",
       "runtimeSha256": "13f0b1fd17581d52e20893ec4e2839213e66be28074005e18b4f215d6d2b2046",
-      "ownedRecoveryDumpSha256": "fd2af621934d552dab2fd62d4727589ecf20cf80c4ffdc554591f102288096a5",
+      "ownedRecoveryDumpSha256": "a8f4ffd0f85c93c1abe9e0e4ac5c569fb96ea84676e156285d18f0c7fc5bff02",
       "ownedSessionsClosedAndServersStopped": true
     },
     "browserSuites": [
@@ -86,17 +86,29 @@
       }
     ],
     "browserIsolation": "Dedicated headless browser contexts, synthetic data, localhost-only application requests, no personal Chrome attachment.",
-    "noLiveBusinessWrites": true
+    "noLiveBusinessWrites": true,
+    "browserSuitesEvidenceCommit": "8cf7b4dc97d9fc2c11cd3beb883e9a58db13ed5c",
+    "metadataAlignment": {
+      "types": "PASS",
+      "unitAndActualApiPassed": 124,
+      "pricingAndCapabilitySqlPassed": 109,
+      "nativePostgresPassed": 15,
+      "affectedRootCaseBrowserFlowsPassed": 2,
+      "changedFixtureLint": "PASS: zero errors/warnings",
+      "sqlByteParity": "13/13 unchanged",
+      "applicationSourceByteParity": "All tracked application paths unchanged from stage1; 33 release-changed application files individually hashed in metadata proof."
+    }
   },
   "releaseNotes": [
     "Only 12 added lines in the shared proxy: pricing guard import plus authorization-first legacy write fences. Existing CCINFO/country/Outlook protections retained.",
     "Test fixture bindings use the real pricing and CCINFO guards together; legal Taiwan notice POST retained rather than bypassing the new fence.",
     "Required-root case/space lookup repair preserves raw names and conflict baselines.",
-    "Backup capability RPC must be installed before consumers that require its explicit metadata. Parent owns migration/deployment coordination.",
+    "Parent reports the backup capability RPC was applied before consumers and the legacy contract/revoke phase after verified app cutover; see metadata proof for evidence ownership.",
     "Initial assembly document records the original 84-file source copy, not this final release manifest.",
-    "These checks use owned synthetic databases and local application harnesses; they do not certify current hosted business values."
+    "These checks use owned synthetic databases and local application harnesses; they do not certify current hosted business values.",
+    "Migration filenames and exact test/fixture references now match the supplied hosted versions. SQL and application bytes are identical to stage1; historical source/preflight facts retain explicit historical labels."
   ],
-  "changedFileCountExcludingThisManifest": 105,
+  "changedFileCountExcludingThisManifest": 106,
   "files": [
     {
       "path": "app/admin/hongkongpricehistory/page.tsx",
@@ -156,12 +168,17 @@
     {
       "path": "docs/pricing-clean-candidate-source-assembly-2026-10-12.json",
       "status": "new",
-      "sha256": "9ffa1a1ef632e38c35162f7e149b3f04bea5f16fb2728858bf3f61c8f7ce671f"
+      "sha256": "7dec28960cd0ad78d8fb100e490f74917e667ac881f993ee2da462086581488e"
+    },
+    {
+      "path": "docs/pricing-migration-metadata-alignment-2026-10-12.json",
+      "status": "new",
+      "sha256": "75370660aba41eaf9c8a5c2658d8e967b91bef78a7e01f033d77ea36c450680c"
     },
     {
       "path": "docs/sitewide-debug-2026-10-12-pricing-preflight.json",
       "status": "new",
-      "sha256": "fd2f29c7266880e67233018a0a1a64d4054e865ebfaa10f7632b3a7d43abd128"
+      "sha256": "462b5c77121ce785e9f17a6be7252cc4d307bbda0292ad9f46f7a6ddd75104da"
     },
     {
       "path": "lib/adminPriceHistory.ts",
@@ -279,69 +296,69 @@
       "sha256": "feb8e4ebb5f26cc29fdd3fc5a18c0e3ca7e1c9be93c87cbcbc87385716c86bd9"
     },
     {
-      "path": "supabase/migrations/20261008112629_atomic_price_setter_save.sql",
-      "status": "new",
-      "sha256": "c0e54c8737c1867ff8a15b5dbe7f0969650a75f335e617686f7cc5c243c2affc"
-    },
-    {
-      "path": "supabase/migrations/20261009025254_atomic_market_history_changes.sql",
-      "status": "new",
-      "sha256": "dbce5aa16d7895a50439f1ea4399141c3ee41a6673d2b3ed44dfe0e1132fb2c4"
-    },
-    {
-      "path": "supabase/migrations/20261009032431_coherent_report_publication.sql",
-      "status": "new",
-      "sha256": "b70643ca9576f04430f98cf25efba6bb3d6355cbb43c86245d878c68fe88770a"
-    },
-    {
-      "path": "supabase/migrations/20261009043924_recover_damaged_report_publications.sql",
-      "status": "new",
-      "sha256": "537b65222ac8de94f7417e66ba975cdc55786771419e9ffeb71adae4703233aa"
-    },
-    {
-      "path": "supabase/migrations/20261009044514_protect_price_setter_port_deletion.sql",
-      "status": "new",
-      "sha256": "d8826d010865452cfe386c4f5c944361eb13b17c91b4e723fbddb531e959e52f"
-    },
-    {
-      "path": "supabase/migrations/20261009045645_protect_required_report_port_identity.sql",
-      "status": "new",
-      "sha256": "ca51ecac77c903bd13de0c0cc797b642ee0b40cdcffb6d142b9fb71cad02edbe"
-    },
-    {
-      "path": "supabase/migrations/20261009050520_idempotent_price_setter_port_creation.sql",
-      "status": "new",
-      "sha256": "bbc46a352723693651e56a7177b787a757bbd26d81a3267e7f7d0653f610521e"
-    },
-    {
-      "path": "supabase/migrations/20261009051842_complete_price_setter_inventory.sql",
-      "status": "new",
-      "sha256": "21854ed96faee81e568a8a7358261a3624f5d431ce8d5f78fbb6572806f96a15"
-    },
-    {
-      "path": "supabase/migrations/20261009054830_durable_price_setter_creation_recovery.sql",
-      "status": "new",
-      "sha256": "ff43f9054cb0cda7f68b5b16a4dc6a9773a8b21d2500f1a8f71978482a73eca8"
-    },
-    {
-      "path": "supabase/migrations/20261009070459_fence_legacy_price_setter_creation.sql",
-      "status": "new",
-      "sha256": "2566fba0a5e2b7a22a8f9f006174662f0b4aab07e15d33472b3795a81518024f"
-    },
-    {
-      "path": "supabase/migrations/20261009110700_order_divider_rename_locks.sql",
-      "status": "new",
-      "sha256": "4ad07df03f839bea15cd5b7469ccc197e579954f70351a8ca2066bf7d7d06e05"
-    },
-    {
-      "path": "supabase/migrations/20261012111738_explicit_backup_schema_capabilities.sql",
+      "path": "supabase/migrations/20261012114540_explicit_backup_schema_capabilities.sql",
       "status": "new",
       "sha256": "cae1c5be312f92ba273eefaf64e923679b57a9bc94ffac8f62ea1df83a2a1051"
     },
     {
-      "path": "supabase/migrations/20261012112711_normalize_market_history_root_lookup.sql",
+      "path": "supabase/migrations/20261012114603_atomic_price_setter_save.sql",
+      "status": "new",
+      "sha256": "c0e54c8737c1867ff8a15b5dbe7f0969650a75f335e617686f7cc5c243c2affc"
+    },
+    {
+      "path": "supabase/migrations/20261012114634_atomic_market_history_changes.sql",
+      "status": "new",
+      "sha256": "dbce5aa16d7895a50439f1ea4399141c3ee41a6673d2b3ed44dfe0e1132fb2c4"
+    },
+    {
+      "path": "supabase/migrations/20261012114638_coherent_report_publication.sql",
+      "status": "new",
+      "sha256": "b70643ca9576f04430f98cf25efba6bb3d6355cbb43c86245d878c68fe88770a"
+    },
+    {
+      "path": "supabase/migrations/20261012114644_recover_damaged_report_publications.sql",
+      "status": "new",
+      "sha256": "537b65222ac8de94f7417e66ba975cdc55786771419e9ffeb71adae4703233aa"
+    },
+    {
+      "path": "supabase/migrations/20261012114649_protect_price_setter_port_deletion.sql",
+      "status": "new",
+      "sha256": "d8826d010865452cfe386c4f5c944361eb13b17c91b4e723fbddb531e959e52f"
+    },
+    {
+      "path": "supabase/migrations/20261012114654_protect_required_report_port_identity.sql",
+      "status": "new",
+      "sha256": "ca51ecac77c903bd13de0c0cc797b642ee0b40cdcffb6d142b9fb71cad02edbe"
+    },
+    {
+      "path": "supabase/migrations/20261012114712_idempotent_price_setter_port_creation.sql",
+      "status": "new",
+      "sha256": "bbc46a352723693651e56a7177b787a757bbd26d81a3267e7f7d0653f610521e"
+    },
+    {
+      "path": "supabase/migrations/20261012114717_complete_price_setter_inventory.sql",
+      "status": "new",
+      "sha256": "21854ed96faee81e568a8a7358261a3624f5d431ce8d5f78fbb6572806f96a15"
+    },
+    {
+      "path": "supabase/migrations/20261012114722_durable_price_setter_creation_recovery.sql",
+      "status": "new",
+      "sha256": "ff43f9054cb0cda7f68b5b16a4dc6a9773a8b21d2500f1a8f71978482a73eca8"
+    },
+    {
+      "path": "supabase/migrations/20261012114726_order_divider_rename_locks.sql",
+      "status": "new",
+      "sha256": "4ad07df03f839bea15cd5b7469ccc197e579954f70351a8ca2066bf7d7d06e05"
+    },
+    {
+      "path": "supabase/migrations/20261012114731_normalize_market_history_root_lookup.sql",
       "status": "new",
       "sha256": "729c6bf4548f4510cdfbcefd1dca28612a3ee6fe6b25e57bbb5929a4e859733f"
+    },
+    {
+      "path": "supabase/migrations/20261012115008_fence_legacy_price_setter_creation.sql",
+      "status": "new",
+      "sha256": "2566fba0a5e2b7a22a8f9f006174662f0b4aab07e15d33472b3795a81518024f"
     },
     {
       "path": "tests/admin-price-history.browser.test.cjs",
@@ -361,12 +378,12 @@
     {
       "path": "tests/backup-schema-capabilities-native.test.mjs",
       "status": "new",
-      "sha256": "6b5d5b0ffb3f1a3c32cf3a0f35e78da6893ecaf1f460f477fecf5d63d7967b23"
+      "sha256": "f537907cfb19ac6bf8d1c4e1e4e99021dbce3debbfdccee10ae620aeac443151"
     },
     {
       "path": "tests/backup-schema-capabilities-sql.test.mjs",
       "status": "new",
-      "sha256": "437727dfb176eea2c46104f4613067479d85090e5c8251a190bfb023ce6d6e49"
+      "sha256": "af05237417fd9e441b6318f158c62c554dfa5b9d014793856a0f6bd721beb703"
     },
     {
       "path": "tests/backup-schema-consumers.test.ts",
@@ -381,17 +398,17 @@
     {
       "path": "tests/fixtures/market-price-history-app.mjs",
       "status": "new",
-      "sha256": "1258a910e5c01353a02fe19677d8803978e7d89adcd90c44c9433c2570903d12"
+      "sha256": "d51651caca8183456d202a65fe533a59e52bc35c54500db77e1b36f74fd3ae75"
     },
     {
       "path": "tests/fixtures/native-postgres-pricing.mjs",
       "status": "new",
-      "sha256": "41bd1ccc7fe33e3d789b378a6e707db9453c77b9c646c13c2074c248c4f755e6"
+      "sha256": "91aeea5bf21082a16f8ad10f0623c76cd9816e7baba59a4726966337d2b826c6"
     },
     {
       "path": "tests/fixtures/price-setter-sql.mjs",
       "status": "new",
-      "sha256": "b8469a762c30d6725a9f24dfb758e6c1b3bff227f2de2a67c5b2eae55081e834"
+      "sha256": "ff37e79153b044bcf68e9f119235fdeaa09112b2fdc68e7dd48227bca1c3f23d"
     },
     {
       "path": "tests/fixtures/public-report-reader.mjs",
@@ -401,7 +418,7 @@
     {
       "path": "tests/fixtures/report-publication-app.mjs",
       "status": "new",
-      "sha256": "6d3ebfbfb795c83475b8c426d012540329977034789593b6f6eb2c35f7e096f9"
+      "sha256": "b09dbdd5aaed5538cd45b8ae888ac98282551a3685b19688122b1a75871ef4ef"
     },
     {
       "path": "tests/fixtures/report-publication-baseline.cjs",
@@ -411,7 +428,7 @@
     {
       "path": "tests/market-price-history-api-sql.test.mjs",
       "status": "new",
-      "sha256": "61259a92c4058b05970db3ef86ee3e535aa9dfd9fbee642cddee9735bd4a004d"
+      "sha256": "af9d2c9cb60d4c05c7dc6f5313f5a962bcb40391f9d9797704aa66998a598ce7"
     },
     {
       "path": "tests/market-price-history-flow.browser.test.mjs",
@@ -426,17 +443,17 @@
     {
       "path": "tests/market-price-history-root-case.browser.test.mjs",
       "status": "new",
-      "sha256": "3cdcc55ca812c2750f660cf597eb70d812409b53c2b98b5c79abc33747f936c4"
+      "sha256": "8d89d6a487f13828c30853d268cd27494737f0a9317a226f1854f7d9fdacf736"
     },
     {
       "path": "tests/market-price-history-root-case.test.mjs",
       "status": "new",
-      "sha256": "36396729bf8c1642bf43cad145334256434321ef69d97ae24c716febb11d92cc"
+      "sha256": "4de349ded0fcd2a83326ddf39cfc620b5054ef1d47c1f58470a27c68995346ed"
     },
     {
       "path": "tests/market-price-history-sql.test.mjs",
       "status": "new",
-      "sha256": "f3dedc4765afda310ed692e955e5a8af983ae69007880657c7dd2b5fde459e1e"
+      "sha256": "3c20904e51dba6291e26800a7db9d0c05bf3e73917ba5b3c1b810a0afb5237ad"
     },
     {
       "path": "tests/market-price-history.test.ts",
@@ -556,7 +573,7 @@
     {
       "path": "tests/price-setter-settings-sql.test.mjs",
       "status": "new",
-      "sha256": "00e2cf7401dd97377717c9bdc5a373c94344824199fbbad2d2f63b1b79690094"
+      "sha256": "86f5ac692cec479d586d36a269f893b4cc46adc31ddce59353e43096f9a40e4b"
     },
     {
       "path": "tests/price-setter-settings.test.ts",
@@ -623,5 +640,11 @@
       "status": "modified",
       "sha256": "849da2023c069a77433e4d32646d6d54d1ebd929d9e2ad55c1adcec6ee941120"
     }
-  ]
+  ],
+  "releaseBaseCommit": "ab9d32de82295baf69fd7336658b4c5c2a59d716",
+  "fileListComparisonBaseCommit": "ab9d32de82295baf69fd7336658b4c5c2a59d716",
+  "metadataBaseCommit": "8cf7b4dc97d9fc2c11cd3beb883e9a58db13ed5c",
+  "stage1ApplicationCommit": "8cf7b4dc97d9fc2c11cd3beb883e9a58db13ed5c",
+  "applicationSourceBytesUnchangedFromStage1": true,
+  "metadataProof": "docs/pricing-migration-metadata-alignment-2026-10-12.json"
 }

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs"
 import { setupMarketHistoryApp } from "./fixtures/market-price-history-app.mjs"
 import { parseMarketHistorySnapshot, validateMarketHistoryChange, confirmMarketHistoryChange } from "../lib/marketPriceHistory.ts"
 
-const fix = readFileSync(new URL("../supabase/migrations/20261012112711_normalize_market_history_root_lookup.sql", import.meta.url), "utf8")
+const fix = readFileSync(new URL("../supabase/migrations/20261012114731_normalize_market_history_root_lookup.sql", import.meta.url), "utf8")
 const roots = ["Hong Kong", "Kaohsiung", "Taichung", "Keelung", "Suao", "Hualien"]
 
 async function fixture() {

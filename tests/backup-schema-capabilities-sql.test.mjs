@@ -4,7 +4,7 @@ import test from "node:test"
 import { CREATION_MIGRATION, RECOVERY_MIGRATION, pricingBackupSchemaFromInventory, pricingBackupSchemaVersion } from "../lib/backupPricingSchema.mjs"
 
 const { PGlite } = await import(process.env.PGLITE_MODULE_PATH || "@electric-sql/pglite")
-const migration = readFileSync(new URL("../supabase/migrations/20261012111738_explicit_backup_schema_capabilities.sql", import.meta.url), "utf8")
+const migration = readFileSync(new URL("../supabase/migrations/20261012114540_explicit_backup_schema_capabilities.sql", import.meta.url), "utf8")
 
 test("actual inventory SQL supplies exact sparse history and physical schema, preserves privilege/fence boundaries, and reveals missing installed state", async () => {
   const db = new PGlite()

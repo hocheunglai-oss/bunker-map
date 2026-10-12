@@ -39,7 +39,7 @@ try {
     app = await setupMarketHistoryApp()
     const context = await browser.newContext({ timezoneId: "America/Los_Angeles", viewport: { width: 1400, height: 1000 } })
     try {
-      await app.db.exec(`reset role;${readFileSync(path.join(root, "supabase/migrations/20261012112711_normalize_market_history_root_lookup.sql"), "utf8")};set role service_role`)
+      await app.db.exec(`reset role;${readFileSync(path.join(root, "supabase/migrations/20261012114731_normalize_market_history_root_lookup.sql"), "utf8")};set role service_role`)
       const rawNames = (await app.db.query("update ports set name=' '||upper(name)||' ' where lower(name) in ('hong kong','kaohsiung','taichung','keelung','suao','hualien') returning id,name")).rows
       const page = await context.newPage(), errors = [], external = []
       page.setDefaultTimeout(5000); page.on("pageerror", error => errors.push(error.message)); page.on("dialog", dialog => dialog.accept())

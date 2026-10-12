@@ -11,8 +11,8 @@ import { setup, basis, linked, chained, other } from "./price-setter-sql.mjs"
 // PostgreSQL. Only session authorization and Supabase's HTTP adapter are fake.
 export async function setupMarketHistoryApp() {
   const f = await setup(), calls = [], permissions = [], auditHeaders = []
-  const migration = readFileSync(new URL("../../supabase/migrations/20261009025254_atomic_market_history_changes.sql", import.meta.url), "utf8")
-  const publicationMigration = readFileSync(new URL("../../supabase/migrations/20261009032431_coherent_report_publication.sql", import.meta.url), "utf8")
+  const migration = readFileSync(new URL("../../supabase/migrations/20261012114634_atomic_market_history_changes.sql", import.meta.url), "utf8")
+  const publicationMigration = readFileSync(new URL("../../supabase/migrations/20261012114638_coherent_report_publication.sql", import.meta.url), "utf8")
   await f.db.exec(`update ports set hsfo_formula=null,vlsfo_formula=null,mgo_formula=null;
     update ports set name=case id when '${basis}' then 'Hong Kong' when '${linked}' then 'Kaohsiung' when '${chained}' then 'Taichung' else name end;
     insert into ports(name) values ('Keelung'),('Suao'),('Hualien');

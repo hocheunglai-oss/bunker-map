@@ -189,18 +189,18 @@ export async function setupNativePricing() {
       alter function public.audit_request_header(text) set search_path=public,pg_temp;
       alter function public.audit_text_setting(text) set search_path=public,pg_temp;`)
     const migrations = [
-      "20261008112629_atomic_price_setter_save.sql",
-      "20261009025254_atomic_market_history_changes.sql",
-      "20261009032431_coherent_report_publication.sql",
-      "20261009043924_recover_damaged_report_publications.sql",
-      "20261009044514_protect_price_setter_port_deletion.sql",
-      "20261009045645_protect_required_report_port_identity.sql",
-      "20261009050520_idempotent_price_setter_port_creation.sql",
-      "20261009051842_complete_price_setter_inventory.sql",
-      "20261009054830_durable_price_setter_creation_recovery.sql",
-      "20261009070459_fence_legacy_price_setter_creation.sql",
-      "20261009110700_order_divider_rename_locks.sql",
-      "20261012112711_normalize_market_history_root_lookup.sql",
+      "20261012114603_atomic_price_setter_save.sql",
+      "20261012114634_atomic_market_history_changes.sql",
+      "20261012114638_coherent_report_publication.sql",
+      "20261012114644_recover_damaged_report_publications.sql",
+      "20261012114649_protect_price_setter_port_deletion.sql",
+      "20261012114654_protect_required_report_port_identity.sql",
+      "20261012114712_idempotent_price_setter_port_creation.sql",
+      "20261012114717_complete_price_setter_inventory.sql",
+      "20261012114722_durable_price_setter_creation_recovery.sql",
+      "20261012114726_order_divider_rename_locks.sql",
+      "20261012114731_normalize_market_history_root_lookup.sql",
+      "20261012115008_fence_legacy_price_setter_creation.sql",
     ]
     const sourceHashes = { auditDeclarations: hash(audited), auditAttachmentHelper: hash(enableAudit), backupEpochFunctions: hash(epoch) }
     for (const file of migrations) {

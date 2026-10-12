@@ -13,8 +13,8 @@ import * as creationRecovery from "../../lib/priceSetterCreationRecovery.ts"
 import * as priceRequest from "../../lib/priceSetterRequest.ts"
 import { setup, basis, linked, chained, other } from "./price-setter-sql.mjs"
 
-const migration = readFileSync(new URL("../../supabase/migrations/20261009032431_coherent_report_publication.sql", import.meta.url), "utf8")
-const recoveryMigration = readFileSync(new URL("../../supabase/migrations/20261009043924_recover_damaged_report_publications.sql", import.meta.url), "utf8")
+const migration = readFileSync(new URL("../../supabase/migrations/20261012114638_coherent_report_publication.sql", import.meta.url), "utf8")
+const recoveryMigration = readFileSync(new URL("../../supabase/migrations/20261012114644_recover_damaged_report_publications.sql", import.meta.url), "utf8")
 export async function setupReportPublicationApp() {
   const f = await setup({ creationCutover: true }), calls = [], permissions = [], auditHeaders = []
   await f.db.exec(`update ports set hsfo_formula=null,vlsfo_formula=null,mgo_formula=null;

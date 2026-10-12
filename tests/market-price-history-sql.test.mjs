@@ -5,7 +5,7 @@ import { setup, basis, linked, chained, other } from "./fixtures/price-setter-sq
 import { priceSetterSnapshot } from "../lib/priceSetterMutation.ts"
 import { validateMarketHistoryChange, confirmMarketHistoryChange } from "../lib/marketPriceHistory.ts"
 
-const migration = readFileSync(new URL("../supabase/migrations/20261009025254_atomic_market_history_changes.sql",import.meta.url),"utf8")
+const migration = readFileSync(new URL("../supabase/migrations/20261012114634_atomic_market_history_changes.sql",import.meta.url),"utf8")
 const day="2026-10-08", names={hongkong:[basis],taiwan:[linked,chained]}
 const price=(port_id,n=700)=>({port_id,hsfo:port_id===chained?null:n,vlsfo:n,mgo:n+100})
 
