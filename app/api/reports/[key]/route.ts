@@ -2,10 +2,14 @@ import { NextResponse } from "next/server"
 import {
   getPublicReportData,
   isReportSnapshotKey,
-  publicMarketCacheHeaders,
 } from "@/lib/publicMarketData"
 
 export const dynamic = "force-dynamic"
+const REPORT_HEADERS = {
+  "Cache-Control": "no-store, max-age=0",
+  "CDN-Cache-Control": "no-store",
+  "Vercel-CDN-Cache-Control": "no-store",
+}
 
 export async function GET(
   _request: Request,
@@ -13,19 +17,15 @@ export async function GET(
 ) {
   const { key } = await context.params
   if (!isReportSnapshotKey(key)) {
-    return NextResponse.json({ message: "Unknown report." }, { status: 404 })
+    return NextResponse.json({ message: "Unknown report." }, { status: 404, headers: REPORT_HEADERS })
   }
 
   try {
     return NextResponse.json(await getPublicReportData(key), {
-      headers: key === "taiwan" || key === "hongkong"
-        ? {
-            "Cache-Control": "no-store, max-age=0",
-          }
-        : publicMarketCacheHeaders(),
+      headers: REPORT_HEADERS,
     })
   } catch (error) {
     console.error("Report data load failed", error)
-    return NextResponse.json({ message: "Unable to load report data." }, { status: 502 })
+    return NextResponse.json({ message: "Unable to load report data." }, { status: 502, headers: REPORT_HEADERS })
   }
 }

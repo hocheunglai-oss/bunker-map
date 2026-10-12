@@ -9,6 +9,7 @@ import { useIsMobile } from "@/lib/useIsMobile"
 import DisclaimerLink from "@/components/DisclaimerLink"
 import { buildFallbackKey, type FallbackMap } from "@/lib/reportFallbackKeys"
 import type { PublicReportPayloadByKey } from "@/lib/publicMarketData"
+import { parsePublicReportPayload, PUBLIC_REPORT_UNAVAILABLE_MESSAGE } from "@/lib/publicReportValidation"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -122,10 +123,16 @@ const compactExpandablePreviewRows: Record<string, string[]> = {
 
 type CompactReportPayload = PublicReportPayloadByKey["compact"]
 
-async function loadCompactReport(): Promise<CompactReportPayload | null> {
-  const response = await fetch("/api/reports/compact")
-  if (!response.ok) return null
-  return response.json() as Promise<CompactReportPayload>
+async function loadCompactReport(signal: AbortSignal): Promise<CompactReportPayload | null> {
+  try {
+    const response = await fetch("/api/reports/compact", { cache: "no-store", signal })
+    if (!response.ok) return null
+    return parsePublicReportPayload(await response.json(), "compact")
+  } catch {
+    // A background refresh must preserve the last displayed report on network
+    // failure, cancellation or an unreadable response.
+    return null
+  }
 }
 
 export default function CompactReport({ initialData }: { initialData: CompactReportPayload }) {
@@ -137,10 +144,14 @@ export default function CompactReport({ initialData }: { initialData: CompactRep
 
   useEffect(() => {
     let cancelled = false
+    let activeRequest: AbortController | null = null
 
     async function refreshReport() {
-      const payload = await loadCompactReport()
-      if (cancelled || !payload?.snapshot) return
+      activeRequest?.abort()
+      const request = new AbortController()
+      activeRequest = request
+      const payload = await loadCompactReport(request.signal)
+      if (cancelled || request.signal.aborted || !payload?.snapshot) return
 
       setReportDate(payload.snapshot.reportDate)
       setSections(payload.snapshot.sections)
@@ -156,6 +167,7 @@ export default function CompactReport({ initialData }: { initialData: CompactRep
 
     return () => {
       cancelled = true
+      activeRequest?.abort()
       window.removeEventListener("focus", refreshVisibleReport)
       document.removeEventListener("visibilitychange", refreshVisibleReport)
     }
@@ -307,8 +319,8 @@ export default function CompactReport({ initialData }: { initialData: CompactRep
         </div>
 
         {totalRows === 0 ? (
-          <div style={{ ...cardStyle, padding: "18px", marginBottom: "24px", textAlign: "center", color: "#d7e9ff" }}>
-            No report data available.
+          <div role="status" style={{ ...cardStyle, padding: "18px", marginBottom: "24px", textAlign: "center", color: "#d7e9ff" }}>
+            {initialData.unavailable ? PUBLIC_REPORT_UNAVAILABLE_MESSAGE : "No report data available."}
           </div>
         ) : (
           <div

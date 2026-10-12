@@ -8,6 +8,7 @@ import { type TaiwanReportRow } from "@/lib/taiwanReport"
 import DisclaimerLink from "@/components/DisclaimerLink"
 import { buildFallbackKey, type FallbackMap } from "@/lib/reportFallbackKeys"
 import type { PublicReportPayloadByKey } from "@/lib/publicMarketData"
+import { parsePublicReportPayload, PUBLIC_REPORT_UNAVAILABLE_MESSAGE } from "@/lib/publicReportValidation"
 import {
   buildTaiwanOperationalNoticeMessage,
   isTaiwanOperationalNoticeReady,
@@ -166,10 +167,16 @@ function renderOperationalChangeNa() {
 
 type TaiwanReportPayload = PublicReportPayloadByKey["taiwan"]
 
-async function loadTaiwanReport(): Promise<TaiwanReportPayload | null> {
-  const response = await fetch("/api/reports/taiwan", { cache: "no-store" })
-  if (!response.ok) return null
-  return response.json() as Promise<TaiwanReportPayload>
+async function loadTaiwanReport(signal: AbortSignal): Promise<TaiwanReportPayload | null> {
+  try {
+    const response = await fetch("/api/reports/taiwan", { cache: "no-store", signal })
+    if (!response.ok) return null
+    return parsePublicReportPayload(await response.json(), "taiwan")
+  } catch {
+    // A background refresh must preserve the last displayed report on network
+    // failure, cancellation or an unreadable response.
+    return null
+  }
 }
 
 export default function TaiwanReport({ initialData }: { initialData: TaiwanReportPayload }) {
@@ -187,10 +194,14 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
 
   useEffect(() => {
     let cancelled = false
+    let activeRequest: AbortController | null = null
 
     async function refreshReport() {
-      const payload = await loadTaiwanReport()
-      if (cancelled || !payload?.snapshot) return
+      activeRequest?.abort()
+      const request = new AbortController()
+      activeRequest = request
+      const payload = await loadTaiwanReport(request.signal)
+      if (cancelled || request.signal.aborted || !payload?.snapshot) return
 
       setReportDate(payload.snapshot.reportDate)
       setRows(payload.snapshot.rows)
@@ -210,6 +221,7 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
 
     return () => {
       cancelled = true
+      activeRequest?.abort()
       window.removeEventListener("focus", refreshVisibleReport)
       document.removeEventListener("visibilitychange", refreshVisibleReport)
     }
@@ -326,6 +338,12 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
             </div>
           </div>
         </div>
+
+        {rows.length === 0 && (
+          <div role="status" style={{ ...cardStyle, padding: "18px", marginBottom: "24px", textAlign: "center", color: "#d7e9ff" }}>
+            {initialData.unavailable ? PUBLIC_REPORT_UNAVAILABLE_MESSAGE : "No report data available."}
+          </div>
+        )}
 
         {showOperationalNotice && (
           <div

@@ -9,6 +9,7 @@ import { useIsMobile } from "@/lib/useIsMobile"
 import DisclaimerLink from "@/components/DisclaimerLink"
 import { buildFallbackKey, type FallbackMap } from "@/lib/reportFallbackKeys"
 import type { PublicReportPayloadByKey } from "@/lib/publicMarketData"
+import { parsePublicReportPayload, PUBLIC_REPORT_UNAVAILABLE_MESSAGE } from "@/lib/publicReportValidation"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -79,10 +80,16 @@ const fuelAccentStyles = {
 
 type HongKongReportPayload = PublicReportPayloadByKey["hongkong"]
 
-async function loadHongKongReport(): Promise<HongKongReportPayload | null> {
-  const response = await fetch("/api/reports/hongkong", { cache: "no-store" })
-  if (!response.ok) return null
-  return response.json() as Promise<HongKongReportPayload>
+async function loadHongKongReport(signal: AbortSignal): Promise<HongKongReportPayload | null> {
+  try {
+    const response = await fetch("/api/reports/hongkong", { cache: "no-store", signal })
+    if (!response.ok) return null
+    return parsePublicReportPayload(await response.json(), "hongkong")
+  } catch {
+    // A background refresh must preserve the last displayed report on network
+    // failure, cancellation or an unreadable response.
+    return null
+  }
 }
 
 export default function HongKongReport({ initialData }: { initialData: HongKongReportPayload }) {
@@ -93,10 +100,14 @@ export default function HongKongReport({ initialData }: { initialData: HongKongR
 
   useEffect(() => {
     let cancelled = false
+    let activeRequest: AbortController | null = null
 
     async function refreshReport() {
-      const payload = await loadHongKongReport()
-      if (cancelled || !payload?.snapshot) return
+      activeRequest?.abort()
+      const request = new AbortController()
+      activeRequest = request
+      const payload = await loadHongKongReport(request.signal)
+      if (cancelled || request.signal.aborted || !payload?.snapshot) return
 
       setReportDate(payload.snapshot.reportDate)
       setRows(payload.snapshot.rows)
@@ -113,6 +124,7 @@ export default function HongKongReport({ initialData }: { initialData: HongKongR
 
     return () => {
       cancelled = true
+      activeRequest?.abort()
       window.removeEventListener("focus", refreshVisibleReport)
       document.removeEventListener("visibilitychange", refreshVisibleReport)
     }
@@ -229,6 +241,12 @@ export default function HongKongReport({ initialData }: { initialData: HongKongR
             </div>
           </div>
         </div>
+
+        {rows.length === 0 && (
+          <div role="status" style={{ ...cardStyle, padding: "18px", marginBottom: "24px", textAlign: "center", color: "#d7e9ff" }}>
+            {initialData.unavailable ? PUBLIC_REPORT_UNAVAILABLE_MESSAGE : "No report data available."}
+          </div>
+        )}
 
         <div style={{ ...cardStyle, overflow: "hidden", marginBottom: "24px" }}>
           <div style={{ overflowX: "auto" }}>
