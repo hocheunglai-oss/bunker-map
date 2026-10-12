@@ -1,15 +1,16 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { supabase } from "@/lib/supabase"
+import { useMemo, useRef, useState } from "react"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
-import { buildHongKongReportRows, type HongKongReportRow } from "@/lib/hongKongReport"
-import { formatReportDate } from "@/lib/taiwanReport"
-import { saveReportSnapshot } from "@/lib/reportSnapshots"
-import { syncPortFromLatestHistory } from "@/lib/priceHistorySync"
+import { useReportPublication } from "@/lib/useReportPublication"
+import { ReportPublicationStatus } from "@/components/ReportPublicationStatus"
+import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
+import { historyPrice } from "@/lib/marketPriceHistory"
+import { useMarketPriceHistory } from "@/lib/useMarketPriceHistory"
+import { formatPriceHistoryDate, getPriceHistoryDateParts as getHongKongDateParts, sortAdminPriceHistoryRows as sortHistoryRows } from "@/lib/adminPriceHistory"
 import {
   getMarketDateKey,
-  savePriceHistoryForMarketDate,
+  distinctPriceHistoryDates,
   type PriceHistoryPortId,
   type PriceHistoryRecordId,
 } from "@/lib/priceHistoryRecords"
@@ -28,50 +29,12 @@ const monthFormatter = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Asia/Hong_Kong",
 })
 
-const dateFormatter = new Intl.DateTimeFormat("en-GB", {
-  year: "numeric",
-  month: "short",
-  day: "2-digit",
-  timeZone: "Asia/Hong_Kong",
-})
-
-function getHongKongDateParts(value: string) {
-  const date = new Date(value)
-  const year = new Intl.DateTimeFormat("en-CA", {
-    year: "numeric",
-    timeZone: "Asia/Hong_Kong",
-  }).format(date)
-  const month = new Intl.DateTimeFormat("en-CA", {
-    month: "2-digit",
-    timeZone: "Asia/Hong_Kong",
-  }).format(date)
-
-  return { year, month }
-}
-
 function average(values: Array<number | null>) {
   const numbers = values.filter((value): value is number => value != null)
   if (numbers.length === 0) return null
 
   const total = numbers.reduce((sum, value) => sum + value, 0)
   return Number((total / numbers.length).toFixed(2))
-}
-
-function sortHistoryRows(rows: HistoryRow[]) {
-  return [...rows].sort((a, b) => {
-    const dateDelta = new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime()
-    if (dateDelta !== 0) return dateDelta
-    return String(b.id).localeCompare(String(a.id))
-  })
-}
-
-function getPublishErrorMessage(error: unknown) {
-  if (error && typeof error === "object" && "message" in error) {
-    const message = (error as { message?: unknown }).message
-    if (typeof message === "string" && message.trim()) return message
-  }
-
-  return "Publish failed. Please try again."
 }
 
 const pageShellStyle: React.CSSProperties = {
@@ -128,10 +91,13 @@ const secondaryButtonStyle: React.CSSProperties = {
 }
 
 export default function HongKongPriceHistoryPage() {
-  const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
-  const [rows, setRows] = useState<HistoryRow[]>([])
-  const [portId, setPortId] = useState<PriceHistoryPortId | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { loading: adminLoading, authenticated, role, permissions } = useSimpleAdminAuth()
+  const canEdit = isAdminRole(role) || canAccessAdminPage(permissions, "hongkong-price-history", "edit")
+  const history = useMarketPriceHistory("hongkong", !adminLoading && authenticated, canEdit)
+  const publication = useReportPublication("hongkong", "hongkong-price-history", !adminLoading && authenticated, canEdit)
+  const rows = useMemo(() => sortHistoryRows(distinctPriceHistoryDates(history.snapshot?.rows ?? [])), [history.snapshot])
+  const portId = history.snapshot?.ports[0]?.id ?? null
+  const loading = history.loading
   const [deletingId, setDeletingId] = useState<PriceHistoryRecordId | null>(null)
   const [saving, setSaving] = useState(false)
   const [selectedYear, setSelectedYear] = useState("all")
@@ -140,71 +106,11 @@ export default function HongKongPriceHistoryPage() {
   const [formHsfo, setFormHsfo] = useState("")
   const [formVlsfo, setFormVlsfo] = useState("")
   const [formMgo, setFormMgo] = useState("")
-  const [publishing, setPublishing] = useState(false)
-  const [published, setPublished] = useState(false)
+  const { publishing, published } = publication
   const [publishMessage, setPublishMessage] = useState("")
   const [showDeleteButtons, setShowDeleteButtons] = useState(false)
-
-  async function buildHongKongSnapshot(): Promise<{
-    reportDate: string
-    rows: HongKongReportRow[]
-  } | null> {
-    const portsWanted = ["Hong Kong"]
-    const { data: portsData } = await supabase
-      .from("ports")
-      .select("*")
-      .in("name", portsWanted)
-
-    if (!portsData) return null
-
-    const portIds = portsData.map((port) => port.id)
-    const { data: historyData } = await supabase
-      .from("price_history")
-      .select("*")
-      .in("port_id", portIds)
-      .order("recorded_at", { ascending: false })
-      .order("id", { ascending: false })
-
-    if (!historyData || historyData.length === 0) return null
-
-    return {
-      reportDate: formatReportDate(historyData[0].recorded_at),
-      rows: buildHongKongReportRows(portsData, historyData, portsWanted),
-    }
-  }
-
-  useEffect(() => {
-    async function load() {
-      setLoading(true)
-
-      const { data: portData } = await supabase
-        .from("ports")
-        .select("id")
-        .eq("name", "Hong Kong")
-        .limit(1)
-        .single()
-
-      if (!portData) {
-        setRows([])
-        setLoading(false)
-        return
-      }
-
-      setPortId(portData.id)
-
-      const { data: historyData } = await supabase
-        .from("price_history")
-        .select("id,port_id,hsfo,vlsfo,mgo,recorded_at")
-        .eq("port_id", portData.id)
-        .order("recorded_at", { ascending: false })
-        .order("id", { ascending: false })
-
-      setRows(sortHistoryRows(historyData ?? []))
-      setLoading(false)
-    }
-
-    load()
-  }, [])
+  const actionLock = useRef(false)
+  const busy = saving || deletingId !== null || publishing || history.changing || loading
 
   const years = useMemo(() => {
     return [...new Set(rows.map((row) => getHongKongDateParts(row.recorded_at).year))]
@@ -233,64 +139,30 @@ export default function HongKongPriceHistoryPage() {
   }, [filteredRows, showMonthlyAverage])
 
   async function deleteHistoryRow(row: HistoryRow) {
+    if (!canEdit || !history.ready || actionLock.current) return
     const firstConfirm = window.confirm(
-      `Delete the history record on ${dateFormatter.format(new Date(row.recorded_at))}?`
+      `Delete the history record on ${formatPriceHistoryDate(row.recorded_at)}?`
     )
     if (!firstConfirm) return
 
     const secondConfirm = window.confirm(
-      "Please confirm again. This history record will be permanently deleted."
+      "Please confirm again. All history records for this market day will be permanently deleted. Current prices will follow the remaining latest day, or become empty if none remains."
     )
     if (!secondConfirm) return
 
+    actionLock.current = true
     setDeletingId(row.id)
-    await supabase.from("price_history").delete().eq("id", row.id)
-    setRows((prev) => prev.filter((item) => item.id !== row.id))
-    await syncPortFromLatestHistory(supabase, row.port_id)
-    setDeletingId(null)
+    publication.invalidate()
+    try {
+      if (await history.change(getMarketDateKey(row.recorded_at), "delete", [])) await publication.reload(true)
+    } finally { setDeletingId(null); actionLock.current = false }
   }
 
   async function addMissingRecord() {
-    if (!portId || !formDate) return
-
-    const firstConfirm = window.confirm(
-      `Add a missing history record for ${formDate}?`
-    )
-    if (!firstConfirm) return
-
-    setSaving(true)
-
-    const inserted = await savePriceHistoryForMarketDate(supabase, {
-      portId,
-      recordedAt: `${formDate}T12:00:00+08:00`,
-      values: {
-        hsfo: formHsfo ? Number(formHsfo) : null,
-        vlsfo: formVlsfo ? Number(formVlsfo) : null,
-        mgo: formMgo ? Number(formMgo) : null,
-      },
-    })
-
-    if (inserted) {
-      setRows((prev) => sortHistoryRows([
-        ...prev.filter(
-          (row) => getMarketDateKey(row.recorded_at) !== getMarketDateKey(inserted.recorded_at)
-        ),
-        inserted,
-      ]))
-      setFormDate("")
-      setFormHsfo("")
-      setFormVlsfo("")
-      setFormMgo("")
-      await syncPortFromLatestHistory(supabase, portId)
-      setPublished(false)
-    }
-
-    setSaving(false)
+    await saveDay(formDate, true)
   }
 
   async function addAsLatestRecord() {
-    if (!portId) return
-
     const today = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Hong_Kong",
       year: "numeric",
@@ -298,60 +170,36 @@ export default function HongKongPriceHistoryPage() {
       day: "2-digit",
     }).format(new Date())
 
-    const firstConfirm = window.confirm(`Add today's price as the latest record for ${today}?`)
-    if (!firstConfirm) return
+    await saveDay(today, false)
+  }
 
+  async function saveDay(day: string, resetDate: boolean) {
+    if (!canEdit || !portId || !day || !history.ready || actionLock.current) return
+    if (!window.confirm(`Save history prices for ${day}? Any existing prices for this market day will be replaced.`)) return
+    actionLock.current = true
     setSaving(true)
-
-    const inserted = await savePriceHistoryForMarketDate(supabase, {
-      portId,
-      recordedAt: `${today}T12:00:00+08:00`,
-      values: {
-        hsfo: formHsfo ? Number(formHsfo) : null,
-        vlsfo: formVlsfo ? Number(formVlsfo) : null,
-        mgo: formMgo ? Number(formMgo) : null,
-      },
-    })
-
-    if (inserted) {
-      setRows((prev) => sortHistoryRows([
-        ...prev.filter(
-          (row) => getMarketDateKey(row.recorded_at) !== getMarketDateKey(inserted.recorded_at)
-        ),
-        inserted,
-      ]))
-      setFormHsfo("")
-      setFormVlsfo("")
-      setFormMgo("")
-      await syncPortFromLatestHistory(supabase, portId)
-      setPublished(false)
-    }
-
-    setSaving(false)
+    setPublishMessage("")
+    try {
+      const values = [{ port_id: portId, hsfo: historyPrice(formHsfo), vlsfo: historyPrice(formVlsfo), mgo: historyPrice(formMgo) }]
+      publication.invalidate()
+      if (await history.change(day, "save", values)) {
+        if (resetDate) setFormDate("")
+        setFormHsfo(""); setFormVlsfo(""); setFormMgo("")
+        await publication.reload(true)
+      }
+    } catch { setPublishMessage("Check the prices. Use positive numbers, zero or empty fields.") }
+    finally { setSaving(false); actionLock.current = false }
   }
 
   async function handlePublish() {
-    setPublishing(true)
+    if (!canEdit || !history.ready || !publication.ready || actionLock.current) return
+    if ((formDate || formHsfo || formVlsfo || formMgo) && !window.confirm("Publish saved history only? Your unsaved inputs will not be included.")) return
+    actionLock.current = true
     setPublishMessage("")
     try {
-      const snapshot = await buildHongKongSnapshot()
-      if (!snapshot) {
-        setPublishMessage("No Hong Kong history records found to publish.")
-        setPublished(false)
-        return
-      }
-
-      const { error } = await saveReportSnapshot("hongkong", snapshot)
-      if (error) throw error
-
-      setPublished(true)
-      setPublishMessage(`Published ${snapshot.reportDate}`)
-    } catch (error) {
-      console.error(error)
-      setPublished(false)
-      setPublishMessage(getPublishErrorMessage(error))
+      await publication.publish()
     } finally {
-      setPublishing(false)
+      actionLock.current = false
     }
   }
 
@@ -396,7 +244,7 @@ export default function HongKongPriceHistoryPage() {
 
             <button
               onClick={handlePublish}
-              disabled={publishing}
+              disabled={!canEdit || busy || !history.ready || !publication.ready}
               style={{
                 ...secondaryButtonStyle,
                 border: published ? "1px solid var(--fc-admin-border)" : "1px solid var(--fc-admin-selected-border)",
@@ -414,6 +262,7 @@ export default function HongKongPriceHistoryPage() {
             <button
               type="button"
               onClick={() => setShowDeleteButtons((prev) => !prev)}
+              disabled={!canEdit || busy || !history.ready}
               style={{
                 ...secondaryButtonStyle,
                 cursor: "pointer",
@@ -427,8 +276,15 @@ export default function HongKongPriceHistoryPage() {
           </div>
         </div>
 
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "14px" }}>
+          <button onClick={() => { if (!actionLock.current) void history.reload() }} disabled={busy} style={secondaryButtonStyle}>Reload saved history</button>
+          {!canEdit && <span>View only</span>}
+          {history.message && <p role={history.needsReload ? "alert" : "status"}>{history.message}</p>}
+        </div>
+        <ReportPublicationStatus title="Hong Kong" publication={publication} busy={busy} />
         {publishMessage && (
           <div
+            role="status"
             style={{
               marginBottom: "14px",
               padding: "10px 12px",
@@ -534,6 +390,7 @@ export default function HongKongPriceHistoryPage() {
               <label key={field.label} style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                 <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--fc-admin-panel-text)" }}>{field.label}</span>
                 <input
+                  disabled={!canEdit || busy || !history.ready}
                   type={field.type}
                   value={field.value}
                   onChange={(event) => field.setter(event.target.value)}
@@ -547,7 +404,7 @@ export default function HongKongPriceHistoryPage() {
 
             <button
               onClick={addMissingRecord}
-              disabled={saving || !formDate}
+              disabled={!canEdit || busy || !history.ready || !formDate}
               style={{
                 ...secondaryButtonStyle,
                 background: saving || !formDate
@@ -566,7 +423,7 @@ export default function HongKongPriceHistoryPage() {
 
             <button
               onClick={addAsLatestRecord}
-              disabled={saving}
+              disabled={!canEdit || busy || !history.ready}
               style={{
                 ...secondaryButtonStyle,
                 background: "var(--fc-admin-success-bg)",
@@ -584,7 +441,7 @@ export default function HongKongPriceHistoryPage() {
         </div>
 
         <div style={{ ...sectionCardStyle, overflow: "hidden" }}>
-          {loading ? (
+          {history.needsReload ? <p role="status" style={{ padding: "14px" }}>History is not verified. Reload saved history before making changes.</p> : loading ? (
             <p style={{ margin: 0, padding: "14px", color: "var(--fc-admin-panel-text)" }}>Loading history...</p>
           ) : (
             <div style={{ overflowX: "auto" }}>
@@ -616,7 +473,7 @@ export default function HongKongPriceHistoryPage() {
                       }}
                     >
                       <td style={{ padding: "8px 12px", fontSize: "13px", whiteSpace: "nowrap", color: "var(--fc-admin-panel-text)" }}>
-                        {dateFormatter.format(new Date(row.recorded_at))}
+                        {formatPriceHistoryDate(row.recorded_at)}
                       </td>
                       <td style={{ padding: "8px 12px", fontSize: "13px", color: "var(--fc-admin-panel-text)" }}>{row.hsfo ?? "-"}</td>
                       <td style={{ padding: "8px 12px", fontSize: "13px", color: "var(--fc-admin-panel-text)" }}>{row.vlsfo ?? "-"}</td>
@@ -625,7 +482,7 @@ export default function HongKongPriceHistoryPage() {
                         <td style={{ padding: "8px 12px" }}>
                           <button
                             onClick={() => deleteHistoryRow(row)}
-                            disabled={deletingId === row.id}
+                            disabled={!canEdit || busy || !history.ready}
                             style={{
                               background: "var(--fc-admin-danger-bg)",
                               color: "var(--fc-admin-danger-text)",

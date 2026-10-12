@@ -53,6 +53,70 @@ test("Hong Kong uses three distinct market dates even when the newest date is du
   assert.deepEqual(rows[0].vlsfo, { today: 735, last1: 725, last2: 715 })
 })
 
+test("Taiwan preserves an explicit missing history quote instead of reviving a stale port price", () => {
+  const ports = [
+    { id: "khh", name: "Kaohsiung", hsfo: 638, vlsfo: 700, mgo: 990 },
+    { id: "txg", name: "Taichung", hsfo: null, vlsfo: 710, mgo: 990 },
+    { id: "kln", name: "Keelung", hsfo: null, vlsfo: 999, mgo: 999 },
+  ]
+  const history = [
+    { port_id: "khh", hsfo: null, vlsfo: null, mgo: 0, recorded_at: "2026-10-09T12:00:00" },
+    { port_id: "khh", hsfo: 620, vlsfo: 690, mgo: 980, recorded_at: "2026-10-08T12:00:00" },
+    { port_id: "txg", hsfo: null, vlsfo: null, mgo: null, recorded_at: "2026-10-09T12:00:00" },
+    { port_id: "txg", hsfo: null, vlsfo: 700, mgo: 980, recorded_at: "2026-10-08T12:00:00" },
+  ]
+  const rows = buildTaiwanReportRows(ports, history, ["Kaohsiung", "Keelung", "Taichung"])
+  assert.deepEqual(rows[0].hsfo, { today: null, last: 620, change: null })
+  assert.deepEqual(rows[0].vlsfo, { today: null, last: 690, change: null })
+  assert.deepEqual(rows[0].mgo, { today: 0, last: 980, change: -980 })
+  for (const row of rows.slice(1)) {
+    assert.deepEqual(row.vlsfo, { today: null, last: 700, change: null })
+    assert.deepEqual(row.mgo, { today: null, last: 980, change: null })
+  }
+})
+
+test("Taiwan formula chains propagate missing history but keep zero and no-history direct fallbacks", () => {
+  const ports = [
+    { id: "khh", name: "Kaohsiung", hsfo: 600, vlsfo: 800, mgo: 1000 },
+    { id: "txg", name: "Taichung", hsfo: null, vlsfo: 888, mgo: 999, vlsfo_formula: "External + 5", mgo_formula: "External - -5" },
+    { id: "kln", name: "Keelung", hsfo: null, vlsfo: 777, mgo: 777 },
+    { id: "external", name: "External", hsfo: null, vlsfo: 20, mgo: 30 },
+  ]
+  const noHistory = buildTaiwanReportRows(ports.slice(0, 3), [], ["Kaohsiung", "Keelung", "Taichung"], ports)
+  assert.equal(noHistory[0].hsfo.today, 600)
+  for (const row of noHistory.slice(1)) {
+    assert.deepEqual(row.vlsfo, { today: 25, last: null, change: null })
+    assert.deepEqual(row.mgo, { today: 35, last: null, change: null })
+  }
+  const history = [
+    { port_id: "external", hsfo: null, vlsfo: null, mgo: 0, recorded_at: "2026-10-09T12:00:00" },
+    { port_id: "external", hsfo: null, vlsfo: 0, mgo: null, recorded_at: "2026-10-08T12:00:00" },
+  ]
+  for (const row of buildTaiwanReportRows(ports.slice(0, 3), history, ["Kaohsiung", "Keelung", "Taichung"], ports).slice(1)) {
+    assert.deepEqual(row.vlsfo, { today: null, last: 5, change: null })
+    assert.deepEqual(row.mgo, { today: 5, last: null, change: null })
+  }
+})
+
+test("the newest microsecond-ranked missing quote remains authoritative in both historical reports", () => {
+  const ports = [{ id: "khh", name: "Kaohsiung", hsfo: 999, vlsfo: 999, mgo: 999 }]
+  const history = [
+    { port_id: "khh", hsfo: 600, vlsfo: 800, mgo: 1000, recorded_at: "2026-10-09T12:00:00.000001" },
+    { port_id: "khh", hsfo: null, vlsfo: 0, mgo: null, recorded_at: "2026-10-09T12:00:00.000002" },
+    { port_id: "khh", hsfo: null, vlsfo: 700, mgo: 900, recorded_at: "2026-10-08T12:00:00" },
+  ]
+  for (const entries of [history, [...history].reverse()]) {
+    const taiwan = buildTaiwanReportRows(ports, entries, ["Kaohsiung"])[0]
+    assert.deepEqual(taiwan.hsfo, { today: null, last: null, change: null })
+    assert.deepEqual(taiwan.vlsfo, { today: 0, last: 700, change: -700 })
+    assert.deepEqual(taiwan.mgo, { today: null, last: 900, change: null })
+    const hongkong = buildHongKongReportRows([{ id: "khh", name: "Hong Kong" }], entries, ["Hong Kong"])[0]
+    assert.deepEqual(hongkong.hsfo, { today: null, last1: null, last2: null })
+    assert.deepEqual(hongkong.vlsfo, { today: 0, last1: 700, last2: null })
+    assert.deepEqual(hongkong.mgo, { today: null, last1: 900, last2: null })
+  }
+})
+
 test("market dates are stable for database timestamps and timezone-aware input", () => {
   assert.equal(getMarketDateKey("2026-07-13T12:00:00"), "2026-07-13")
   assert.equal(getMarketDateKey("2026-07-12T16:30:00.000Z"), "2026-07-13")

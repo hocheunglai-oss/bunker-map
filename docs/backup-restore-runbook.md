@@ -99,6 +99,24 @@ Every v2 artifact includes:
 - the captured database checkpoint: ledger row count, head sequence, head
   SHA-256, and latest full-certification/projection evidence.
 
+Pricing receipt coverage is determined by exact applied migration **names** and
+the observed receipt table/column schema, not by the maximum migration timestamp.
+An unrelated, newer migration does not prove an earlier pricing migration was
+installed. The inventory RPC reports the actual names and hosted versions; new
+artifacts preserve the relevant evidence in `databaseInventory.pricingSchema`.
+Their Drive metadata stores only the compact `pricingSchemaVersion` marker, not
+the full migration history, keeping each property within Drive's size limit.
+Missing installed receipt tables or recovery columns fail export and health
+verification explicitly; never-installed pricing tables are not required.
+
+Historical production artifacts without pricing receipts remain supported even
+when their migration head is newer than the local pricing migration filenames.
+A pre-extension file claiming receipt exports without exact schema evidence is
+not certified by the automated validator: it needs manual recovery inspection.
+No such pricing receipt schema had been deployed in the verified production
+migration history when this extension was prepared. Never infer ownership or
+recovery fields from dates, an empty receipt section, or the current live schema.
+
 The checkpoint is taken before the export and defines its upper ledger bound.
 The exported ledger must begin at the first entry and end at that exact head.
 This is what lets the offline validator detect a missing tail, not only a

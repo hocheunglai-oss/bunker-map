@@ -15,6 +15,7 @@ import {
 } from "@/lib/compressedBackupStage"
 import { loadGoogleApis } from "@/lib/googleApis"
 import { buildGoogleDriveFolderLookupQuery } from "@/lib/queryEscaping"
+import { pricingBackupSchemaFromInventory, pricingBackupSchemaVersion, type PricingBackupSchemaVersion } from "@/lib/backupPricingSchema.mjs"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -107,6 +108,7 @@ type PreparedBackupData = {
   truthHeadSha256: string
   databaseEpoch: number
   migrationHead: string
+  pricingSchemaVersion: PricingBackupSchemaVersion
   inventorySha256: string
   catalogSha256: string
   liveTableCount: number
@@ -185,6 +187,7 @@ const TABLES: TableConfig[] = [
   { key: "ports", table: "ports", order: [{ column: "id", ascending: true }] },
   { key: "remarks", table: "remarks", order: [{ column: "id", ascending: true }] },
   { key: "priceHistory", table: "price_history", order: [{ column: "id", ascending: true }] },
+  { key: "priceSetterCreationReceipts", table: "price_setter_creation_receipts", order: [{ column: "request_id", ascending: true }] },
   { key: "whatsappConversations", table: "whatsapp_conversations", order: [{ column: "id", ascending: true }] },
   { key: "whatsappMessages", table: "whatsapp_messages", order: [{ column: "id", ascending: true }] },
   {
@@ -238,9 +241,9 @@ const FCUNO_IDENTITY_EPHEMERAL_TABLES = [
   "oidc_token_revocations",
 ]
 
-function getApplicableTableConfigs(migrationHead: string) {
+function getApplicableTableConfigs(migrationHead: string, pricingSchemaVersion: PricingBackupSchemaVersion = "none") {
   return TABLES.filter(
-    (config) => !config.introducedAt || migrationHead >= config.introducedAt
+    (config) => config.table === "price_setter_creation_receipts" ? pricingSchemaVersion !== "none" : !config.introducedAt || migrationHead >= config.introducedAt
   )
 }
 
@@ -600,7 +603,6 @@ async function getBackupInventory(
   if (!/^\d{14}$/.test(migrationHead)) {
     throw new Error("Backup database inventory did not return a valid live migration head.")
   }
-  const tableConfigs = getApplicableTableConfigs(migrationHead)
   const explicitlyEphemeralTables = getExplicitlyEphemeralTables(migrationHead)
   if (
     !Array.isArray(inventory.tables) ||
@@ -628,6 +630,8 @@ async function getBackupInventory(
   }
 
   const liveTables = new Set(inventory.tables as string[])
+  const pricingSchema = pricingBackupSchemaFromInventory(inventory)
+  const tableConfigs = getApplicableTableConfigs(migrationHead, pricingBackupSchemaVersion(pricingSchema))
   const catalogSha256 = requiredSha256(
     inventory.catalogSha256,
     "Backup database catalog SHA-256"
@@ -666,6 +670,7 @@ async function getBackupInventory(
     migrationHead,
     catalogSha256,
     liveTables,
+    pricingSchema,
     tableConfigs,
     registeredTables: [...registeredTables].sort(),
     explicitlyEphemeralTables: [...explicitlyEphemeralTables].sort(),
@@ -1084,6 +1089,7 @@ async function buildBackupFile(
         "admin_users.password_hash",
         "spc_users.password_hash",
       ],
+      pricingSchema: inventory.pricingSchema,
     },
   }
   const stage = createCompressedBackupStage(
@@ -1413,6 +1419,7 @@ async function buildBackupFile(
     if (
       inventoryAfter.migrationHead !== inventory.migrationHead ||
       inventoryAfter.catalogSha256 !== inventory.catalogSha256 ||
+      JSON.stringify(inventoryAfter.pricingSchema) !== JSON.stringify(inventory.pricingSchema) ||
       JSON.stringify([...inventoryAfter.liveTables].sort()) !==
         JSON.stringify([...inventory.liveTables].sort())
     ) {
@@ -1486,6 +1493,7 @@ async function buildBackupFile(
       truthHeadSha256: checkpointBefore.headSha256,
       databaseEpoch: databaseEpochBefore,
       migrationHead: inventory.migrationHead,
+      pricingSchemaVersion: pricingBackupSchemaVersion(inventory.pricingSchema),
       inventorySha256,
       catalogSha256: inventory.catalogSha256,
       liveTableCount: inventory.liveTables.size,
@@ -1800,6 +1808,7 @@ async function markBackupVerified(
         truthHeadSequence: String(prepared.truthHeadSequence),
         truthHeadSha256: prepared.truthHeadSha256,
         migrationHead: prepared.migrationHead,
+        pricingSchemaVersion: prepared.pricingSchemaVersion,
         databaseEpoch: String(prepared.databaseEpoch),
         inventorySha256: prepared.inventorySha256,
         catalogSha256: prepared.catalogSha256,

@@ -1,31 +1,42 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import { supabase } from "@/lib/supabase"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { confirmPriceSetterInventory } from "@/lib/priceSetterInventory"
+import { buildPriceSetterFuelChanges, priceSetterFuelEdit, priceSetterFuelInput, type PriceSetterFuelDrafts } from "@/lib/priceSetterFuelInputs"
+import { getTaiwanBasisFormula } from "@/lib/taiwanReport"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
+import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
 import { priceSetterTabs } from "@/data/priceSetterTabs"
-import { chinaReportSections, compactReportSections } from "@/data/reportSections"
-import { hasFormulaForAnyFuel, parseSimpleFormula, resolvePortFuelValue } from "@/lib/portPricing"
-import { loadReportSnapshot, loadReportSnapshots, saveReportSnapshot, type ReportSnapshotKey } from "@/lib/reportSnapshots"
-import { buildChinaReportSections } from "@/lib/chinaReport"
-import { buildTaiwanReportRows, formatReportDate, type TaiwanReportRow } from "@/lib/taiwanReport"
-import { buildHongKongReportRows, type HongKongReportRow } from "@/lib/hongKongReport"
-import { savePriceHistoryForMarketDate } from "@/lib/priceHistoryRecords"
+import { hasFormulaForAnyFuel, resolvePortFuelValue } from "@/lib/portPricing"
+import type { ReportSnapshotKey } from "@/lib/reportSnapshots"
+import { useReportPublication } from "@/lib/useReportPublication"
+import { ReportPublicationStatus } from "@/components/ReportPublicationStatus"
+import { confirmPriceSetterCreation, confirmPriceSetterDeletion, confirmPriceSetterSave, priceSetterDeletionFallbacks, priceSetterDeletionSnapshot, priceSetterSnapshot, type PriceSetterSnapshot } from "@/lib/priceSetterMutation"
+import { confirmPriceSetterAcknowledgement, confirmPriceSetterCreationState, type OwnedPriceSetterCreation, type PriceSetterCreationState } from "@/lib/priceSetterCreationRecovery"
+import { formatMarketDateNumeric, getMarketDateKey } from "@/lib/priceHistoryRecords"
 import { useIsMobile } from "@/lib/useIsMobile"
 import {
   buildFallbackKey,
   loadReportFallbacks,
-  saveReportFallbacks,
   type FallbackMap,
   type FallbackValue,
 } from "@/lib/reportFallbacks"
+import { confirmPriceSetterDivider, mergeConfirmedFallbackBaseline, parsePriceSetterFallbacks } from "@/lib/priceSetterSettings"
+import { confirmPriceSetterOrder, insertVisiblePort, priceSetterOrderSnapshot, type PriceSetterReorder } from "@/lib/priceSetterOrder"
 
 type SavedPortsState = Record<string, boolean>
 type SavingPortsState = Record<string, boolean>
+type PortDropPreview = {
+  movedId: string
+  targetId: string
+  edge: "before" | "after"
+  draft: PriceSetterReorder
+  ports: readonly { id: string; display_order?: unknown }[]
+  visible: readonly { id: string }[]
+}
 
 type PortGroupMode = "All" | "Primary Ports" | "Secondary Ports"
 type ReportDateOverrides = Record<ReportSnapshotKey, string>
-type ReportDates = Record<ReportSnapshotKey, string>
 
 const tertiaryPortNames = new Set(
   [
@@ -56,29 +67,7 @@ const fuelFieldConfigs = [
   { priceField: "mgo", formulaField: "mgo_formula", label: "MGO" },
 ] as const
 
-const taiwanBasisFormulaDefaults: Record<string, { vlsfo_formula?: string; mgo_formula?: string }> = {
-  keelung: {
-    vlsfo_formula: "Taichung + 0",
-    mgo_formula: "Taichung + 0",
-  },
-  suao: {
-    vlsfo_formula: "Taichung + 0",
-    mgo_formula: "Taichung + 0",
-  },
-  hualien: {
-    vlsfo_formula: "Taichung + 0",
-    mgo_formula: "Taichung + 0",
-  },
-}
-
 const emptyReportDateOverrides: ReportDateOverrides = {
-  taiwan: "",
-  hongkong: "",
-  china: "",
-  compact: "",
-}
-
-const emptyReportDates: ReportDates = {
   taiwan: "",
   hongkong: "",
   china: "",
@@ -93,26 +82,59 @@ const reportDateItems: Array<{ key: ReportSnapshotKey; label: string }> = [
 ]
 
 export default function AdminPage() {
-  const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
+  const { loading: adminLoading, authenticated, role, permissions } = useSimpleAdminAuth()
+  const hasEditPermission = isAdminRole(role) || canAccessAdminPage(permissions, "pricesetter", "edit")
   const isMobile = useIsMobile()
 
   const [ports, setPorts] = useState<any[]>([])
+  const [portsLoadStatus, setPortsLoadStatus] = useState<"loading" | "ready" | "error">("loading")
+  const [portsLoadAttempt, setPortsLoadAttempt] = useState(0)
+  const [portListError, setPortListError] = useState("")
+  const [changingPortList, setChangingPortList] = useState(false)
+  const portListLock = useRef(false)
+  // Server receipts survive refresh/reopen. Keep an unconfirmed local attempt
+  // too: a failed request may still be waiting to commit on the server.
+  const pendingCreation = useRef<OwnedPriceSetterCreation | null>(null)
+  const [pendingAttempt, setPendingAttempt] = useState<OwnedPriceSetterCreation | null>(null)
+  const creationState = useRef<PriceSetterCreationState | null>(null)
+  const creationGeneration = useRef(0)
+  const [creationLoadStatus, setCreationLoadStatus] = useState<"loading" | "ready" | "error">("loading")
+  const [creationLoadAttempt, setCreationLoadAttempt] = useState(0)
+  const [creationError, setCreationError] = useState("")
+  const [orderDraft, setOrderDraft] = useState<PriceSetterReorder | null>(null)
+  const [orderError, setOrderError] = useState("")
+  const [savingOrder, setSavingOrder] = useState(false)
+  const [orderSaved, setOrderSaved] = useState(false)
+  const draggedPortId = useRef<string | null>(null)
+  const portDropPreview = useRef<PortDropPreview | null>(null)
+  const [dropIndicator, setDropIndicator] = useState<PortDropPreview | null>(null)
+  const savedPortSnapshots = useRef<Record<string, PriceSetterSnapshot>>({})
+  const dirtyPortIds = useRef(new Set<string>())
+  const priceSaveLocks = useRef(new Set<string>())
+  const [priceSaveErrors, setPriceSaveErrors] = useState<Record<string, string>>({})
+  const [fuelDrafts, setFuelDrafts] = useState<Record<string, PriceSetterFuelDrafts>>({})
+  const canEdit = hasEditPermission && portsLoadStatus === "ready" && !changingPortList
+  const canChangePortList = canEdit && !portListError && !orderDraft
+  const canAddRow = canChangePortList && creationLoadStatus === "ready"
   const [showCoords, setShowCoords] = useState(false)
   const [savedPorts, setSavedPorts] = useState<SavedPortsState>({})
   const [savingPorts, setSavingPorts] = useState<SavingPortsState>({})
   const [selectedPortGroup, setSelectedPortGroup] = useState<PortGroupMode>("All")
   const [selectedTab, setSelectedTab] = useState("All")
   const [hideTertiary, setHideTertiary] = useState(false)
-  const [publishingChina, setPublishingChina] = useState(false)
-  const [publishedChina, setPublishedChina] = useState(false)
-  const [publishingCompact, setPublishingCompact] = useState(false)
-  const [publishedCompact, setPublishedCompact] = useState(false)
-  const [publishingTaiwan, setPublishingTaiwan] = useState(false)
-  const [publishedTaiwan, setPublishedTaiwan] = useState(false)
-  const [publishingHongKong, setPublishingHongKong] = useState(false)
-  const [publishedHongKong, setPublishedHongKong] = useState(false)
+  const publicationEnabled = !adminLoading && authenticated
+  const chinaPublication = useReportPublication("china", "pricesetter", publicationEnabled, hasEditPermission)
+  const compactPublication = useReportPublication("compact", "pricesetter", publicationEnabled, hasEditPermission)
+  const taiwanPublication = useReportPublication("taiwan", "pricesetter", publicationEnabled, hasEditPermission)
+  const hongKongPublication = useReportPublication("hongkong", "pricesetter", publicationEnabled, hasEditPermission)
+  const publications = { china: chinaPublication, compact: compactPublication, taiwan: taiwanPublication, hongkong: hongKongPublication }
+  const { publishing: publishingChina, published: publishedChina } = chinaPublication
+  const { publishing: publishingCompact, published: publishedCompact } = compactPublication
+  const { publishing: publishingTaiwan, published: publishedTaiwan } = taiwanPublication
+  const { publishing: publishingHongKong, published: publishedHongKong } = hongKongPublication
   const [reportDateOverrides, setReportDateOverrides] = useState<ReportDateOverrides>(emptyReportDateOverrides)
-  const [reportDates, setReportDates] = useState<ReportDates>(emptyReportDates)
+  const [publishErrors, setPublishErrors] = useState<Partial<Record<ReportSnapshotKey, string>>>({})
+  const publishingAny = publishingChina || publishingCompact || publishingTaiwan || publishingHongKong
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false)
 
   useEffect(() => {
@@ -120,9 +142,29 @@ export default function AdminPage() {
   }, [])
   const [showDeleteButtons, setShowDeleteButtons] = useState(false)
   const [reportFallbacks, setReportFallbacks] = useState<FallbackMap>({})
+  const savedFallbacks = useRef<FallbackMap>({})
+  const [configLoadStatus, setConfigLoadStatus] = useState<"loading" | "ready" | "error">("loading")
+  const [configLoadAttempt, setConfigLoadAttempt] = useState(0)
+  const [fallbackDrafts, setFallbackDrafts] = useState<FallbackMap>({})
+  const [fallbackError, setFallbackError] = useState("")
+  const [savingFallback, setSavingFallback] = useState(false)
+  const fallbackSaveLock = useRef(false)
+  const canDeletePort = canChangePortList && !publishingAny && !Object.values(savingPorts).some(Boolean)
+    && configLoadStatus === "ready" && !savingFallback && !Object.keys(fallbackDrafts).length
+  const canPublishReports = canEdit && !orderDraft && configLoadStatus === "ready" && !savingFallback && !Object.keys(fallbackDrafts).length
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
-  const today = new Date().toDateString()
+  const today = getMarketDateKey(new Date().toISOString())
+
+  function invalidatePublications() {
+    for (const publication of Object.values(publications)) publication.invalidate()
+  }
+
+  async function refreshPublicationSources() {
+    // Saving prices can refresh the source, but cannot adopt someone else's
+    // publication. That requires the explicit report reload/review control.
+    await Promise.all(Object.values(publications).map((publication) => publication.reload(true)))
+  }
 
   const th: React.CSSProperties = {
     borderBottom: "1px solid var(--fc-admin-border-soft)",
@@ -143,229 +185,445 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (adminLoading || !authenticated) return
+    let cancelled = false
+    const controller = new AbortController()
+    const timeout = setTimeout(() => {
+      cancelled = true
+      controller.abort()
+      setPortsLoadStatus("error")
+    }, 15_000)
+    setPortsLoadStatus("loading")
     async function loadPorts() {
-      const { data, error } = await supabase
-        .from("ports")
-        .select("id,name,type,lat,lng,hsfo,vlsfo,mgo,hsfo_formula,vlsfo_formula,mgo_formula,updated_at,display_order")
-        .order("display_order", { ascending: true })
-
-      if (error) {
-        console.error(error)
-        return
+      try {
+        const response = await fetch("/api/admin/prices", { credentials: "include", cache: "no-store", signal: controller.signal })
+        if (!response.ok) throw new Error("Could not load the saved ports")
+        const { ports: data } = confirmPriceSetterInventory(await response.json())
+        if (cancelled) return
+        const snapshots = Object.fromEntries(data.map((port) => [port.id, priceSetterSnapshot(port)]))
+        savedPortSnapshots.current = snapshots
+        dirtyPortIds.current.clear()
+        setPorts(data)
+        setFuelDrafts({})
+        setSavedPorts({})
+        setPriceSaveErrors({})
+        setPortListError("")
+        setOrderDraft(null)
+        setOrderError("")
+        setOrderSaved(false)
+        setPortsLoadStatus("ready")
+      } catch {
+        if (!cancelled) setPortsLoadStatus("error")
+      } finally {
+        clearTimeout(timeout)
       }
-
-      setPorts(data || [])
     }
 
-    loadPorts()
-  }, [adminLoading, authenticated])
+    void loadPorts()
+    return () => { cancelled = true; controller.abort(); clearTimeout(timeout) }
+  }, [adminLoading, authenticated, portsLoadAttempt])
+
+  const setCreationAttempt = useCallback((attempt: OwnedPriceSetterCreation | null) => {
+    pendingCreation.current = attempt
+    setPendingAttempt(attempt)
+  }, [])
+
+  const fetchCreationState = useCallback(async (signal: AbortSignal) => {
+    const response = await fetch("/api/admin/prices/creation", { credentials: "same-origin", cache: "no-store", signal })
+    if (!response.ok) throw Error("Could not check earlier additions")
+    return confirmPriceSetterCreationState(await response.json())
+  }, [])
+
+  const applyCreationState = useCallback((state: PriceSetterCreationState) => {
+    const prior = pendingCreation.current
+    setCreationAttempt(state.pending
+      ? { operation: "create", ...state.pending, actorId: state.actorId, expectedVersion: state.version }
+      : prior?.actorId === state.actorId ? prior : null)
+    creationState.current = state
+    setCreationLoadStatus("ready")
+    setCreationError("")
+  }, [setCreationAttempt])
+
+  useEffect(() => {
+    const generation = ++creationGeneration.current
+    creationState.current = null
+    if (adminLoading || !authenticated || !hasEditPermission) return
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15_000)
+    setCreationLoadStatus("loading")
+    void fetchCreationState(controller.signal).then(state => {
+      if (generation === creationGeneration.current) applyCreationState(state)
+    }).catch(() => {
+      if (generation === creationGeneration.current) {
+        setCreationLoadStatus("error")
+        setCreationError("Could not check earlier additions. Adding rows is paused; your existing prices and drafts have not changed.")
+      }
+    }).finally(() => clearTimeout(timeout))
+    return () => { creationGeneration.current = generation + 1; controller.abort(); clearTimeout(timeout) }
+  }, [adminLoading, authenticated, hasEditPermission, creationLoadAttempt, fetchCreationState, applyCreationState])
 
   useEffect(() => {
     if (adminLoading || !authenticated) return
+    let cancelled = false
+    setConfigLoadStatus("loading")
+    const timeout = setTimeout(() => { cancelled = true; setConfigLoadStatus("error") }, 15_000)
     async function loadReportConfig() {
-      const [snapshots, fallbacks] = await Promise.all([
-        loadReportSnapshots<{ reportDate?: string }>(reportDateItems.map((item) => item.key)),
-        loadReportFallbacks(),
-      ])
-
-      setReportDates((prev) => ({
-        ...prev,
-        ...Object.fromEntries(
-          reportDateItems.map((item) => [item.key, snapshots[item.key]?.reportDate || ""]),
-        ),
-      }))
-      setReportFallbacks(fallbacks)
+      try {
+        // Publication metadata is loaded by each versioned report endpoint.
+        // Do not let one damaged old snapshot block every report's repair.
+        const fallbacks = await loadReportFallbacks()
+        if (cancelled) return
+        savedFallbacks.current = fallbacks
+        setReportFallbacks(fallbacks)
+        setFallbackDrafts({})
+        setFallbackError("")
+        setConfigLoadStatus("ready")
+      } catch { if (!cancelled) setConfigLoadStatus("error") }
+      finally { clearTimeout(timeout) }
     }
-
-    loadReportConfig()
-  }, [adminLoading, authenticated])
+    void loadReportConfig()
+    return () => { cancelled = true; clearTimeout(timeout) }
+  }, [adminLoading, authenticated, configLoadAttempt])
 
   function updateValue(id: string, field: string, value: any) {
+    updateValues(id, { [field]: value })
+  }
+
+  function updateValues(id: string, values: Record<string, unknown>) {
+    if (!canEdit || portListLock.current || publishingAny || priceSaveLocks.current.has(id)) return
+    dirtyPortIds.current.add(id)
+    for (const publication of Object.values(publications)) publication.resetPublished()
+    setPriceSaveErrors((prev) => ({ ...prev, [id]: "" }))
     setPorts((prev) =>
-      prev.map((port) => (port.id === id ? { ...port, [field]: value } : port))
+      prev.map((port) => (port.id === id ? { ...port, ...values } : port))
     )
 
     setSavedPorts((prev) => ({
       ...prev,
       [id]: false,
     }))
+    return true
   }
 
   async function saveDivider(port: any) {
-    await supabase
-      .from("ports")
-      .update({
-        name: port.name,
-      })
-      .eq("id", port.id)
+    if (!canEdit || publishingAny || portListLock.current || priceSaveLocks.current.has(port.id) || !dirtyPortIds.current.has(port.id)) return
+    priceSaveLocks.current.add(port.id)
+    setSavingPorts((prev) => ({ ...prev, [port.id]: true }))
+    setPriceSaveErrors((prev) => ({ ...prev, [port.id]: "" }))
+    try {
+      const expected = savedPortSnapshots.current[port.id]
+      if (!expected || !String(port.name).trim()) throw new Error("Enter a divider name before saving.")
+      const response = await fetch("/api/admin/prices", { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operation: "divider", portId: port.id, expectedName: expected.name, name: port.name }), signal: AbortSignal.timeout(20_000) })
+      const result = await response.json().catch(() => { throw new Error("The save could not be confirmed. Your draft is still here.") })
+      if (!response.ok) throw new Error(typeof result?.message === "string" ? result.message : "The save could not be confirmed. Your draft is still here.")
+      const { port: confirmedPort, snapshot } = confirmPriceSetterDivider(result, port.id, String(port.name).trim())
+      savedPortSnapshots.current[port.id] = snapshot
+      dirtyPortIds.current.delete(port.id)
+      setPorts((prev) => prev.map((row) => row.id === port.id ? { ...row, ...confirmedPort } : row))
+      setSavedPorts((prev) => ({ ...prev, [port.id]: true }))
+    } catch (error) {
+      setPriceSaveErrors((prev) => ({ ...prev, [port.id]: error instanceof Error && !["TypeError", "AbortError", "TimeoutError"].includes(error.name) ? error.message : "The save could not be confirmed. Your draft is still here; reload saved ports to check before retrying." }))
+      setSavedPorts((prev) => ({ ...prev, [port.id]: false }))
+    } finally { priceSaveLocks.current.delete(port.id); setSavingPorts((prev) => ({ ...prev, [port.id]: false })) }
   }
 
   async function savePort(port: any) {
+    if (!canEdit || portListLock.current || publishingAny || priceSaveLocks.current.has(port.id)) return
+    priceSaveLocks.current.add(port.id)
     setSavingPorts((prev) => ({ ...prev, [port.id]: true }))
-    const taiwanDefaults = taiwanBasisFormulaDefaults[String(port.name).toLowerCase()] ?? {}
-
-    const now = new Date()
-
-    const updatePayload = {
-      name: port.name,
-      lat: port.lat ? Number(port.lat) : null,
-      lng: port.lng ? Number(port.lng) : null,
-      hsfo: port.hsfo ? Number(port.hsfo) : null,
-      vlsfo: port.vlsfo ? Number(port.vlsfo) : null,
-      mgo: port.mgo ? Number(port.mgo) : null,
-      hsfo_formula: port.hsfo_formula || null,
-      vlsfo_formula: port.vlsfo_formula || taiwanDefaults.vlsfo_formula || null,
-      mgo_formula: port.mgo_formula || taiwanDefaults.mgo_formula || null,
-      updated_at: now,
-    }
-
-    const { error: updateError } = await supabase
-      .from("ports")
-      .update(updatePayload)
-      .eq("id", port.id)
-
-    if (updateError) {
-      console.error(updateError)
-      setSavingPorts((prev) => ({ ...prev, [port.id]: false }))
-      return
-    }
-
+    setPriceSaveErrors((prev) => ({ ...prev, [port.id]: "" }))
+    let renaming = false
     try {
-      await savePriceHistoryForMarketDate(supabase, {
-        portId: port.id,
-        recordedAt: now.toISOString(),
-        values: {
-          hsfo: port.hsfo ? Number(port.hsfo) : null,
-          vlsfo: port.vlsfo ? Number(port.vlsfo) : null,
-          mgo: port.mgo ? Number(port.mgo) : null,
-        },
-      })
-    } catch (error) {
-      console.error(error)
-      setSavingPorts((prev) => ({ ...prev, [port.id]: false }))
-      return
-    }
-
-    const portsByName = new Map(
-      ports.map((item) => [String(item.name).toLowerCase(), item] as const)
-    )
-
-    const dependentIds = new Set<string>()
-    const queue = [String(port.name).toLowerCase()]
-
-    while (queue.length > 0) {
-      const currentName = queue.shift()
-      if (!currentName) continue
-
-      for (const candidate of ports) {
-        if (candidate.id === port.id || candidate.type === "divider") continue
-
-        const formulas = [
-          candidate.hsfo_formula,
-          candidate.vlsfo_formula,
-          candidate.mgo_formula,
-        ]
-
-        const referencesCurrent = formulas.some((formula: string | null | undefined) => {
-          const parsed = parseSimpleFormula(formula)
-          return parsed?.refName === currentName
-        })
-
-        if (!referencesCurrent || dependentIds.has(candidate.id)) continue
-
-        dependentIds.add(candidate.id)
-        queue.push(String(candidate.name).toLowerCase())
-      }
-    }
-
-    if (dependentIds.size > 0) {
-      const dependentIdList = Array.from(dependentIds)
-      await supabase
-        .from("ports")
-        .update({ updated_at: now.toISOString() })
-        .in("id", dependentIdList)
-    }
-
-    setPorts((prev) =>
-      prev.map((item) => {
-        if (item.id === port.id || dependentIds.has(item.id)) {
-          return { ...item, updated_at: now.toISOString() }
+      const expected = savedPortSnapshots.current[port.id]
+      if (!expected) throw new Error("Reload saved ports before saving this price.")
+      const changes = buildPriceSetterFuelChanges(port, fuelDrafts[port.id])
+      if (changes.name !== expected.name) {
+        if (fallbackSaveLock.current || configLoadStatus !== "ready" || Object.keys(fallbackDrafts).length || priceSaveLocks.current.size > 1) {
+          throw new Error("Finish or reload unsaved report settings and wait for other price saves before renaming this port. Your draft is still here.")
         }
-        return item
+        // A rename also moves name-keyed report settings. Keep all competing
+        // UI mutations paused until the response and a fresh config read.
+        renaming = true
+        portListLock.current = true
+        setChangingPortList(true)
+        setConfigLoadStatus("loading")
+      }
+      invalidatePublications()
+      const response = await fetch("/api/admin/prices", {
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ portId: port.id, expected, changes }),
+        signal: AbortSignal.timeout(20_000),
       })
-    )
-
-    setSavedPorts((prev) => ({
-      ...prev,
-      [port.id]: true,
-    }))
-    setSavingPorts((prev) => ({ ...prev, [port.id]: false }))
+      const result = await response.json().catch(() => {
+        throw new Error("The save could not be confirmed. Reload saved ports to check; your draft is still here.")
+      })
+      if (!response.ok) throw new Error(typeof result?.message === "string" ? result.message : "The save could not be confirmed. Your draft is still here.")
+      const confirmed = new Map<string, Record<string, unknown>>()
+      const validatedRows = confirmPriceSetterSave(result, port.id, changes)
+      for (const { row, snapshot } of validatedRows) {
+        // A basis-port save may update linked ports. Never overwrite a different
+        // row's draft or advance its conflict baseline behind the user's back.
+        if (row.id === port.id || !dirtyPortIds.current.has(row.id) && !priceSaveLocks.current.has(row.id)) {
+          savedPortSnapshots.current[row.id] = snapshot
+          confirmed.set(row.id, row)
+        }
+      }
+      dirtyPortIds.current.delete(port.id)
+      setPorts((prev) => prev.map((item) => confirmed.has(item.id) ? { ...item, ...confirmed.get(item.id) } : item))
+      setFuelDrafts((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => !confirmed.has(id))))
+      setSavedPorts((prev) => ({ ...prev, [port.id]: true }))
+      await refreshPublicationSources()
+    } catch (error) {
+      setPriceSaveErrors((prev) => ({ ...prev, [port.id]: error instanceof Error && error.message && !["TypeError", "AbortError", "TimeoutError"].includes(error.name)
+        ? error.message : "The save could not be confirmed. Your draft is still here; reload saved ports to check before retrying." }))
+      setSavedPorts((prev) => ({ ...prev, [port.id]: false }))
+    } finally {
+      if (renaming) {
+        // Also reload after an unknown outcome: the transaction may have
+        // committed even when its HTTP response was lost. Price drafts stay.
+        setConfigLoadAttempt((attempt) => attempt + 1)
+        portListLock.current = false
+        setChangingPortList(false)
+      }
+      priceSaveLocks.current.delete(port.id)
+      setSavingPorts((prev) => ({ ...prev, [port.id]: false }))
+    }
   }
 
   async function deletePort(id: string, name: string) {
-    if (!confirm(`Delete ${name} ?`)) return
-
-    await supabase.from("ports").delete().eq("id", id)
-    setPorts((prev) => prev.filter((port) => port.id !== id))
+    if (!canChangePortList || portListLock.current || publishingAny || priceSaveLocks.current.size
+      || configLoadStatus !== "ready" || fallbackSaveLock.current || Object.keys(fallbackDrafts).length) return
+    if (!confirm(`Delete ${name}? Any unsaved changes in this row will be discarded. Ports required by reports, other prices or saved history cannot be deleted.`)) return
+    portListLock.current = true
+    setChangingPortList(true)
+    setPortListError("")
+    const affectsReports = ports.find((port) => port.id === id)?.type !== "divider"
+    if (affectsReports) invalidatePublications()
+    try {
+      const port = ports.find(port => port.id === id), baseline = savedPortSnapshots.current[id]
+      if (!port || !baseline) throw new Error("Reload saved ports before deleting.")
+      const expected = priceSetterDeletionSnapshot({ ...port, ...baseline })
+      const expectedFallbacks = expected.type === "divider" ? {} : priceSetterDeletionFallbacks(expected.name, savedFallbacks.current)
+      const response = await fetch("/api/admin/prices", { method: "DELETE", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ portId: id, expected, expectedFallbacks }), signal: AbortSignal.timeout(20_000) })
+      const result = await response.json().catch(() => { throw new Error("Could not confirm deletion. Reload saved ports to check before trying again.") })
+      if (!response.ok) throw new Error(typeof result?.message === "string" ? result.message : "Could not confirm deletion. Reload saved ports to check before trying again.")
+      confirmPriceSetterDeletion(result, id)
+      setPorts((prev) => prev.filter((port) => port.id !== id))
+      delete savedPortSnapshots.current[id]
+      dirtyPortIds.current.delete(id)
+      if (affectsReports) await refreshPublicationSources()
+    } catch (error) {
+      setPortListError(error instanceof Error && !["TypeError", "AbortError", "TimeoutError"].includes(error.name) ? error.message : `Could not confirm deletion of ${name}. The row is still shown; reload saved ports to check before trying again.`)
+    } finally {
+      // Target overrides may have been cleaned up even if the reply was lost.
+      // No setting drafts exist at entry; report publishing waits for this read.
+      setConfigLoadStatus("loading")
+      setConfigLoadAttempt(attempt => attempt + 1)
+      portListLock.current = false
+      setChangingPortList(false)
+    }
   }
 
-  async function addPort() {
-    const { data } = await supabase
-      .from("ports")
-      .insert({
-        name: "New Port",
-        display_order: ports.length + 1,
+  async function addPortRow(divider: boolean, recover = false) {
+    if (!(recover ? canEdit && !orderDraft && !!pendingCreation.current : canAddRow)
+      || creationLoadStatus !== "ready" || !creationState.current || portListLock.current
+      || publishingAny || priceSaveLocks.current.size || Object.values(savingPorts).some(Boolean)) return
+    const kind = divider ? "divider" : "port"
+    if (pendingCreation.current && pendingCreation.current.kind !== kind) {
+      setPortListError(`Retry Add ${pendingCreation.current.kind === "divider" ? "Divider" : "Port"} first to check the earlier addition. Reload saved ports before retrying.`)
+      return
+    }
+    const attempt = pendingCreation.current || { operation: "create" as const, requestId: crypto.randomUUID(), kind,
+      actorId: creationState.current.actorId, expectedVersion: creationState.current.version }
+    setCreationAttempt(attempt)
+    const generation = creationGeneration.current
+    portListLock.current = true
+    setChangingPortList(true)
+    setPortListError("")
+    if (!divider) invalidatePublications()
+    try {
+      const response = await fetch("/api/admin/prices", {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(attempt),
+        credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(20_000),
       })
-      .select()
-
-    if (data) {
-      setPorts([...ports, ...data])
+      const result = await response.json()
+      if (generation !== creationGeneration.current) return
+      if (!response.ok) {
+        if (["CREATION_PENDING", "CREATION_VERSION_CHANGED", "CREATION_OWNER_MISMATCH", "CREATION_ACCOUNT_CHANGED"].includes(result?.code)) {
+          // These SQL/account checks prove this request did not allocate. Do
+          // not silently turn the conflict into a fresh creation intention.
+          setCreationAttempt(null)
+          creationState.current = null
+          setCreationLoadStatus("error")
+          setCreationError(typeof result?.message === "string" ? result.message : "Reload previous additions before continuing.")
+        }
+        throw Error(typeof result?.message === "string" ? result.message : "Addition was not confirmed")
+      }
+      const confirmed = confirmPriceSetterCreation(result, attempt)
+      if (confirmed.port && confirmed.snapshot) {
+        // A reload may have found this row already. Preserve its later local
+        // edits and baseline; only append a row that is genuinely absent.
+        if (!Object.hasOwn(savedPortSnapshots.current, confirmed.portId)) savedPortSnapshots.current[confirmed.portId] = confirmed.snapshot
+        setPorts((prev) => prev.some(port => port.id === confirmed.portId) ? prev : [...prev, confirmed.port])
+        // A new row has no market or price group yet. Reveal a proven addition
+        // (including a confirmed retry) without discarding existing drafts.
+        setSelectedTab("All")
+        setSelectedPortGroup("All")
+      }
+      const acknowledgement = { actorId: attempt.actorId, requestId: attempt.requestId }
+      const ackResponse = await fetch("/api/admin/prices/creation", { method: "POST", credentials: "same-origin", cache: "no-store",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(acknowledgement), signal: AbortSignal.timeout(20_000) })
+      const ackResult = await ackResponse.json()
+      if (generation !== creationGeneration.current) return
+      if (!ackResponse.ok) throw Error(typeof ackResult?.message === "string" ? ackResult.message : "Could not finish checking the earlier addition. Please retry.")
+      confirmPriceSetterAcknowledgement(ackResult, acknowledgement)
+      setCreationAttempt(null)
+      // Acknowledgement does not invent a next revision. Read current state,
+      // which may now contain a different tab's pending request.
+      creationState.current = null
+      setCreationLoadStatus("loading")
+      const state = await fetchCreationState(AbortSignal.timeout(15_000))
+      if (generation !== creationGeneration.current) return
+      applyCreationState(state)
+      if (!confirmed.port) {
+        setPortListError("The earlier addition was already removed. No row was recreated. Reload saved ports before making a new addition.")
+        return
+      }
+      if (!divider) await refreshPublicationSources()
+    } catch (error) {
+      if (generation !== creationGeneration.current) return
+      if (!creationState.current) {
+        setCreationLoadStatus("error")
+        setCreationError("Reload previous additions before adding another row. Your existing prices and drafts are still here.")
+      }
+      setPortListError(error instanceof Error && !["TypeError", "AbortError", "TimeoutError", "SyntaxError"].includes(error.name)
+        ? error.message : `Could not confirm the new ${kind}. Reload saved ports, then retry Add ${divider ? "Divider" : "Port"}; the same request will be checked without creating a duplicate.`)
+    } finally {
+      portListLock.current = false
+      setChangingPortList(false)
     }
   }
 
-  async function addDivider() {
-    const { data } = await supabase
-      .from("ports")
-      .insert({
-        name: "Section",
-        type: "divider",
-        display_order: ports.length + 1,
+  function addPort() { return addPortRow(false) }
+
+  function addDivider() { return addPortRow(true) }
+
+  function reloadSavedPorts() {
+    if (portListLock.current || publishingAny || Object.values(savingPorts).some(Boolean)) return
+    if ((orderDraft || Object.values(savedPorts).some((saved) => saved === false))
+      && !window.confirm("Reload saved ports and discard unsaved price, name or order changes?")) return
+    setPortsLoadAttempt((attempt) => attempt + 1)
+    setCreationLoadAttempt((attempt) => attempt + 1)
+  }
+
+  function reloadPreviousAdditions() {
+    if (portListLock.current || publishingAny || priceSaveLocks.current.size) return
+    setCreationLoadAttempt(attempt => attempt + 1)
+  }
+
+  function dragStart(event: React.DragEvent, id: string) {
+    clearPortDrag()
+    if (!canChangePortList || publishingAny || portListLock.current || priceSaveLocks.current.size) { event.preventDefault(); return }
+    if (event.target instanceof Element && event.target.closest("input, textarea, select, button, a")) { event.preventDefault(); return }
+    event.dataTransfer.setData("application/x-fcuno-port-id", id)
+    event.dataTransfer.effectAllowed = "move"
+    draggedPortId.current = id
+  }
+
+  function clearPortDrop() {
+    portDropPreview.current = null
+    setDropIndicator(null)
+  }
+
+  function clearPortDrag() {
+    draggedPortId.current = null
+    clearPortDrop()
+  }
+
+  function dragOver(event: React.DragEvent<HTMLTableRowElement>, targetId: string) {
+    const movedId = draggedPortId.current
+    if (!movedId || !canChangePortList || publishingAny || portListLock.current || priceSaveLocks.current.size
+      || !event.dataTransfer.types.includes("application/x-fcuno-port-id")) { clearPortDrop(); return }
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const edge = event.clientY < bounds.top + bounds.height / 2 ? "before" : "after"
+    const prior = portDropPreview.current
+    if (prior?.movedId === movedId && prior.targetId === targetId && prior.edge === edge && prior.ports === ports && prior.visible === visiblePorts) {
+      event.preventDefault()
+      event.dataTransfer.dropEffect = "move"
+      return
+    }
+    try {
+      const fullIds = ports.map(port => port.id)
+      const order = insertVisiblePort(fullIds, visiblePorts.map(port => port.id), movedId, targetId, edge)
+      if (order.every((id, index) => id === fullIds[index])) { clearPortDrop(); return }
+      const preview: PortDropPreview = {
+        movedId, targetId, edge, ports, visible: visiblePorts,
+        draft: { operation: "reorder", expected: priceSetterOrderSnapshot(ports), order },
+      }
+      portDropPreview.current = preview
+      setDropIndicator(preview)
+      event.preventDefault()
+      event.dataTransfer.dropEffect = "move"
+    } catch { clearPortDrop() }
+  }
+
+  function dragLeave(event: React.DragEvent<HTMLElement>) {
+    if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) clearPortDrop()
+  }
+
+  async function savePortOrder(draft: PriceSetterReorder) {
+    if (!canEdit || publishingAny || portListLock.current || priceSaveLocks.current.size) return
+    portListLock.current = true
+    setChangingPortList(true)
+    setSavingOrder(true)
+    setOrderDraft(draft)
+    setOrderError("")
+    setOrderSaved(false)
+    try {
+      const response = await fetch("/api/admin/prices", { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(draft), signal: AbortSignal.timeout(20_000) })
+      const result = await response.json().catch(() => { throw new Error("The new order could not be confirmed. Retry or reload saved ports.") })
+      if (!response.ok) throw new Error(typeof result?.message === "string" ? result.message : "The new order could not be confirmed. Retry or reload saved ports.")
+      const confirmed = confirmPriceSetterOrder(result, draft.order)
+      // Only the order changes. Existing price/name drafts and baselines survive.
+      setPorts(prev => {
+        const byId = new Map(prev.map(port => [port.id, port]))
+        return confirmed.map(([id, display_order]) => ({ ...byId.get(id), display_order }))
       })
-      .select()
-
-    if (data) {
-      setPorts([...ports, ...data])
+      setOrderDraft(null)
+      setOrderSaved(true)
+    } catch (error) {
+      setOrderError(error instanceof Error && !["TypeError", "AbortError", "TimeoutError"].includes(error.name) ? error.message : "The new order could not be confirmed. Retry or reload saved ports.")
+    } finally {
+      portListLock.current = false
+      setChangingPortList(false)
+      setSavingOrder(false)
     }
   }
 
-  function dragStart(event: any, index: number) {
-    event.dataTransfer.setData("index", index)
-  }
-
-  async function dragDrop(event: any, index: number) {
-    const from = Number(event.dataTransfer.getData("index"))
-    const newPorts = [...ports]
-    const item = newPorts.splice(from, 1)[0]
-    newPorts.splice(index, 0, item)
-    setPorts(newPorts)
-
-    for (let i = 0; i < newPorts.length; i += 1) {
-      await supabase
-        .from("ports")
-        .update({ display_order: i + 1 })
-        .eq("id", newPorts[i].id)
-    }
+  async function dragDrop(event: React.DragEvent, targetId: string) {
+    event.preventDefault()
+    const preview = portDropPreview.current
+    const movedId = event.dataTransfer.getData("application/x-fcuno-port-id")
+    const activeId = draggedPortId.current
+    clearPortDrag()
+    if (!canChangePortList || publishingAny || portListLock.current || priceSaveLocks.current.size) return
+    // A drop is allowed only where this page displayed a valid insertion line.
+    // An external drag, changed filter/list, or stale target cannot choose an
+    // unreviewed position or reuse a previous gesture's destination.
+    if (!preview || movedId !== activeId || preview.movedId !== movedId || preview.targetId !== targetId
+      || preview.ports !== ports || preview.visible !== visiblePorts
+      || !(event.currentTarget instanceof HTMLElement) || event.currentTarget.dataset.dropPosition !== preview.edge) return
+    await savePortOrder(preview.draft)
   }
 
   function isUpdatedToday(date: any) {
     if (!date) return false
-    return new Date(date).toDateString() === today
+    return getMarketDateKey(String(date)) === today
   }
 
   function isFormulaStylePort(port: any) {
     const portName = String(port.name).toLowerCase()
     if (portName === "vizag") return false
-    if (taiwanBasisFormulaDefaults[portName]) return true
+    if (getTaiwanBasisFormula(portName, "vlsfo")) return true
     return hasFormulaForAnyFuel(port) || portName === "zhanjiang"
   }
 
@@ -441,187 +699,44 @@ export default function AdminPage() {
     }
   }
 
-  async function buildSnapshotFromPorts(
-    key: "china" | "compact",
-    sections: Array<{ title: string; ports: string[] }>
-  ) {
-    const includedPorts = Array.from(new Set(sections.flatMap((section) => section.ports)))
-    const { data: portsData } = await supabase
-      .from("ports")
-      .select("*")
-      .in("name", includedPorts)
-
-    if (!portsData) return null
-
-    const latestUpdated = portsData
-      .map((port) => port.updated_at)
-      .filter(Boolean)
-      .sort()
-      .at(-1)
-
-    const automaticReportDate = latestUpdated ? formatReportDate(latestUpdated) : ""
-    const snapshot = {
-      reportDate: getReportDateForSnapshot(key, automaticReportDate),
-      sections: buildChinaReportSections(portsData, sections),
-    }
-
-    await saveReportSnapshotOrThrow(key, snapshot)
-    return snapshot
-  }
-
-  function formatOverrideDate(value: string) {
-    if (!value) return ""
-    return formatReportDate(`${value}T12:00:00+08:00`)
-  }
-
-  function getReportDateForSnapshot(key: ReportSnapshotKey, automaticReportDate: string) {
-    return formatOverrideDate(reportDateOverrides[key]) || automaticReportDate
-  }
-
   function updateReportDateOverride(key: ReportSnapshotKey, value: string) {
-    setReportDateOverrides((prev) => ({
-      ...prev,
-      [key]: value,
-    }))
+    if (!canEdit || portListLock.current || publishingAny) return
+    setReportDateOverrides((prev) => ({ ...prev, [key]: value }))
+    publications[key].resetPublished()
   }
 
-  async function saveReportSnapshotOrThrow<T>(key: ReportSnapshotKey, snapshot: T) {
-    const { error } = await saveReportSnapshot(key, snapshot)
-    if (error) throw error
-  }
-
-  async function buildTaiwanSnapshot(): Promise<{
-    reportDate: string
-    rows: TaiwanReportRow[]
-    remark: string
-    specialNotice: string
-  } | null> {
-    const portsWanted = ["Kaohsiung", "Keelung", "Taichung", "Suao", "Hualien"]
-    const { data: portsData } = await supabase
-      .from("ports")
-      .select("*")
-      .in("name", portsWanted)
-
-    if (!portsData) return null
-
-    const portIds = portsData.map((port) => port.id)
-    const { data: historyData } = await supabase
-      .from("price_history")
-      .select("*")
-      .in("port_id", portIds)
-      .order("recorded_at", { ascending: false })
-      .order("id", { ascending: false })
-
-    if (!historyData || historyData.length === 0) return null
-
-    const { data: remarksData } = await supabase
-      .from("remarks")
-      .select("*")
-      .in("id", [1, 2])
-
-    const remarkData = remarksData?.find((item) => item.id === 1)
-    const noticeData = remarksData?.find((item) => item.id === 2)
-
-    const automaticReportDate = formatReportDate(historyData[0].recorded_at)
-
-    return {
-      reportDate: getReportDateForSnapshot("taiwan", automaticReportDate),
-      rows: buildTaiwanReportRows(portsData, historyData, portsWanted),
-      remark: remarkData?.content || "",
-      specialNotice: noticeData?.content || "",
-    }
-  }
-
-  async function buildHongKongSnapshot(): Promise<{
-    reportDate: string
-    rows: HongKongReportRow[]
-  } | null> {
-    const portsWanted = ["Hong Kong"]
-    const { data: portsData } = await supabase
-      .from("ports")
-      .select("*")
-      .in("name", portsWanted)
-
-    if (!portsData) return null
-
-    const portIds = portsData.map((port) => port.id)
-    const { data: historyData } = await supabase
-      .from("price_history")
-      .select("*")
-      .in("port_id", portIds)
-      .order("recorded_at", { ascending: false })
-      .order("id", { ascending: false })
-
-    if (!historyData || historyData.length === 0) return null
-
-    const automaticReportDate = formatReportDate(historyData[0].recorded_at)
-
-    return {
-      reportDate: getReportDateForSnapshot("hongkong", automaticReportDate),
-      rows: buildHongKongReportRows(portsData, historyData, portsWanted),
-    }
-  }
-
-  async function handlePublishChina() {
-    setPublishingChina(true)
+  async function handlePublish(key: ReportSnapshotKey) {
+    if (!canPublish(key) || !publications[key].ready) return
+    // Shared immediate lock closes the same-tick gap between different report
+    // buttons and price/list changes, before React renders the busy state.
+    portListLock.current = true
     try {
-      const snapshot = await buildSnapshotFromPorts("china", chinaReportSections)
-      if (snapshot) setPublishedChina(true)
-      if (snapshot) setReportDates((prev) => ({ ...prev, china: snapshot.reportDate }))
-    } catch (error) {
-      console.error(error)
-      setPublishedChina(false)
-    } finally {
-      setPublishingChina(false)
-    }
+      await publications[key].publish(reportDateOverrides[key])
+    } finally { portListLock.current = false }
   }
 
-  async function handlePublishCompact() {
-    setPublishingCompact(true)
-    try {
-      const snapshot = await buildSnapshotFromPorts("compact", compactReportSections)
-      if (snapshot) setPublishedCompact(true)
-      if (snapshot) setReportDates((prev) => ({ ...prev, compact: snapshot.reportDate }))
-    } catch (error) {
-      console.error(error)
-      setPublishedCompact(false)
-    } finally {
-      setPublishingCompact(false)
-    }
-  }
+  function handlePublishChina() { return handlePublish("china") }
+  function handlePublishCompact() { return handlePublish("compact") }
+  function handlePublishTaiwan() { return handlePublish("taiwan") }
+  function handlePublishHongKong() { return handlePublish("hongkong") }
 
-  async function handlePublishTaiwan() {
-    setPublishingTaiwan(true)
-    try {
-      const snapshot = await buildTaiwanSnapshot()
-      if (snapshot) {
-        await saveReportSnapshotOrThrow("taiwan", snapshot)
-        setPublishedTaiwan(true)
-        setReportDates((prev) => ({ ...prev, taiwan: snapshot.reportDate }))
-      }
-    } catch (error) {
-      console.error(error)
-      setPublishedTaiwan(false)
-    } finally {
-      setPublishingTaiwan(false)
+  function canPublish(key: ReportSnapshotKey) {
+    if (!canEdit || orderDraft || portListLock.current || priceSaveLocks.current.size > 0 || publishingAny) return false
+    if (configLoadStatus !== "ready" || fallbackSaveLock.current || Object.keys(fallbackDrafts).length) {
+      setPublishErrors((prev) => ({ ...prev, [key]: "Load and save report settings before publishing." }))
+      return false
     }
-  }
-
-  async function handlePublishHongKong() {
-    setPublishingHongKong(true)
-    try {
-      const snapshot = await buildHongKongSnapshot()
-      if (snapshot) {
-        await saveReportSnapshotOrThrow("hongkong", snapshot)
-        setPublishedHongKong(true)
-        setReportDates((prev) => ({ ...prev, hongkong: snapshot.reportDate }))
-      }
-    } catch (error) {
-      console.error(error)
-      setPublishedHongKong(false)
-    } finally {
-      setPublishingHongKong(false)
+    if (portListError) {
+      setPublishErrors((prev) => ({ ...prev, [key]: "Reload saved ports before publishing a report." }))
+      return false
     }
+    if (dirtyPortIds.current.size > 0 || ports.some((port) => savedPorts[port.id] === false)
+      || Object.values(savingPorts).some(Boolean)) {
+      setPublishErrors((prev) => ({ ...prev, [key]: "Save changed prices before publishing a report." }))
+      return false
+    }
+    setPublishErrors((prev) => ({ ...prev, [key]: undefined }))
+    return true
   }
 
   const visiblePorts = useMemo(() => {
@@ -636,15 +751,19 @@ export default function AdminPage() {
         return selectedTab === "All"
       }
 
-      const portName = String(port.name).toLowerCase()
+      // Draft text must not remove its own row before it can be saved. Use
+      // the confirmed baseline for membership, but render drafts in full-list
+      // order so filtered drag insertion still preserves every hidden slot.
+      const filterPort = savedPortSnapshots.current[port.id] ?? port
+      const portName = String(filterPort.name).toLowerCase()
       const inTab = !allowedPorts || allowedPorts.has(portName)
       if (!inTab) return false
       if (hideTertiary && tertiaryPortNames.has(portName)) return false
 
       if (selectedPortGroup === "All") return true
 
-      const hasFormula = isFormulaStylePort(port)
-      const hasPrice = [port.hsfo, port.vlsfo, port.mgo].some(
+      const hasFormula = isFormulaStylePort(filterPort)
+      const hasPrice = [filterPort.hsfo, filterPort.vlsfo, filterPort.mgo].some(
         (value) => value !== null && value !== undefined && String(value).trim() !== ""
       )
 
@@ -655,6 +774,15 @@ export default function AdminPage() {
       return hasFormula || !hasPrice
     })
   }, [hideTertiary, ports, selectedPortGroup, selectedTab])
+
+  useLayoutEffect(() => {
+    if (!canChangePortList || publishingAny || Object.values(savingPorts).some(Boolean)
+      || portDropPreview.current && (portDropPreview.current.ports !== ports || portDropPreview.current.visible !== visiblePorts)) {
+      draggedPortId.current = null
+      portDropPreview.current = null
+      setDropIndicator(null)
+    }
+  }, [canChangePortList, publishingAny, savingPorts, ports, visiblePorts])
 
   const missingFuelMatrix = useMemo(() => {
     const portsByName = new Map(
@@ -686,13 +814,42 @@ export default function AdminPage() {
   }, [ports])
 
   async function setFallback(port: string, fuel: "hsfo" | "vlsfo" | "mgo", value: FallbackValue) {
-    const key = buildFallbackKey(port, fuel)
-    const next = {
-      ...reportFallbacks,
-      [key]: value,
+    if (!canEdit || portListLock.current || publishingAny || configLoadStatus !== "ready" || fallbackSaveLock.current) return
+    if (ports.some((item) => item.name === port && savedPortSnapshots.current[item.id]?.name !== port)) {
+      setFallbackError("Save or reload the port name before changing its report settings.")
+      return
     }
-    setReportFallbacks(next)
-    await saveReportFallbacks(next)
+    const key = buildFallbackKey(port, fuel)
+    fallbackSaveLock.current = true
+    setSavingFallback(true)
+    setFallbackDrafts((prev) => ({ ...prev, [key]: value }))
+    setFallbackError("")
+    try {
+      const response = await fetch("/api/admin/prices", { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operation: "fallback", key, expectedValue: savedFallbacks.current[key] ?? null, value }), signal: AbortSignal.timeout(20_000) })
+      const result = await response.json().catch(() => { throw new Error("The override save could not be confirmed. Your draft is still here.") })
+      if (!response.ok) throw new Error(typeof result?.message === "string" ? result.message : "The override save could not be confirmed. Your draft is still here.")
+      const confirmed = parsePriceSetterFallbacks(JSON.stringify(result?.fallbacks))
+      if (result?.key !== key || confirmed[key] !== value) throw new Error("The override save could not be confirmed. Your draft is still here.")
+      savedFallbacks.current = mergeConfirmedFallbackBaseline(confirmed, savedFallbacks.current, Object.keys(fallbackDrafts), key)
+      setReportFallbacks(confirmed)
+      setFallbackDrafts((prev) => { const next = { ...prev }; delete next[key]; return next })
+    } catch (error) {
+      setFallbackError(error instanceof Error && !["TypeError", "AbortError", "TimeoutError"].includes(error.name) ? error.message : "The override save could not be confirmed. Your draft is still here; reload saved settings to check before retrying.")
+    } finally { fallbackSaveLock.current = false; setSavingFallback(false) }
+  }
+
+  function reloadReportSettings() {
+    if (fallbackSaveLock.current || portListLock.current || publishingAny) return
+    if (Object.keys(fallbackDrafts).length && !window.confirm("Reload saved report settings and discard unsaved override changes? Unsaved prices will stay here.")) return
+    setConfigLoadAttempt((attempt) => attempt + 1)
+  }
+
+  function retryFallback() {
+    const entry = Object.entries(fallbackDrafts)[0]
+    if (entry) {
+      const separator = entry[0].lastIndexOf("::")
+      void setFallback(entry[0].slice(0, separator), entry[0].slice(separator + 2) as "hsfo" | "vlsfo" | "mgo", entry[1])
+    }
   }
 
   function switchPortGroup(nextGroup: PortGroupMode) {
@@ -761,7 +918,7 @@ export default function AdminPage() {
             >
               <button
                 onClick={handlePublishChina}
-                disabled={publishingChina}
+                disabled={!canPublishReports || publishingAny || !chinaPublication.ready}
                 style={{
                   ...toolbarButtonStyle,
                   background: "var(--fc-admin-primary-button-bg)",
@@ -787,7 +944,7 @@ export default function AdminPage() {
               </a>
               <button
                 onClick={handlePublishCompact}
-                disabled={publishingCompact}
+                disabled={!canPublishReports || publishingAny || !compactPublication.ready}
                 style={{
                   ...toolbarButtonStyle,
                   background: "var(--fc-admin-primary-button-bg)",
@@ -832,10 +989,10 @@ export default function AdminPage() {
                       zIndex: 30,
                     }}
                   >
-                    <button onClick={() => { setToolsMenuOpen(false); void addPort() }} style={{ ...toolbarButtonStyle, justifyContent: "flex-start", textAlign: "left" }}>
+                    <button disabled={!canAddRow || publishingAny || Object.values(savingPorts).some(Boolean)} onClick={() => { setToolsMenuOpen(false); void addPort() }} style={{ ...toolbarButtonStyle, justifyContent: "flex-start", textAlign: "left" }}>
                       Add Port
                     </button>
-                    <button onClick={() => { setToolsMenuOpen(false); void addDivider() }} style={{ ...toolbarButtonStyle, justifyContent: "flex-start", textAlign: "left" }}>
+                    <button disabled={!canAddRow || publishingAny || Object.values(savingPorts).some(Boolean)} onClick={() => { setToolsMenuOpen(false); void addDivider() }} style={{ ...toolbarButtonStyle, justifyContent: "flex-start", textAlign: "left" }}>
                       Add Divider
                     </button>
                     <button onClick={() => { setShowCoords((prev) => !prev); setToolsMenuOpen(false) }} style={{ ...toolbarButtonStyle, justifyContent: "flex-start", textAlign: "left" }}>
@@ -873,7 +1030,7 @@ export default function AdminPage() {
             >
               <button
                 onClick={handlePublishTaiwan}
-                disabled={publishingTaiwan}
+                disabled={!canPublishReports || publishingAny || !taiwanPublication.ready}
                 style={{
                   ...toolbarButtonStyle,
                   background: "var(--fc-admin-primary-button-bg)",
@@ -899,7 +1056,7 @@ export default function AdminPage() {
               </a>
               <button
                 onClick={handlePublishHongKong}
-                disabled={publishingHongKong}
+                disabled={!canPublishReports || publishingAny || !hongKongPublication.ready}
                 style={{
                   ...toolbarButtonStyle,
                   background: "var(--fc-admin-primary-button-bg)",
@@ -1001,6 +1158,44 @@ export default function AdminPage() {
           </div>
         </div>
 
+        {reportDateItems.map((item) => publishErrors[item.key] ? (
+          <p key={item.key} role="alert" style={{ color: "var(--fc-admin-danger-text)" }}>{publishErrors[item.key]}</p>
+        ) : null)}
+
+        {portsLoadStatus === "loading" && <p role="status">Loading saved ports...</p>}
+        {portsLoadStatus === "error" && <div role="alert">
+          <p>Could not load saved ports. Editing and publishing are paused until they can be loaded.</p>
+          <button onClick={reloadSavedPorts} style={toolbarButtonStyle}>Try loading again</button>
+        </div>}
+        {portListError && <div role="alert">
+          <p>{portListError}</p>
+          <button onClick={reloadSavedPorts} disabled={changingPortList || publishingAny || Object.values(savingPorts).some(Boolean)} style={toolbarButtonStyle}>Reload saved ports</button>
+        </div>}
+        {hasEditPermission && creationLoadStatus === "loading" && <p role="status">Checking earlier additions…</p>}
+        {hasEditPermission && (creationError || pendingAttempt) && <div role={creationError ? "alert" : "status"}>
+          <p>{creationError || `An earlier ${pendingAttempt?.kind === "divider" ? "divider" : "port"} addition needs to be checked. No new row will be added while it is pending.`}</p>
+          {pendingAttempt && <button onClick={() => void addPortRow(pendingAttempt.kind === "divider", true)}
+            disabled={!canEdit || !!orderDraft || creationLoadStatus !== "ready" || publishingAny || Object.values(savingPorts).some(Boolean)} style={toolbarButtonStyle}>Check earlier addition</button>}
+          <button onClick={reloadPreviousAdditions} disabled={changingPortList || publishingAny || Object.values(savingPorts).some(Boolean)} style={toolbarButtonStyle}>Reload previous additions</button>
+        </div>}
+        {configLoadStatus === "loading" && <p role="status">Loading report settings… Publishing and override changes are paused.</p>}
+        {savingOrder && <p role="status">Saving port order…</p>}
+        {orderSaved && <p role="status">Port order saved.</p>}
+        {orderError && <div role="alert">
+          <p>{orderError}</p>
+          {orderDraft && <button onClick={() => void savePortOrder(orderDraft)} disabled={savingOrder || !canEdit} style={toolbarButtonStyle}>Retry order save</button>}
+          <button onClick={reloadSavedPorts} disabled={changingPortList || publishingAny || Object.values(savingPorts).some(Boolean)} style={toolbarButtonStyle}>Reload saved ports</button>
+        </div>}
+        {configLoadStatus === "error" && <div role="alert">
+          <p>Could not load saved report settings. Publishing and override changes are paused; saved settings have not been replaced.</p>
+          <button onClick={reloadReportSettings} style={toolbarButtonStyle}>Try loading report settings again</button>
+        </div>}
+        {(fallbackError || !savingFallback && Object.keys(fallbackDrafts).length > 0) && <div role="alert">
+          <p>{fallbackError || "An override change is still unsaved. Retry it or reload the saved report settings."}</p>
+          <button onClick={retryFallback} disabled={savingFallback || configLoadStatus !== "ready"} style={toolbarButtonStyle}>Retry override save</button>
+          <button onClick={reloadReportSettings} disabled={savingFallback || publishingAny} style={toolbarButtonStyle}>Reload saved report settings</button>
+        </div>}
+
         <div
           style={{
             display: "grid",
@@ -1009,8 +1204,15 @@ export default function AdminPage() {
             alignItems: "start",
           }}
         >
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: showCoords ? "980px" : "860px" }}>
+        <div style={{ overflowX: "auto" }} onDragLeave={dragLeave} onDragEnd={clearPortDrag}>
+          <style>{`
+            table[data-fcuno-port-order] > tbody > tr[data-drop-position="before"] > td { box-shadow: inset 0 3px 0 #006fee; }
+            table[data-fcuno-port-order] > tbody > tr[data-drop-position="after"] > td { box-shadow: inset 0 -3px 0 #006fee; }
+          `}</style>
+          {dropIndicator && <div role="status" aria-live="polite" style={{ position: "fixed", bottom: "18px", left: "50%", transform: "translateX(-50%)", zIndex: 50, pointerEvents: "none", padding: "9px 14px", borderRadius: "8px", background: "#0057bc", color: "#fff", fontWeight: 700, fontSize: "13px" }}>
+            Drop {dropIndicator.edge} {ports.find(port => port.id === dropIndicator.targetId)?.name || "this row"}
+          </div>}
+          <table data-fcuno-port-order style={{ width: "100%", borderCollapse: "collapse", minWidth: showCoords ? "980px" : "860px" }}>
             <thead>
               <tr>
                 <th style={th}>⇅</th>
@@ -1033,15 +1235,19 @@ export default function AdminPage() {
                   return (
                     <tr
                       key={port.id}
-                      draggable
-                      onDragStart={(event) => dragStart(event, index)}
-                      onDrop={(event) => dragDrop(event, index)}
-                      onDragOver={(event) => event.preventDefault()}
+                      draggable={canChangePortList && !publishingAny && !Object.values(savingPorts).some(Boolean)}
+                      onDragStart={(event) => dragStart(event, port.id)}
+                      onDrop={(event) => dragDrop(event, port.id)}
+                      onDragOver={(event) => dragOver(event, port.id)}
+                      onDragLeave={dragLeave}
+                      data-drop-position={dropIndicator && dropIndicator.targetId === port.id ? dropIndicator.edge : undefined}
                     >
                       <td style={td}>↕</td>
                       <td style={{ ...td, paddingTop: "8px", paddingBottom: "8px" }} colSpan={showCoords ? 9 : 7}>
                         <input
                           value={port.name}
+                          aria-label="Divider title"
+                          disabled={!canEdit || publishingAny || Boolean(savingPorts[port.id])}
                           onChange={(event) => updateValue(port.id, "name", event.target.value)}
                           onBlur={() => saveDivider(port)}
                           ref={(element) => {
@@ -1055,10 +1261,17 @@ export default function AdminPage() {
                             fontSize: "12px",
                           }}
                         />
+                        {savingPorts[port.id] && <span role="status">Saving divider…</span>}
+                        {savedPorts[port.id] && <span role="status">Saved</span>}
+                        {priceSaveErrors[port.id] && <div role="alert">
+                          <p>{priceSaveErrors[port.id]}</p>
+                          <button onClick={() => void saveDivider(port)} disabled={Boolean(savingPorts[port.id]) || !canEdit} style={toolbarButtonStyle}>Retry divider save</button>
+                          <button onClick={reloadSavedPorts} disabled={Object.values(savingPorts).some(Boolean)} style={toolbarButtonStyle}>Reload saved ports</button>
+                        </div>}
                       </td>
                       {showDeleteButtons && (
                         <td style={td}>
-                          <button onClick={() => deletePort(port.id, port.name)} style={dangerButtonStyle}>
+                          <button disabled={!canDeletePort} onClick={() => deletePort(port.id, port.name)} style={dangerButtonStyle}>
                             Delete
                           </button>
                         </td>
@@ -1070,19 +1283,19 @@ export default function AdminPage() {
                 const updated = isUpdatedToday(port.updated_at)
                 const isSaving = Boolean(savingPorts[port.id])
                 const isSaved = Boolean(savedPorts[port.id])
-                const isFormulaPort = isFormulaStylePort(port)
-                const taiwanDefaults = taiwanBasisFormulaDefaults[String(port.name).toLowerCase()] ?? {}
-                const rowTint = isFormulaPort
+                const rowTint = isFormulaStylePort(port)
                   ? "#eef6ff"
                   : "#ffffff"
 
                 return (
                   <tr
                     key={port.id}
-                    draggable
-                    onDragStart={(event) => dragStart(event, index)}
-                    onDrop={(event) => dragDrop(event, index)}
-                    onDragOver={(event) => event.preventDefault()}
+                    draggable={canChangePortList && !publishingAny && !Object.values(savingPorts).some(Boolean)}
+                    onDragStart={(event) => dragStart(event, port.id)}
+                    onDrop={(event) => dragDrop(event, port.id)}
+                    onDragOver={(event) => dragOver(event, port.id)}
+                    onDragLeave={dragLeave}
+                    data-drop-position={dropIndicator && dropIndicator.targetId === port.id ? dropIndicator.edge : undefined}
                     style={{ background: rowTint }}
                   >
                     <td style={{ ...td, color: "var(--fc-admin-muted)", fontSize: "11px" }}>⇅</td>
@@ -1106,6 +1319,7 @@ export default function AdminPage() {
                     <td style={td}>
                       <input
                         value={port.name ?? ""}
+                        disabled={!canEdit || publishingAny || isSaving}
                         onChange={(event) => updateValue(port.id, "name", event.target.value)}
                         ref={(element) => {
                           inputRefs.current[`${index}:0`] = element
@@ -1119,6 +1333,7 @@ export default function AdminPage() {
                       <td style={td}>
                         <input
                           value={port.lat ?? ""}
+                          disabled={!canEdit || publishingAny || isSaving}
                           onChange={(event) => updateValue(port.id, "lat", event.target.value)}
                           ref={(element) => {
                             inputRefs.current[`${index}:1`] = element
@@ -1133,6 +1348,7 @@ export default function AdminPage() {
                       <td style={td}>
                         <input
                           value={port.lng ?? ""}
+                          disabled={!canEdit || publishingAny || isSaving}
                           onChange={(event) => updateValue(port.id, "lng", event.target.value)}
                           ref={(element) => {
                             inputRefs.current[`${index}:2`] = element
@@ -1143,22 +1359,28 @@ export default function AdminPage() {
                       </td>
                     )}
 
-                    {fuelFieldConfigs.map((field, fuelIndex) => (
+                    {fuelFieldConfigs.map((field, fuelIndex) => {
+                      // Preserve the existing primary/direct vs formula-capable
+                      // workflow, but display each fuel independently. Pin that
+                      // capability to the saved row while editing a draft.
+                      const allowsFormula = isFormulaStylePort(port) || hasFormulaForAnyFuel(port)
+                        || hasFormulaForAnyFuel(savedPortSnapshots.current[port.id] ?? port)
+                      const input = priceSetterFuelInput(port, field.priceField, fuelDrafts[port.id]?.[field.priceField], allowsFormula)
+                      return (
                       <td key={field.priceField} style={td}>
                         <input
-                          placeholder={isFormulaPort ? "formula" : "price"}
-                          value={
-                            isFormulaPort
-                              ? port[field.formulaField] ?? taiwanDefaults[field.formulaField as keyof typeof taiwanDefaults] ?? ""
-                              : port[field.priceField] ?? ""
-                          }
-                          onChange={(event) =>
-                            updateValue(
-                              port.id,
-                              isFormulaPort ? field.formulaField : field.priceField,
-                              event.target.value
-                            )
-                          }
+                          placeholder={input.isFormula ? "formula" : "price"}
+                          aria-label={`${port.name} ${field.label} price or formula`}
+                          title={allowsFormula ? "Enter a price or a formula, e.g. Taichung + 0" : "Enter a price, or leave empty if unavailable"}
+                          maxLength={200}
+                          disabled={!canEdit || publishingAny || isSaving}
+                          value={input.value}
+                          onChange={(event) => {
+                            const value = event.target.value
+                            if (updateValues(port.id, priceSetterFuelEdit(field.priceField, value, allowsFormula))) {
+                              setFuelDrafts((prev) => ({ ...prev, [port.id]: { ...prev[port.id], [field.priceField]: value } }))
+                            }
+                          }}
                           ref={(element) => {
                             inputRefs.current[`${index}:${fuelIndex + (showCoords ? 3 : 1)}`] = element
                           }}
@@ -1167,22 +1389,22 @@ export default function AdminPage() {
                           }
                           style={{
                             ...compactInputStyle,
-                            width: isFormulaPort ? "124px" : "62px",
+                            width: input.isFormula ? "124px" : "62px",
                           }}
                         />
                       </td>
-                    ))}
+                    )})}
 
                     <td style={{ ...td, fontSize: "12px", whiteSpace: "nowrap", color: "var(--fc-admin-muted)" }}>
                       {port.updated_at
-                        ? new Date(port.updated_at).toLocaleDateString("en-GB")
+                        ? formatMarketDateNumeric(port.updated_at)
                         : "-"}
                     </td>
 
                     <td style={td}>
                       <button
                         onClick={() => savePort(port)}
-                        disabled={isSaving}
+                        disabled={!canEdit || publishingAny || isSaving}
                         style={{
                           ...saveButtonStyle,
                           color: isSaved ? "var(--fc-admin-muted)" : "var(--fc-admin-success-text)",
@@ -1197,11 +1419,15 @@ export default function AdminPage() {
                       >
                         {isSaving ? "Saving..." : isSaved ? "Saved" : "Save"}
                       </button>
+                      {priceSaveErrors[port.id] && <div role="alert" style={{ maxWidth: "260px", fontSize: "12px", marginTop: "6px", color: "var(--fc-admin-danger-text)" }}>
+                        <p style={{ margin: "0 0 6px" }}>{priceSaveErrors[port.id]}</p>
+                        <button onClick={reloadSavedPorts} disabled={changingPortList || publishingAny || Object.values(savingPorts).some(Boolean)} style={toolbarButtonStyle}>Reload saved ports</button>
+                      </div>}
                     </td>
 
                     {showDeleteButtons && (
                       <td style={td}>
-                        <button onClick={() => deletePort(port.id, port.name)} style={dangerButtonStyle}>
+                        <button disabled={!canDeletePort} onClick={() => deletePort(port.id, port.name)} style={dangerButtonStyle}>
                           Delete
                         </button>
                       </td>
@@ -1265,11 +1491,12 @@ export default function AdminPage() {
                   {item.label}
                 </span>
                 <span style={{ color: "var(--fc-admin-muted)", fontSize: "12px" }}>
-                  Current: {reportDates[item.key] || "-"}
+                  Current: {publications[item.key].baseline?.publishedReportDate || "-"}
                 </span>
                 <input
                   type="date"
                   value={reportDateOverrides[item.key]}
+                  disabled={!canEdit || configLoadStatus !== "ready" || publishingAny}
                   onChange={(event) => updateReportDateOverride(item.key, event.target.value)}
                   style={{
                     ...compactInputStyle,
@@ -1281,6 +1508,8 @@ export default function AdminPage() {
               </label>
             ))}
           </div>
+          {reportDateItems.map((item) => <ReportPublicationStatus key={item.key} title={item.label} publication={publications[item.key]}
+            busy={publishingAny || changingPortList || Object.values(savingPorts).some(Boolean) || savingOrder || savingFallback} />)}
         </section>
 
         <section
@@ -1345,12 +1574,14 @@ export default function AdminPage() {
                           return <div key={fuel} style={{ textAlign: "center", color: "var(--fc-admin-muted)", fontSize: "12px" }}>-</div>
                         }
                         const mapKey = buildFallbackKey(item.port, fuel)
-                        const current = reportFallbacks[mapKey] ?? "-"
+                        const current = fallbackDrafts[mapKey] ?? reportFallbacks[mapKey] ?? "-"
                         const selectColor =
                           current === "NA" ? "var(--fc-admin-danger-text)" : current === "SE" ? "var(--fc-admin-warning-text)" : "var(--fc-admin-panel-text)"
                         return (
                           <select
                             key={fuel}
+                            aria-label={`${item.port} ${fuel.toUpperCase()} override`}
+                            disabled={!canEdit || publishingAny || configLoadStatus !== "ready" || savingFallback}
                             value={current}
                             onChange={(event) => {
                               void setFallback(item.port, fuel, event.target.value as FallbackValue)

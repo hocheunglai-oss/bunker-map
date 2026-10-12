@@ -41,6 +41,10 @@ const taiwanBasisPortFallbacks: Partial<Record<string, Partial<Record<FuelKey, s
   hualien: { vlsfo: "taichung + 0", mgo: "taichung + 0" },
 }
 
+export function getTaiwanBasisFormula(portName: string, fuel: FuelKey): string | null {
+  return taiwanBasisPortFallbacks[portName.toLowerCase()]?.[fuel] ?? null
+}
+
 function buildFuelSnapshot(today: number | null, last: number | null): FuelSnapshot {
   return {
     today,
@@ -66,7 +70,7 @@ function resolveValue(
   const previousEntry = portHistory[1] ?? null
 
   const formula = port[`${fuel}_formula` as const]
-  const fallbackFormula = taiwanBasisPortFallbacks[port.name.toLowerCase()]?.[fuel] ?? null
+  const fallbackFormula = getTaiwanBasisFormula(port.name, fuel)
   const effectiveFormula = formula?.trim() ? formula : fallbackFormula
 
   if (effectiveFormula?.trim()) {
@@ -81,11 +85,11 @@ function resolveValue(
     return applyFormula(refBase, effectiveFormula)
   }
 
-  const directCurrent = currentEntry?.[fuel] ?? null
-  if (version === "today" && directCurrent != null) return directCurrent
-
-  const directPrevious = previousEntry?.[fuel] ?? null
-  if (version === "last" && directPrevious != null) return directPrevious
+  // A saved NULL is an explicit unavailable quote, not a missing history row.
+  // Reusing an older port value would invent today's price and its change,
+  // including for every formula-linked port that depends on this fuel.
+  const entry = version === "today" ? currentEntry : previousEntry
+  if (entry) return entry[fuel] ?? null
 
   return version === "today" ? port[fuel] ?? null : null
 }
@@ -104,10 +108,11 @@ export function formatReportDate(recordedAt: string): string {
 export function buildTaiwanReportRows(
   ports: PortRecord[],
   history: PriceHistoryRecord[],
-  portOrder: string[]
+  portOrder: string[],
+  dependencyPorts: PortRecord[] = ports
 ): TaiwanReportRow[] {
   const portsByName = new Map(
-    ports.map((port) => [port.name.toLowerCase(), port] as const)
+    dependencyPorts.map((port) => [port.name.toLowerCase(), port] as const)
   )
   const historyByPortId = new Map<PriceHistoryPortId, PriceHistoryRecord[]>()
 

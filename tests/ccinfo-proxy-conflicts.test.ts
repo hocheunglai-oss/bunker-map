@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import test from "node:test"
 import { transformSync } from "esbuild"
 import * as ccinfoSave from "../lib/ccinfoSave"
+import * as pricingWrites from "../lib/priceSetterLegacyWrites"
 
 function fixture(permission = "edit") {
   const requests: Request[] = []
@@ -17,9 +18,8 @@ function fixture(permission = "edit") {
       return { username: "SYNTHETIC EDITOR", displayName: "Synthetic Editor", role: "STAFF" }
     } },
     "@/lib/outlookContactValidation": { validateOutlookContactFields: () => null },
-    // The release proxy does not import pricing fences. The dirty tree does;
-    // this stub keeps this actual-handler test independent of unpublished pricing work.
-    "@/lib/priceSetterLegacyWrites": { priceSetterLegacyWriteMessage: () => null },
+    // Exercise both real guards together while isolating only external I/O.
+    "@/lib/priceSetterLegacyWrites": pricingWrites,
     "@/lib/ccinfoSave": ccinfoSave,
   }
   const loadedModule: { exports: Record<string, (request: Request) => Promise<Response>> } = { exports: {} }
@@ -71,7 +71,7 @@ test("actual CCINFO proxy preserves exact CAS filter, representation and trusted
 })
 
 test("actual proxy leaves noncontent CCINFO writes and other pages unchanged", async () => {
-  for (const input of [{ table: "cc_entry_files", body: { folder_path: "RENAMED" } }, { table: "cc_entry_folders", body: { name: "RENAMED" } }, { table: "cc_ports", cas: true, body: { country_name: "RENAMED", country_id: "11111111-1111-4111-8111-111111111111" } }, { table: "cc_companies", method: "POST" }, { table: "cc_companies", method: "DELETE" }, { page: "taiwan-remarks", table: "remarks", body: { content: "UNCHANGED PATH" } }]) {
+  for (const input of [{ table: "cc_entry_files", body: { folder_path: "RENAMED" } }, { table: "cc_entry_folders", body: { name: "RENAMED" } }, { table: "cc_ports", cas: true, body: { country_name: "RENAMED", country_id: "11111111-1111-4111-8111-111111111111" } }, { table: "cc_companies", method: "POST" }, { table: "cc_companies", method: "DELETE" }, { page: "taiwan-remarks", table: "remarks", method: "POST", body: { id: 1, content: "UNCHANGED PATH" } }]) {
     const app = fixture()
     assert.equal((await app.request(input)).status, 200)
     assert.equal(app.requests.length, 1)
