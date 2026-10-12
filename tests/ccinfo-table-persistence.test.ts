@@ -21,11 +21,14 @@ for (const nested of [false, true]) {
     let fail = false
     const mainSections = [original]
     const highlights = [{ title: "Country tab", sections: [original] }]
-    const persist = async () => {
+    const recordOwnerRef = { current: 1 }
+    const contentDraftRef = { current: { mainSections, highlights } }
+    const persist = async (next: typeof mainSections | typeof highlights) => {
+      Object.assign(contentDraftRef.current, nested ? { highlights: next } : { mainSections: next })
       await new Promise<void>((resolve) => { release = resolve })
       if (fail) throw new Error("Database unavailable")
     }
-    const handler = new Function("mainSections", "highlights", "persistMainSections", "persistHighlights", "setMainSections", "setHighlights", `${body}; return ${name}`)(mainSections, highlights, persist, persist, (value: unknown) => { committed = value }, (value: unknown) => { committed = value })
+    const handler = new Function("mainSections", "highlights", "persistMainSections", "persistHighlights", "setMainSections", "setHighlights", "recordOwnerRef", "renderOwner", "contentDraftRef", `${body}; return ${name}`)(mainSections, highlights, persist, persist, (value: unknown) => { committed = value }, (value: unknown) => { committed = value }, recordOwnerRef, 1, contentDraftRef)
     const args = nested ? [0, 0, table, widths, updates] : [0, table, widths, updates]
     const pending = handler(...args)
     assert.equal(committed, undefined)
@@ -41,5 +44,12 @@ for (const nested of [false, true]) {
     release()
     await assert.rejects(rejected, /Database unavailable/)
     assert.equal(committed, undefined, "a failed save cannot replace committed table data")
+
+    fail = false
+    const previousEntry = handler(...args)
+    recordOwnerRef.current += 1
+    release()
+    await previousEntry
+    assert.equal(committed, undefined, "a late save cannot put the previous entry's table into the newly opened entry")
   })
 }

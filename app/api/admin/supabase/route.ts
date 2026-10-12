@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 import { validateOutlookContactFields, type OutlookContactFields } from "@/lib/outlookContactValidation"
+import { ccinfoLegacyContentWriteMessage } from "@/lib/ccinfoSave"
 
 const PAGE_TABLES: Record<string, Set<string>> = {
   pricesetter: new Set(["ports", "price_history", "remarks"]),
@@ -172,6 +173,10 @@ async function proxyRequest(request: Request) {
     headers.set("apikey", serviceKey)
     headers.set("authorization", `Bearer ${serviceKey}`)
     const requestBody = isRead ? undefined : await request.arrayBuffer()
+    const ccinfoMessage = ccinfoLegacyContentWriteMessage(pageId, table, request.method, target, request.headers.get("prefer"), requestBody)
+    if (ccinfoMessage) {
+      return NextResponse.json({ code: "REFRESH_REQUIRED", message: ccinfoMessage }, { status: 409, headers: { "Cache-Control": "private, no-store" } })
+    }
 
     if (
       table === "phonebook_contacts" &&
