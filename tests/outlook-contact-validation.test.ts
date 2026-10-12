@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import test from "node:test"
 import vm from "node:vm"
 import ts from "typescript"
+import { ccinfoLegacyContentWriteMessage } from "../lib/ccinfoSave"
 import {
   normalizeOutlookContactFields,
   validateOutlookContactFields,
@@ -94,6 +95,7 @@ function loadRoute(permissionError?: "Unauthorized" | "Forbidden") {
     "next/server": { NextResponse: Response },
     "@supabase/supabase-js": { createClient: () => { throw new Error("Unexpected Supabase client: no real database access is allowed in this test.") } },
     "@/lib/outlookContactValidation": { validateOutlookContactFields },
+    "@/lib/ccinfoSave": { ccinfoLegacyContentWriteMessage },
     "@/lib/adminAuth": { requireAdminPagePermission: async (page: string, permission: string) => {
       permissions.push({ page, permission })
       if (permissionError) throw new Error(permissionError)
