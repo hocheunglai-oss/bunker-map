@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   applyVlsfoMaxRemarksToShortenedEnquiry,
   buildShortenedEnquiry,
@@ -47,7 +47,9 @@ type Worksheet = {
 type EnquiryWorksheetCache = {
   enquiryText: string
   cleanedEnquiryText: string
+  shortenedDraft: string | null
   vlsfoMaxRemarks: VlsfoMaxRemark[]
+  parserAiSuggestion: ParserAiSuggestion | null
   guesses: EnquiryWorksheetGuess
   worksheet: Worksheet
 }
@@ -98,6 +100,11 @@ type ParserAiSuggestion = {
   warnings: string[]
   imoSources: ParserAiSourceLink[]
   appliedAt: string
+}
+
+type ParserAiRequest = {
+  generation: number
+  pending: boolean
 }
 
 const workflowLabels: Array<[WorkflowKey, string]> = [
@@ -333,9 +340,44 @@ function restoreCache(value: unknown): EnquiryWorksheetCache | null {
   return {
     enquiryText,
     cleanedEnquiryText: sourceText,
-    vlsfoMaxRemarks: [],
+    shortenedDraft: typeof value.shortenedDraft === "string" ? value.shortenedDraft : null,
+    vlsfoMaxRemarks: restoreVlsfoMaxRemarks(value.vlsfoMaxRemarks),
+    parserAiSuggestion: restoreParserAiSuggestion(value.parserAiSuggestion),
     guesses,
     worksheet,
+  }
+}
+
+function restoreVlsfoMaxRemarks(value: unknown): VlsfoMaxRemark[] {
+  if (!Array.isArray(value)) return []
+  return Array.from(new Set(value.filter((remark): remark is VlsfoMaxRemark =>
+    remark === "80cst min" || remark === "80cst max" || remark === "120cst max" || remark === "180cst max",
+  )))
+}
+
+function restoreParserAiSuggestion(value: unknown): ParserAiSuggestion | null {
+  if (!isRecord(value) || typeof value.parserOutput !== "string" || typeof value.correctedOutput !== "string") return null
+  const fields = isRecord(value.fields) ? value.fields : {}
+  const imoSources = Array.isArray(value.imoSources) ? value.imoSources : []
+  return {
+    model: readString(value, "model"),
+    parserOutput: value.parserOutput,
+    correctedOutput: value.correctedOutput,
+    fields: {
+      vesselName: readString(fields, "vesselName"),
+      imo: readString(fields, "imo"),
+      port: readString(fields, "port"),
+      buyer: readString(fields, "buyer"),
+    },
+    vlsfoMaxRemarks: restoreVlsfoMaxRemarks(value.vlsfoMaxRemarks),
+    confidence: typeof value.confidence === "number" && Number.isFinite(value.confidence) ? value.confidence : 0,
+    warnings: Array.isArray(value.warnings) ? value.warnings.filter((warning): warning is string => typeof warning === "string") : [],
+    imoSources: imoSources.flatMap((source): ParserAiSourceLink[] =>
+      isRecord(source) && typeof source.url === "string" && /^https?:\/\//i.test(source.url)
+        ? [{ title: readString(source, "title"), url: source.url }]
+        : [],
+    ),
+    appliedAt: readString(value, "appliedAt"),
   }
 }
 
@@ -395,7 +437,8 @@ export default function EnquiryWorksheetPage() {
   const [vlsfoMaxRemarks, setVlsfoMaxRemarks] = useState<VlsfoMaxRemark[]>([])
   const [guesses, setGuesses] = useState<EnquiryWorksheetGuess>(() => emptyGuess())
   const [portIndex, setPortIndex] = useState<string[]>([])
-  const [shortenedDraft, setShortenedDraft] = useState("")
+  // null follows the parser; any string (including "") is an exact saved/user/AI draft.
+  const [shortenedDraftOverride, setShortenedDraft] = useState<string | null>(null)
   const [cacheReady, setCacheReady] = useState(false)
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle")
   const [whatsappStatus, setWhatsappStatus] = useState<"idle" | "sending" | "sent" | "failed">("idle")
@@ -410,9 +453,34 @@ export default function EnquiryWorksheetPage() {
   const [parserAiStatus, setParserAiStatus] = useState<"idle" | "loading" | "applied" | "failed">("idle")
   const [parserAiMessage, setParserAiMessage] = useState("")
   const [parserAiSuggestion, setParserAiSuggestion] = useState<ParserAiSuggestion | null>(null)
-  const preservedShortenedDraftRef = useRef("")
+  const portIndexRef = useRef<string[]>([])
+  const parserAiGenerationRef = useRef(0)
+  const parserAiRequestRef = useRef<ParserAiRequest | null>(null)
   const whatsappRequestIdRef = useRef("")
   const whatsappTimeoutRef = useRef<number | null>(null)
+
+  const invalidateParserAiRequest = useCallback(() => {
+    const wasPending = parserAiRequestRef.current?.pending
+    parserAiGenerationRef.current += 1
+    parserAiRequestRef.current = null
+    if (wasPending) {
+      setParserAiStatus("idle")
+      setParserAiMessage("")
+    }
+  }, [])
+
+  const updatePortIndex = useCallback((ports: string[]) => {
+    const previous = portIndexRef.current
+    if (previous.length === ports.length && previous.every((port, index) => port === ports[index])) return
+    invalidateParserAiRequest()
+    portIndexRef.current = ports
+    setPortIndex(ports)
+  }, [invalidateParserAiRequest])
+
+  useEffect(() => () => {
+    parserAiGenerationRef.current += 1
+    parserAiRequestRef.current = null
+  }, [])
 
   useEffect(() => {
     document.title = "Enquiry Worksheet - FC Uno"
@@ -431,16 +499,20 @@ export default function EnquiryWorksheetPage() {
           : []
       })
       .then((ports) => {
-        if (!cancelled) setPortIndex(ports)
+        if (!cancelled) {
+          updatePortIndex(ports)
+        }
       })
       .catch(() => {
-        if (!cancelled) setPortIndex([])
+        if (!cancelled) {
+          updatePortIndex([])
+        }
       })
 
     return () => {
       cancelled = true
     }
-  }, [authenticated])
+  }, [authenticated, updatePortIndex])
 
   useEffect(() => {
     try {
@@ -455,7 +527,9 @@ export default function EnquiryWorksheetPage() {
 
       setEnquiryText(restored.enquiryText)
       setCleanedEnquiryText(restored.cleanedEnquiryText)
+      setShortenedDraft(restored.shortenedDraft)
       setVlsfoMaxRemarks(restored.vlsfoMaxRemarks)
+      setParserAiSuggestion(restored.parserAiSuggestion)
       setGuesses(restored.guesses)
       setWorksheet(restored.worksheet)
     } catch {
@@ -466,24 +540,6 @@ export default function EnquiryWorksheetPage() {
   }, [])
 
   useEffect(() => {
-    if (!cacheReady) return
-
-    try {
-      window.localStorage.setItem(
-        ENQUIRY_WORKSHEET_CACHE_KEY,
-        JSON.stringify({
-          enquiryText,
-          cleanedEnquiryText,
-          guesses,
-          worksheet,
-        }),
-      )
-    } catch {
-      // If browser storage is blocked/full, keep the worksheet usable without persistence.
-    }
-  }, [cacheReady, cleanedEnquiryText, enquiryText, guesses, worksheet])
-
-  useEffect(() => {
     if (!userNickname) return
     setWorksheet((current) => {
       if (current.initials === userNickname) return current
@@ -492,6 +548,7 @@ export default function EnquiryWorksheetPage() {
   }, [userNickname])
 
   function updateField<K extends keyof Worksheet>(key: K, value: Worksheet[K]) {
+    if (key === "vesselName" || key === "imo" || key === "buyer") invalidateParserAiRequest()
     setWorksheet((current) => ({ ...current, [key]: value }))
   }
 
@@ -524,6 +581,7 @@ export default function EnquiryWorksheetPage() {
   }
 
   function updateWorksheetHeader(value: string, input?: HTMLInputElement) {
+    invalidateParserAiRequest()
     if (input) preserveTextInputSelection(input)
     const next = toCaps(value)
     const imoMatch = next.match(/(?:^|\s+-\s+|\s+)(\d{7})\s*$/)
@@ -541,6 +599,8 @@ export default function EnquiryWorksheetPage() {
   }
 
   function handleEnquiryTextChange(value: string) {
+    invalidateParserAiRequest()
+    setShortenedDraft(null)
     setEnquiryText(value)
     setVlsfoMaxRemarks([])
     setParserAiStatus("idle")
@@ -566,6 +626,29 @@ export default function EnquiryWorksheetPage() {
       ),
     [cleanedEnquiryText, enquiryText, guesses.imo, guesses.port, guesses.vesselName, portIndex, vlsfoMaxRemarks],
   )
+  const shortenedDraft = shortenedDraftOverride ?? shortenedEnquiry
+
+  useEffect(() => {
+    if (!cacheReady) return
+
+    try {
+      window.localStorage.setItem(
+        ENQUIRY_WORKSHEET_CACHE_KEY,
+        JSON.stringify({
+          enquiryText,
+          cleanedEnquiryText,
+          shortenedDraft,
+          vlsfoMaxRemarks,
+          parserAiSuggestion,
+          guesses,
+          worksheet,
+        }),
+      )
+    } catch {
+      // If browser storage is blocked/full, keep the worksheet usable without persistence.
+    }
+  }, [cacheReady, cleanedEnquiryText, enquiryText, shortenedDraft, vlsfoMaxRemarks, parserAiSuggestion, guesses, worksheet])
+
   const viscosityCautionDetected = hasViscosityCaution(`${enquiryText}\n${cleanedEnquiryText}`)
   const attentionTerms = detectAttentionTerms(`${enquiryText}\n${cleanedEnquiryText}`)
   const imoSearchUrl = useMemo(
@@ -593,18 +676,20 @@ export default function EnquiryWorksheetPage() {
   }, [portIndex])
 
   useEffect(() => {
-    const preservedShortenedDraft = preservedShortenedDraftRef.current
-    if (preservedShortenedDraft) {
-      preservedShortenedDraftRef.current = ""
-      setShortenedDraft(preservedShortenedDraft)
-    } else {
-      setShortenedDraft(shortenedEnquiry)
-    }
     setCopyStatus("idle")
     setWhatsappStatus("idle")
   }, [shortenedEnquiry])
 
-  function applyCorrectedShortenedEnquiry(correctedOutput: string, fields: ParserAiFields = {}) {
+  function isCurrentParserAiRequest(request: ParserAiRequest) {
+    return parserAiRequestRef.current === request &&
+      parserAiGenerationRef.current === request.generation
+  }
+
+  function applyCorrectedShortenedEnquiry(
+    correctedOutput: string,
+    fields: ParserAiFields,
+    request: ParserAiRequest,
+  ) {
     const correctedGuess = parseEnquiryWorksheetGuess(correctedOutput, { portNames: portIndex })
     const hasCorrectedFields = Boolean(
       correctedGuess.vesselName ||
@@ -621,10 +706,9 @@ export default function EnquiryWorksheetPage() {
     const nextImo = (fields.imo || correctedGuess.imo).replace(/\D/g, "").slice(0, 7)
     const nextPort = fields.port ? fields.port.toLowerCase() : correctedGuess.port
 
-    preservedShortenedDraftRef.current = correctedOutput
     setShortenedDraft(correctedOutput)
     setVlsfoMaxRemarks(detectVlsfoMaxRemarks(correctedOutput))
-    setGuesses((current) => ({
+    setGuesses((current) => isCurrentParserAiRequest(request) ? ({
       ...current,
       vesselName: nextVesselName || current.vesselName,
       imo: nextImo || current.imo,
@@ -632,21 +716,23 @@ export default function EnquiryWorksheetPage() {
       buyer: nextBuyer || current.buyer,
       confidence: hasCorrectedFields ? correctedGuess.confidence : current.confidence,
       warnings: hasCorrectedFields ? correctedGuess.warnings : current.warnings,
-    }))
-    setWorksheet((current) => ({
+    }) : current)
+    setWorksheet((current) => isCurrentParserAiRequest(request) ? ({
       ...current,
       vesselName: nextVesselName || current.vesselName,
       imo: nextImo || current.imo,
       buyer: nextBuyer || current.buyer,
-    }))
+    }) : current)
   }
 
   async function runParserAi() {
     const rawText = enquiryText.trim()
     const sourceText = getParserSourceText().trim()
-    if ((!rawText && !sourceText) || parserAiStatus === "loading") return
+    if ((!rawText && !sourceText) || parserAiRequestRef.current?.pending) return
 
     const deterministicOutput = shortenedEnquiry.trim()
+    const request: ParserAiRequest = { generation: parserAiGenerationRef.current, pending: true }
+    parserAiRequestRef.current = request
     setParserAiStatus("loading")
     setParserAiMessage("")
     try {
@@ -670,6 +756,7 @@ export default function EnquiryWorksheetPage() {
         }),
       })
       const payload = (await response.json().catch(() => ({}))) as ParserAiResponse
+      if (!isCurrentParserAiRequest(request)) return
       if (!response.ok || !payload.correctedOutput) {
         throw new Error(payload.message || "AI parser failed.")
       }
@@ -686,15 +773,18 @@ export default function EnquiryWorksheetPage() {
         appliedAt: new Date().toISOString(),
       }
 
-      applyCorrectedShortenedEnquiry(payload.correctedOutput, payload.fields || {})
+      applyCorrectedShortenedEnquiry(payload.correctedOutput, payload.fields || {}, request)
       setParserAiSuggestion(suggestion)
       setParserAiStatus("applied")
       setParserAiMessage("AI correction applied. Double check before sending.")
       setCopyStatus("idle")
       setWhatsappStatus("idle")
     } catch (error) {
+      if (!isCurrentParserAiRequest(request)) return
       setParserAiStatus("failed")
       setParserAiMessage(error instanceof Error ? error.message : "AI parser failed.")
+    } finally {
+      if (isCurrentParserAiRequest(request)) request.pending = false
     }
   }
 
@@ -720,15 +810,15 @@ export default function EnquiryWorksheetPage() {
   }, [])
 
   function toggleVlsfoMaxRemark(remark: VlsfoMaxRemark) {
+    invalidateParserAiRequest()
     const nextRemarks = vlsfoMaxRemarks.includes(remark)
       ? vlsfoMaxRemarks.filter((item) => item !== remark)
       : [...vlsfoMaxRemarks, remark]
     const nextDraft = applyVlsfoMaxRemarksToShortenedEnquiry(
-      shortenedDraft || shortenedEnquiry,
+      shortenedDraft,
       nextRemarks,
     )
 
-    preservedShortenedDraftRef.current = nextDraft
     setShortenedDraft(nextDraft)
     setVlsfoMaxRemarks(nextRemarks)
     setCopyStatus("idle")
@@ -779,7 +869,7 @@ export default function EnquiryWorksheetPage() {
       parserOutput,
       aiOutput,
       aiSources: parserAiSuggestion?.imoSources || [],
-      correctedOutput: (shortenedDraft || shortenedEnquiry).trim(),
+      correctedOutput: shortenedDraft.trim(),
     })
     setParserReportStatus("idle")
   }
@@ -833,6 +923,7 @@ export default function EnquiryWorksheetPage() {
   }
 
   function guessDetails() {
+    invalidateParserAiRequest()
     const parsed = parseEnquiryWorksheetGuess(getParserSourceText(), { portNames: portIndex })
     const nextGuess: EnquiryWorksheetGuess = {
       vesselName: guesses.vesselName || parsed.vesselName,
@@ -843,6 +934,9 @@ export default function EnquiryWorksheetPage() {
       warnings: parsed.warnings,
     }
 
+    if (nextGuess.vesselName !== guesses.vesselName || nextGuess.imo !== guesses.imo || nextGuess.port !== guesses.port) {
+      setShortenedDraft(null)
+    }
     setGuesses(nextGuess)
     return nextGuess
   }
@@ -859,6 +953,7 @@ export default function EnquiryWorksheetPage() {
   }
 
   function clearDraft() {
+    invalidateParserAiRequest()
     try {
       window.localStorage.removeItem(ENQUIRY_WORKSHEET_CACHE_KEY)
     } catch {
@@ -944,6 +1039,7 @@ export default function EnquiryWorksheetPage() {
               className={styles.shortenedBox}
               value={shortenedDraft}
               onChange={(event) => {
+                invalidateParserAiRequest()
                 setShortenedDraft(event.target.value)
                 setCopyStatus("idle")
                 setWhatsappStatus("idle")
@@ -1046,8 +1142,11 @@ export default function EnquiryWorksheetPage() {
               <input
                 value={guesses.vesselName}
                 onChange={(event) => {
+                  invalidateParserAiRequest()
                   preserveTextInputSelection(event.currentTarget)
-                  setGuesses((current) => ({ ...current, vesselName: toCaps(event.target.value) }))
+                  const vesselName = toCaps(event.target.value)
+                  if (vesselName !== guesses.vesselName) setShortenedDraft(null)
+                  setGuesses((current) => ({ ...current, vesselName }))
                 }}
                 className={styles.capsInput}
               />
@@ -1064,11 +1163,11 @@ export default function EnquiryWorksheetPage() {
               <input
                 value={guesses.imo}
                 onChange={(event) => {
+                  invalidateParserAiRequest()
                   preserveTextInputSelection(event.currentTarget)
-                  setGuesses((current) => ({
-                    ...current,
-                    imo: event.target.value.replace(/\D/g, "").slice(0, 7),
-                  }))
+                  const imo = event.target.value.replace(/\D/g, "").slice(0, 7)
+                  if (imo !== guesses.imo) setShortenedDraft(null)
+                  setGuesses((current) => ({ ...current, imo }))
                 }}
                 inputMode="numeric"
                 maxLength={7}
@@ -1079,8 +1178,11 @@ export default function EnquiryWorksheetPage() {
               <input
                 value={guesses.port}
                 onChange={(event) => {
+                  invalidateParserAiRequest()
                   preserveTextInputSelection(event.currentTarget)
-                  setGuesses((current) => ({ ...current, port: event.target.value.toLowerCase() }))
+                  const port = event.target.value.toLowerCase()
+                  if (port !== guesses.port) setShortenedDraft(null)
+                  setGuesses((current) => ({ ...current, port }))
                 }}
                 className={styles.capsInput}
               />
@@ -1090,6 +1192,7 @@ export default function EnquiryWorksheetPage() {
               <input
                 value={guesses.buyer}
                 onChange={(event) => {
+                  invalidateParserAiRequest()
                   preserveTextInputSelection(event.currentTarget)
                   setGuesses((current) => ({ ...current, buyer: toCaps(event.target.value) }))
                 }}
