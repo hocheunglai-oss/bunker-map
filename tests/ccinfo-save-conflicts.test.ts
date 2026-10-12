@@ -93,11 +93,23 @@ test("CCINFO proxy blocks old/unversioned content writes and accepts bounded ret
   assert.ok(check(repeated))
 })
 
-test("CCINFO guard leaves other pages, file/folder writes, name cascades, inserts and deletes unchanged", () => {
+test("CCINFO guard leaves other pages, file/folder writes, inserts and deletes unchanged", () => {
   const content = new TextEncoder().encode(JSON.stringify({ notes: "changed" })).buffer
-  const name = new TextEncoder().encode(JSON.stringify({ country_name: "renamed" })).buffer
   const url = new URL("https://example.test/rest/v1/cc_ports")
-  for (const [page, table, method, body] of [["phonebook", "cc_ports", "PATCH", content], ["ccinfo", "cc_entry_files", "PATCH", content], ["ccinfo", "cc_ports", "POST", content], ["ccinfo", "cc_ports", "DELETE", content], ["ccinfo", "cc_ports", "PATCH", name]] as const) {
+  for (const [page, table, method, body] of [["phonebook", "cc_ports", "PATCH", content], ["ccinfo", "cc_entry_files", "PATCH", content], ["ccinfo", "cc_ports", "POST", content], ["ccinfo", "cc_ports", "DELETE", content]] as const) {
     assert.equal(ccinfoLegacyContentWriteMessage(page, table, method, url, null, body), null)
   }
+})
+
+test("country names require atomic rename; legacy bulk cascades fail closed but versioned port reparenting still works", () => {
+  const name = new TextEncoder().encode(JSON.stringify({ name: "RENAMED" })).buffer
+  const port = new TextEncoder().encode(JSON.stringify({ country_id: target.id, country_name: "RENAMED" })).buffer
+  const url = new URL("https://example.test/rest/v1/cc_countries")
+  url.searchParams.set("id", `eq.${target.id}`)
+  url.searchParams.set("updated_at", `eq.${initial}`)
+  url.searchParams.set("select", "*")
+  assert.ok(ccinfoLegacyContentWriteMessage("ccinfo", "cc_countries", "PATCH", url, "return=representation", name))
+  assert.equal(ccinfoLegacyContentWriteMessage("ccinfo", "cc_ports", "PATCH", url, "return=representation", port), null)
+  url.searchParams.delete("updated_at")
+  assert.ok(ccinfoLegacyContentWriteMessage("ccinfo", "cc_ports", "PATCH", url, "return=representation", port))
 })

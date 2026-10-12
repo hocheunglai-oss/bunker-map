@@ -71,9 +71,18 @@ test("actual CCINFO proxy preserves exact CAS filter, representation and trusted
 })
 
 test("actual proxy leaves noncontent CCINFO writes and other pages unchanged", async () => {
-  for (const input of [{ table: "cc_entry_files", body: { folder_path: "RENAMED" } }, { table: "cc_entry_folders", body: { name: "RENAMED" } }, { table: "cc_ports", body: { country_name: "RENAMED" } }, { table: "cc_companies", method: "POST" }, { table: "cc_companies", method: "DELETE" }, { page: "taiwan-remarks", table: "remarks", body: { content: "UNCHANGED PATH" } }]) {
+  for (const input of [{ table: "cc_entry_files", body: { folder_path: "RENAMED" } }, { table: "cc_entry_folders", body: { name: "RENAMED" } }, { table: "cc_ports", cas: true, body: { country_name: "RENAMED", country_id: "11111111-1111-4111-8111-111111111111" } }, { table: "cc_companies", method: "POST" }, { table: "cc_companies", method: "DELETE" }, { page: "taiwan-remarks", table: "remarks", body: { content: "UNCHANGED PATH" } }]) {
     const app = fixture()
     assert.equal((await app.request(input)).status, 200)
     assert.equal(app.requests.length, 1)
+  }
+})
+
+test("actual proxy prevents old tabs from directly renaming countries or cascading unbounded port labels", async () => {
+  for (const input of [{ table: "cc_countries", cas: true, body: { name: "RENAMED" } }, { table: "cc_ports", body: { country_name: "RENAMED" } }]) {
+    const app = fixture()
+    assert.equal((await app.request(input)).status, 409)
+    assert.equal(app.requests.length, 0)
+    assert.deepEqual(app.permissions, [["ccinfo", "edit"]])
   }
 })

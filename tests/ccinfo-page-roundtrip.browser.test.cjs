@@ -45,6 +45,13 @@ async function main() {
   let releasePatch = null
   let heldPatch = null
   let failNextCascade = false
+  let cascadeRequests = 0
+  let renameFailure = ""
+  let holdRename = false
+  let releaseRename = null
+  let renameSequence = 0
+  let canonicalizePortCountry = false
+  const renameRequests = []
   let holdCompanyRead = ""
   let releaseRead = null
   const other = { ...structuredClone(record), id: "00000000-0000-0000-0000-000000000004", name: "SECOND SYNTHETIC COMPANY", notes: "Second company note", summary: null }
@@ -84,6 +91,58 @@ async function main() {
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1")
     response.setHeader("Cache-Control", "no-store")
+    if (url.pathname === "/api/ccinfo/rename-country") {
+      assert.equal(request.method, "POST")
+      const chunks = []
+      for await (const chunk of request) chunks.push(chunk)
+      const body = JSON.parse(Buffer.concat(chunks).toString())
+      renameRequests.push(body)
+      assert.deepEqual(Object.keys(body).sort(), ["expectedUpdatedAt", "id", "name"])
+      assert.equal(body.id, countryId)
+      if (holdRename) {
+        holdRename = false
+        await new Promise((resolve) => { releaseRename = resolve })
+        releaseRename = null
+      }
+      const failure = renameFailure
+      renameFailure = ""
+      if (failure === "timeout") return // The client's timeout aborts this unacknowledged request.
+      if (failure === "country-stage" || failure === "ports-stage") {
+        response.writeHead(500, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "Synthetic transaction rolled back" }))
+        return
+      }
+      if (failure === "invalid") {
+        response.writeHead(400, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "Invalid name" }))
+        return
+      }
+      if (failure === "duplicate") {
+        response.writeHead(400, { "Content-Type": "application/json" }).end(JSON.stringify({ message: "Another country already uses this name. Please choose a different name." }))
+        return
+      }
+      if (failure === "ambiguous") {
+        response.writeHead(409, { "Content-Type": "application/json" }).end(JSON.stringify({ message: "Some ports need a country check before this rename. No changes were saved." }))
+        return
+      }
+      if (failure === "conflict" || body.expectedUpdatedAt !== country.updated_at) {
+        response.writeHead(409, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "Conflict" }))
+        return
+      }
+      if (failure.startsWith("bad-ack")) {
+        const invalid = { id: countryId, name: body.name, updated_at: "2099-10-12T08:00:00.123456+00:00" }
+        if (failure === "bad-ack-id") invalid.id = id
+        if (failure === "bad-ack-name") invalid.name = "WRONG COUNTRY"
+        if (failure === "bad-ack-version") invalid.updated_at = body.expectedUpdatedAt
+        response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ record: invalid }))
+        return
+      }
+      const oldName = country.name
+      const updatedAt = `2099-10-12T08:00:${String(++renameSequence).padStart(2, "0")}.123456+00:00`
+      Object.assign(country, { name: body.name, updated_at: updatedAt })
+      if (port.country_id === country.id || (!port.country_id && port.country_name === oldName)) Object.assign(port, { country_name: body.name, updated_at: updatedAt })
+      writes.push({ table: "cc_countries", body: { name: body.name }, atomicRename: true })
+      response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ record: { id: country.id, name: country.name, updated_at: country.updated_at } }))
+      return
+    }
     if (url.pathname.startsWith("/rest/v1/")) {
       const table = url.pathname.slice("/rest/v1/".length)
       if (request.method === "PATCH") {
@@ -93,6 +152,7 @@ async function main() {
         for await (const chunk of request) chunks.push(chunk)
         const body = JSON.parse(Buffer.concat(chunks).toString())
         if (table === "cc_ports" && Object.keys(body).length === 1 && Object.hasOwn(body, "country_name")) {
+          cascadeRequests += 1
           if (failNextCascade) {
             failNextCascade = false
             response.writeHead(503, { "Content-Type": "application/json" }).end(JSON.stringify({ message: "Synthetic linked-port failure" }))
@@ -120,8 +180,9 @@ async function main() {
           else response.writeHead(204).end()
           return
         }
-        writes.push({ table, body })
+        writes.push({ table, body, version: url.searchParams.get("updated_at") })
         Object.assign(target, body, { updated_at: new Date().toISOString() })
+        if (table === "cc_ports" && canonicalizePortCountry && target.country_id === country.id) target.country_name = country.name
         if (request.headers.prefer?.includes("return=representation")) response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(request.headers.accept?.includes("application/vnd.pgrst.object+json") ? target : [target]))
         else response.writeHead(204).end()
       } else {
@@ -159,7 +220,20 @@ async function main() {
     const { chromium } = require("playwright")
     browser = await chromium.launch({ headless: true, ...(process.env.CHROME_EXECUTABLE_PATH ? { executablePath: process.env.CHROME_EXECUTABLE_PATH } : {}) })
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
-    await context.route("**/*", (route) => route.request().url().startsWith(`${baseUrl}/`) ? route.continue() : route.abort())
+    await context.route("**/*", async (route) => {
+      if (!route.request().url().startsWith(`${baseUrl}/`)) return route.abort()
+      if (route.request().url() === `${baseUrl}/api/ccinfo/rename-country` && renameFailure === "network") {
+        renameFailure = ""
+        renameRequests.push(JSON.parse(route.request().postData()))
+        return route.abort("internetdisconnected")
+      }
+      if (route.request().url() === `${baseUrl}/api/ccinfo/rename-country` && renameFailure === "lost-ack") {
+        renameFailure = ""
+        await route.fetch() // Commit at the local server, then lose only its acknowledgement.
+        return route.abort("connectionreset")
+      }
+      return route.continue()
+    })
     const page = await context.newPage()
     page.setDefaultTimeout(8000)
     const errors = []
@@ -171,6 +245,256 @@ async function main() {
       const editor = dialog(name)
       await editor.waitFor({ state: "visible" })
       return editor
+    }
+    if (process.argv[2] === "rename-baseline") {
+      await page.goto(`${baseUrl}/admin/ccinfo?kind=country&id=${countryId}`)
+      await page.getByText("Old country note", { exact: true }).waitFor()
+      await page.locator("input[readonly]").dblclick()
+      await page.locator("input:focus").fill("BASELINE PARTIAL RENAME")
+      failNextCascade = true
+      await page.getByRole("button", { name: "Save", exact: true }).last().click()
+      const error = page.getByText(/Unable to complete the rename/)
+      await error.waitFor()
+      assert.equal(country.name, "BASELINE PARTIAL RENAME")
+      assert.equal(port.country_name, "SYNTHETIC COUNTRY")
+      assert.equal(await error.evaluate((node) => { const box = node.getBoundingClientRect(); return node.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)) }), false, "failure text is covered by the still-open rename dialog")
+      await page.getByRole("button", { name: "Save", exact: true }).last().click()
+      await page.waitForTimeout(50)
+      assert.equal(cascadeRequests, 1, "same-name retry returns before retrying the failed cascade")
+      console.log("BASELINE CONFIRMED: partial country rename, covered failure message and same-name retry no-op")
+      return
+    }
+    if (process.argv[2] === "rename") {
+      const renameDialog = dialog("Country")
+      const openRename = async (name) => {
+        await page.locator("input[readonly]").dblclick()
+        await renameDialog.waitFor()
+        assert.equal(await renameDialog.getByRole("alert").count(), 0, "opening the dialog clears only its previous error")
+        await renameDialog.locator("input").fill(name)
+      }
+      const waitForHeld = async (read, label) => {
+        const deadline = Date.now() + 4000
+        while (!read() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10))
+        assert.ok(read(), `${label} reached the synthetic server`)
+      }
+      await page.goto(`${baseUrl}/admin/ccinfo?kind=country&id=${countryId}`)
+      await page.getByText("Old country note", { exact: true }).waitFor()
+      for (const [index, failure] of ["country-stage", "ports-stage", "invalid", "network", "timeout", "bad-ack-id", "bad-ack-name", "bad-ack-version"].entries()) {
+        const nextName = `RETRY COUNTRY ${index}`
+        await openRename(nextName)
+        const before = structuredClone({ country, port })
+        const beforeRequests = renameRequests.length
+        renameFailure = failure
+        if (failure === "timeout") await page.evaluate(() => {
+          window.__renameOriginalTimeout = window.setTimeout
+          window.setTimeout = (callback, delay, ...args) => window.__renameOriginalTimeout(callback, delay === 30_000 ? 80 : delay, ...args)
+        })
+        await renameDialog.getByRole("button", { name: "Save", exact: true }).click()
+        const error = renameDialog.getByRole("alert")
+        await error.waitFor().catch(async (cause) => { throw new Error(`${failure}: ${cause.message}; requests=${JSON.stringify(renameRequests)}; body=${await page.locator("body").innerText()}; pageErrors=${JSON.stringify(errors)}`) })
+        if (failure === "timeout") await page.evaluate(() => { window.setTimeout = window.__renameOriginalTimeout; delete window.__renameOriginalTimeout })
+        assert.deepEqual({ country, port }, before, `${failure} cannot acknowledge or partially change either fixture record`)
+        assert.equal(renameRequests.length, beforeRequests + 1)
+        assert.equal(renameRequests.at(-1).expectedUpdatedAt, before.country.updated_at)
+        assert.equal(await renameDialog.locator("input").inputValue(), nextName)
+        assert.equal(await error.evaluate((node) => { const box = node.getBoundingClientRect(); return node.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)) }), true, "failure is readable inside the topmost dialog, not behind its backdrop")
+        assert.equal(await renameDialog.getByRole("button", { name: "Save", exact: true }).isEnabled(), true)
+        await renameDialog.getByRole("button", { name: "Save", exact: true }).click()
+        await renameDialog.waitFor({ state: "hidden" })
+        assert.equal(country.name, nextName)
+        assert.equal(port.country_name, nextName)
+        assert.equal(renameRequests.at(-1).expectedUpdatedAt, before.country.updated_at, "failed or unverifiable acknowledgements do not advance the client version")
+        assert.equal(country.summary, before.country.summary)
+        assert.equal(country.notes, before.country.notes)
+        const rawVersion = country.updated_at
+        await page.getByRole("button", { name: "Save", exact: true }).click()
+        await page.getByRole("status").getByText("Saved.", { exact: true }).waitFor()
+        assert.equal(writes.at(-1).version, `eq.${rawVersion}`, "subsequent content Save keeps PostgreSQL microseconds and offset exactly")
+        assert.equal(Object.hasOwn(writes.at(-1).body, "name"), false, "ordinary country Save cannot bypass the atomic rename operation")
+      }
+      assert.equal(cascadeRequests, 0, "country rename no longer sends separate browser port cascades")
+      console.log("PASS: both transaction-stage failures, invalid input, network/timeout and wrong id/name/version acknowledgements stay visible with draft intact; same-name retry and exact-version content Save work")
+
+      await openRename("NAME ALREADY USED")
+      renameFailure = "duplicate"
+      const beforeDuplicate = structuredClone({ country, port })
+      await renameDialog.getByRole("button", { name: "Save", exact: true }).click()
+      await renameDialog.getByRole("alert").filter({ hasText: /already uses this name.*choose a different name/ }).waitFor()
+      assert.deepEqual({ country, port }, beforeDuplicate)
+      await renameDialog.locator("input").fill("NEW UNIQUE COUNTRY NAME")
+      await renameDialog.getByRole("button", { name: "Save", exact: true }).click()
+      await renameDialog.waitFor({ state: "hidden" })
+      await openRename("CHECK AMBIGUOUS PORTS")
+      renameFailure = "ambiguous"
+      const beforeAmbiguous = structuredClone({ country, port })
+      await renameDialog.getByRole("button", { name: "Save", exact: true }).click()
+      await renameDialog.getByRole("alert").filter({ hasText: /ports need a country check.*No changes were saved/ }).waitFor()
+      assert.deepEqual({ country, port }, beforeAmbiguous)
+      assert.equal(await renameDialog.locator("input").inputValue(), "CHECK AMBIGUOUS PORTS")
+      await renameDialog.getByRole("button", { name: "Cancel", exact: true }).click()
+      console.log("PASS: duplicate-name400 and ambiguous-port409 preserve the route's actionable nontechnical explanation without changing records or losing the draft")
+
+      await openRename("KEEP CONFLICTED RENAME DRAFT")
+      const originalVersion = country.updated_at
+      country.updated_at = "2099-10-13T08:00:00.654321+00:00"
+      const external = structuredClone({ country, port })
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        await renameDialog.getByRole("button", { name: "Save", exact: true }).click()
+        await renameDialog.getByRole("alert").filter({ hasText: /entry changed or was removed/ }).waitFor()
+        assert.equal(await renameDialog.locator("input").inputValue(), "KEEP CONFLICTED RENAME DRAFT")
+        assert.equal(renameRequests.at(-1).expectedUpdatedAt, originalVersion, "conflict retries never adopt another editor's version")
+        assert.deepEqual({ country, port }, external)
+      }
+      await renameDialog.getByRole("button", { name: "Cancel", exact: true }).click()
+      await page.reload()
+      await page.getByText(country.notes, { exact: true }).waitFor()
+      console.log("PASS: HTTP409 preserves the rename draft and retries remain fenced by the original version without rebasing")
+
+      await page.getByText(country.notes, { exact: true }).dblclick()
+      await page.locator("textarea").fill("CONTENT SAVED BEFORE RENAME")
+      holdNextPatch = true
+      await page.getByRole("button", { name: "Save", exact: true }).last().click()
+      await waitForHeld(() => releasePatch, "preceding content")
+      await openRename("RENAME AFTER EARLIER CONTENT")
+      holdRename = true
+      const beforePrecedingRequests = renameRequests.length
+      await renameDialog.getByRole("button", { name: "Save", exact: true }).click()
+      await page.waitForTimeout(30)
+      assert.equal(renameRequests.length, beforePrecedingRequests, "rename waits for its preceding content save")
+      releasePatch()
+      await waitForHeld(() => releaseRename, "rename after preceding content")
+      assert.equal(renameRequests.at(-1).expectedUpdatedAt, country.updated_at, "rename consumes the preceding content acknowledgement's raw version")
+      assert.equal(await page.getByRole("button", { name: "Saving", exact: true }).first().isDisabled(), true)
+      releaseRename()
+      await renameDialog.waitFor({ state: "hidden" })
+      assert.equal(country.name, "RENAME AFTER EARLIER CONTENT")
+      assert.equal(port.country_name, country.name)
+      assert.equal(country.notes, "CONTENT SAVED BEFORE RENAME")
+      assert.equal(await page.getByRole("button", { name: "Save", exact: true }).isEnabled(), true, "finishing a rename must clear the earlier content save's pending indicator")
+      await page.getByRole("button", { name: "Save", exact: true }).click()
+      await page.getByRole("status").getByText("Saved.", { exact: true }).waitFor()
+      console.log("PASS: country rename queued after a content save consumes its acknowledged version and preserves the saved text")
+
+      await page.getByText(country.notes, { exact: true }).dblclick()
+      await page.locator("textarea").fill("CONTENT QUEUED BEHIND RENAME")
+      await openRename("ATOMIC QUEUED COUNTRY")
+      holdRename = true
+      const beforeQueueRequests = renameRequests.length
+      const beforeQueueWrites = writes.length
+      await renameDialog.locator("input").evaluate((node) => { for (let i = 0; i < 2; i += 1) node.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })) })
+      await waitForHeld(() => releaseRename, "rename")
+      assert.equal(renameRequests.length, beforeQueueRequests + 1, "synchronous double-submit sends one atomic rename")
+      assert.equal(await renameDialog.getByRole("button", { name: "Cancel", exact: true }).isDisabled(), true)
+      assert.equal(await renameDialog.getByRole("button", { name: "Delete this Country", exact: true }).isDisabled(), true)
+      assert.equal(await renameDialog.locator("input").isDisabled(), true)
+      await renameDialog.locator("input").dispatchEvent("keydown", { key: "Escape" })
+      await renameDialog.locator("..").dispatchEvent("click")
+      assert.equal(await renameDialog.isVisible(), true, "Escape and backdrop cannot close a pending rename")
+      await page.getByPlaceholder("Search company, country or port...").fill("SECOND")
+      await page.getByRole("button", { name: /SECOND SYNTHETIC COMPANY/ }).dispatchEvent("click")
+      assert.match(page.url(), new RegExp(countryId), "internal navigation remains blocked through the complete atomic operation")
+      assert.equal(await renameDialog.isVisible(), true)
+      holdNextPatch = true
+      await page.getByRole("button", { name: "Save", exact: true }).dispatchEvent("click")
+      await page.waitForTimeout(30)
+      assert.equal(writes.length, beforeQueueWrites, "queued content waits for atomic rename acknowledgement")
+      releaseRename()
+      await renameDialog.waitFor({ state: "hidden" })
+      await waitForHeld(() => releasePatch, "queued content")
+      assert.equal(heldPatch.version, `eq.${country.updated_at}`)
+      assert.equal(Object.hasOwn(heldPatch.body, "name"), false, "queued content cannot replay the pre-rename country name")
+      await page.getByRole("button", { name: /SECOND SYNTHETIC COMPANY/ }).click()
+      await page.getByText(/Please wait for the current save/).waitFor()
+      assert.match(page.url(), new RegExp(countryId))
+      const queuedFinished = page.waitForResponse((response) => response.request().method() === "PATCH")
+      releasePatch()
+      await queuedFinished
+      await page.locator("textarea").waitFor({ state: "hidden" })
+      assert.equal(country.name, "ATOMIC QUEUED COUNTRY")
+      assert.equal(port.country_name, "ATOMIC QUEUED COUNTRY")
+      assert.equal(country.notes, "CONTENT QUEUED BEHIND RENAME")
+      assert.equal(renameRequests.length, beforeQueueRequests + 1)
+      console.log("PASS: double-submit, Escape, backdrop, delete and navigation are protected while rename and queued content serialize; content cannot revert the renamed country")
+
+      await page.getByText(country.notes, { exact: true }).dblclick()
+      await page.locator("textarea").fill("KEEP CONTENT AFTER RENAME FAILURE")
+      await openRename("FAILED QUEUED COUNTRY")
+      renameFailure = "country-stage"
+      holdRename = true
+      const beforeFailedQueue = writes.length
+      await renameDialog.getByRole("button", { name: "Save", exact: true }).click()
+      await waitForHeld(() => releaseRename, "failed rename")
+      await page.getByRole("button", { name: "Save", exact: true }).dispatchEvent("click")
+      releaseRename()
+      await renameDialog.getByRole("alert").waitFor()
+      await page.waitForTimeout(50)
+      assert.equal(writes.length, beforeFailedQueue, "a failed rename cancels queued stale writes without sending them")
+      assert.equal(await page.locator("textarea").inputValue(), "KEEP CONTENT AFTER RENAME FAILURE")
+      await renameDialog.getByRole("button", { name: "Cancel", exact: true }).click()
+      await page.getByRole("button", { name: "Save", exact: true }).last().click()
+      await page.locator("textarea").waitFor({ state: "hidden" })
+      assert.equal(country.notes, "KEEP CONTENT AFTER RENAME FAILURE")
+      assert.equal(country.name, "ATOMIC QUEUED COUNTRY")
+      console.log("PASS: failed rename never sends its already-queued stale content write; visible content remains available for an explicit retry")
+
+      await openRename("COMMITTED BUT ACKNOWLEDGEMENT LOST")
+      renameFailure = "lost-ack"
+      const beforeLostWrites = writes.length
+      const beforeLostVersion = country.updated_at
+      await renameDialog.getByRole("button", { name: "Save", exact: true }).click()
+      await renameDialog.getByRole("alert").filter({ hasText: /could not be confirmed/ }).waitFor()
+      assert.equal(country.name, "COMMITTED BUT ACKNOWLEDGEMENT LOST")
+      assert.equal(port.country_name, country.name)
+      await renameDialog.getByRole("button", { name: "Save", exact: true }).click()
+      await renameDialog.getByRole("alert").filter({ hasText: /entry changed or was removed/ }).waitFor()
+      assert.equal(writes.length, beforeLostWrites + 1, "lost acknowledgement retry cannot commit twice or overwrite the winning version")
+      assert.equal(renameRequests.at(-1).expectedUpdatedAt, beforeLostVersion)
+      assert.equal(await renameDialog.locator("input").inputValue(), country.name)
+      await renameDialog.getByRole("button", { name: "Cancel", exact: true }).click()
+      console.log("PASS: a committed rename with lost acknowledgement is labelled uncertain; same-name retry conflicts safely without adopting or overwriting the winning version")
+
+      for (const [kind, target, label] of [["company", record, "Company Name"], ["port", port, "Port"]]) {
+        await page.goto(`${baseUrl}/admin/ccinfo?kind=${kind}&id=${target.id}`)
+        await page.getByText(target.notes, { exact: true }).waitFor()
+        await page.locator("input[readonly]").dblclick()
+        const editor = dialog(label)
+        await editor.locator("input").fill(`RENAMED EXISTING ${kind.toUpperCase()}`)
+        holdNextPatch = true
+        const before = writes.length
+        const atomicRequests = renameRequests.length
+        await editor.locator("input").evaluate((node) => { for (let i = 0; i < 2; i += 1) node.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })) })
+        await waitForHeld(() => releasePatch, `${kind} rename`)
+        assert.equal(await editor.getByRole("button", { name: "Cancel", exact: true }).isDisabled(), true)
+        releasePatch()
+        await editor.waitFor({ state: "hidden" })
+        assert.equal(writes.length, before + 1)
+        assert.equal(renameRequests.length, atomicRequests, "company and port rename keep their selected-record CAS path")
+        await page.getByRole("button", { name: "Save", exact: true }).click()
+        await page.getByRole("status").getByText("Saved.", { exact: true }).waitFor()
+        assert.equal(target.name, `RENAMED EXISTING ${kind.toUpperCase()}`)
+      }
+      assert.equal(cascadeRequests, 0)
+      assert.deepEqual(errors, [])
+      console.log("PASS: existing company/port rename still use one bounded CAS request, reject duplicate submit, and support subsequent ordinary Save")
+
+      await page.goto(`${baseUrl}/admin/ccinfo?kind=port&id=${portId}`)
+      await page.getByRole("button", { name: `COUNTRY: ${country.name}`, exact: true }).waitFor()
+      Object.assign(country, { name: "SERVER CANONICAL COUNTRY", notes: "Keep newer country note", summary: "Keep newer country summary" })
+      const canonicalCountry = structuredClone(country)
+      canonicalizePortCountry = true
+      await page.getByRole("button", { name: "Save", exact: true }).click()
+      await page.getByRole("status").getByText("Saved.", { exact: true }).waitFor()
+      await page.getByRole("button", { name: "COUNTRY: SERVER CANONICAL COUNTRY", exact: true }).waitFor()
+      assert.equal(port.country_name, country.name)
+      const beforeCanonicalRetry = writes.length
+      await page.getByRole("button", { name: "Save", exact: true }).click()
+      await page.getByRole("status").getByText("Saved.", { exact: true }).waitFor()
+      assert.equal(writes.length, beforeCanonicalRetry + 1, "the acknowledged canonical label must remain valid against refreshed country options")
+      assert.equal(writes.at(-1).body.country_name, country.name, "a later Save must not replay the stale cached country label")
+      assert.deepEqual(country, canonicalCountry, "installing a canonical port acknowledgement cannot write linked-country content")
+      assert.deepEqual(errors, [])
+      console.log("PASS: port Save installs the server's canonical country relation and options without writing linked-country content or replaying a stale label")
+      return
     }
     if (process.argv[2] === "zero-record") {
       record.summary = null
@@ -365,14 +689,17 @@ async function main() {
 
       await page.locator("input[readonly]").dblclick()
       await page.locator("input:focus").fill("RENAMED SYNTHETIC COUNTRY")
-      failNextCascade = true
+      renameFailure = "ports-stage"
+      const beforeRename = structuredClone({ country, port })
       await page.getByRole("button", { name: "Save", exact: true }).last().click()
-      await page.getByText(/Unable to complete the rename/).waitFor()
-      await page.getByRole("button", { name: "Cancel", exact: true }).click()
+      await dialog("Country").getByRole("alert").waitFor()
+      assert.deepEqual({ country, port }, beforeRename, "atomic rename failure cannot leave a partially renamed country")
+      await dialog("Country").getByRole("button", { name: "Save", exact: true }).click()
+      await dialog("Country").waitFor({ state: "hidden" })
       assert.equal(country.name, "RENAMED SYNTHETIC COUNTRY")
       await page.getByRole("button", { name: "Save", exact: true }).click()
       await page.getByText("Saved.", { exact: true }).waitFor()
-      assert.equal(country.name, "RENAMED SYNTHETIC COUNTRY", "a partial cascade failure cannot revert the acknowledged country rename on the next Save")
+      assert.equal(country.name, "RENAMED SYNTHETIC COUNTRY", "ordinary content Save preserves the acknowledged atomic country rename")
       await page.getByPlaceholder("Search company, country or port...").fill("SYNTHETIC PORT")
       await page.getByRole("button", { name: /SYNTHETIC PORT/ }).click()
       await page.getByText("Unchanged port note", { exact: true }).waitFor()
@@ -380,7 +707,7 @@ async function main() {
       await page.getByText("Saved.", { exact: true }).waitFor()
       assert.equal(port.country_name, "RENAMED SYNTHETIC COUNTRY", "same-page country options use the acknowledged rename for later port saves")
       assert.deepEqual(errors, [])
-      console.log("PASS: partial linked-port rename failure reports explicitly, later country Save retains its name, and same-page port Save uses refreshed country options")
+      console.log("PASS: atomic country rename failure retains both records, same-name retry works, later Save retains its name, and same-page port Save uses refreshed country options")
       return
     }
     await page.goto(`${baseUrl}/admin/ccinfo?kind=company&id=${id}`)

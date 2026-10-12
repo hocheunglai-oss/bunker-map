@@ -56,9 +56,13 @@ export function ccinfoLegacyContentWriteMessage(pageId: string, table: string, m
   if (pageId !== "ccinfo" || !RECORD_TABLES.has(table) || method !== "PATCH" || !body) return null
   let payload: unknown
   try { payload = JSON.parse(new TextDecoder().decode(body)) } catch { return null }
-  if (Array.isArray(payload)) return payload.some((item) => item && typeof item === "object" && ("summary" in item || "notes" in item)) ? "Refresh this page before saving. Your edits have not been saved; copy them first." : null
+  const refresh = "Refresh this page before saving. Your edits have not been saved; copy them first."
+  const needsVersion = (item: object) => "summary" in item || "notes" in item || (table === "cc_ports" && ("country_name" in item || "country_id" in item))
+  if (Array.isArray(payload)) return payload.some((item) => item && typeof item === "object" && (needsVersion(item) || (table === "cc_countries" && "name" in item))) ? refresh : null
   if (!payload || typeof payload !== "object") return null
-  if (!("summary" in payload) && !("notes" in payload)) return null
+  // A rename is no longer a country PATCH followed by best-effort port writes.
+  if (table === "cc_countries" && "name" in payload) return refresh
+  if (!needsVersion(payload)) return null
   const id = target.searchParams.getAll("id")
   const versions = target.searchParams.getAll("updated_at")
   const version = versions[0]?.slice(3)

@@ -566,6 +566,15 @@ function mapAuditPreviewRow(row: Record<string, unknown>): AuditLogRecord {
 }
 
 export function canUndoAuditLogRecord(record: AuditLogRecord) {
+  // Country renames update the country and its linked ports atomically. A
+  // single-row audit undo would restore only part of that operation.
+  if (
+    record.tableSchema === "public" &&
+    ["cc_countries", "cc_ports"].includes(record.tableName) &&
+    record.requestContext.action === "ccinfo_country_rename"
+  ) {
+    return false
+  }
   if (
     record.tableName === "office_calendar_store" &&
     ["event-calendar", "task-calendar", "spc-permission-groups"].includes(getOfficeCalendarStoreKey(record) || "")
