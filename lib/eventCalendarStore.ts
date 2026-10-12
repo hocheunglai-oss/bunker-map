@@ -9,6 +9,7 @@ export type CalendarMutation = {
   expectedEventVersions?: Record<string, unknown>
   expectedSettingVersions?: Record<string, unknown>
   settings?: Record<string, unknown>
+  confirmEmailRecipientsClear?: boolean
 }
 
 const MAX_MUTATION_EVENTS = 500
@@ -85,7 +86,9 @@ export function getEventCalendarSettingVersions(value: unknown) {
   const payload = asRecord(value)
   return {
     people: getEventCalendarRecordVersion(settingValue(payload, "people")),
-    emailRecipientsText: getEventCalendarRecordVersion(settingValue(payload, "emailRecipientsText")),
+    // Missing uses the fallback; an explicit empty string disables updates.
+    // Keep every existing string version stable while distinguishing those modes.
+    emailRecipientsText: getEventCalendarRecordVersion(typeof payload.emailRecipientsText === "string" ? payload.emailRecipientsText : null),
   }
 }
 
@@ -354,12 +357,19 @@ export function applyEventCalendarMutation(
     }
   }
   if (Object.hasOwn(settings, "emailRecipientsText")) {
-    const currentEmailRecipients = settingValue(current, "emailRecipientsText")
+    const emailListChanged = !recordsEqual(current.emailRecipientsText, settings.emailRecipientsText)
     if (
-      !recordsEqual(currentEmailRecipients, settings.emailRecipientsText) &&
-      expectedSettings.emailRecipientsText !== getEventCalendarRecordVersion(currentEmailRecipients)
+      emailListChanged &&
+      expectedSettings.emailRecipientsText !== getEventCalendarSettingVersions(current).emailRecipientsText
     ) {
       conflict(current, "The email reminder list changed after this window opened. Nothing was overwritten; reopen Email Reminders and try again.")
+    }
+    if (
+      emailListChanged &&
+      validateCalendarEmailList(settings.emailRecipientsText).length === 0 &&
+      mutation.confirmEmailRecipientsClear !== true
+    ) {
+      throw new EventCalendarValidationError("Confirm that you want to clear the email list and disable event-update emails. Daily reminders are not affected. Nothing was saved.")
     }
     nextSettings.emailRecipientsText = settings.emailRecipientsText
   }
