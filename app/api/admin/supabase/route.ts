@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 import { validateOutlookContactFields, type OutlookContactFields } from "@/lib/outlookContactValidation"
+import { priceSetterLegacyWriteMessage } from "@/lib/priceSetterLegacyWrites"
 import { ccinfoLegacyContentWriteMessage } from "@/lib/ccinfoSave"
 
 const PAGE_TABLES: Record<string, Set<string>> = {
@@ -139,6 +140,13 @@ async function proxyRequest(request: Request) {
 
     const session = await requireAdminPagePermission(pageId, isRead ? "view" : "edit")
 
+    // Check after authorization and before forwarding a service-role request.
+    // Old price tabs otherwise bypass the atomic save/settings/order endpoint.
+    const legacyMessage = priceSetterLegacyWriteMessage(pageId, table, request.method)
+    if (legacyMessage && table !== "remarks") {
+      return NextResponse.json({ code: "REFRESH_REQUIRED", message: legacyMessage }, { status: 409, headers: { "Cache-Control": "private, no-store" } })
+    }
+
     const headers = new Headers()
     ;[
       "accept",
@@ -176,6 +184,10 @@ async function proxyRequest(request: Request) {
     const ccinfoMessage = ccinfoLegacyContentWriteMessage(pageId, table, request.method, target, request.headers.get("prefer"), requestBody)
     if (ccinfoMessage) {
       return NextResponse.json({ code: "REFRESH_REQUIRED", message: ccinfoMessage }, { status: 409, headers: { "Cache-Control": "private, no-store" } })
+    }
+    const bodyLegacyMessage = priceSetterLegacyWriteMessage(pageId, table, request.method, requestBody)
+    if (bodyLegacyMessage) {
+      return NextResponse.json({ code: "REFRESH_REQUIRED", message: bodyLegacyMessage }, { status: 409, headers: { "Cache-Control": "private, no-store" } })
     }
 
     if (

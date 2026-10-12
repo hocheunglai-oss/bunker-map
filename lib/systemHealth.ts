@@ -4,6 +4,7 @@ import type { drive_v3 } from "googleapis"
 import { getEmailNoticeConfigStatus } from "@/lib/emailNotice"
 import { loadGoogleApis } from "@/lib/googleApis"
 import { evaluateDriveFileBackupHealth, isVerifiedDriveBackupManifest, type ActiveDriveBackupFile, type DriveBackupManifest } from "@/lib/driveFileBackupHealth"
+import { parsePricingBackupSchemaVersion, pricingBackupSchemaFromArtifact, pricingBackupSchemaFromInventory, pricingBackupSchemaVersion, type PricingBackupSchemaVersion } from "@/lib/backupPricingSchema.mjs"
 
 export type HealthStatus = "ok" | "warning" | "error"
 
@@ -125,6 +126,7 @@ const BACKUP_TABLE_SECTIONS = [
   { key: "ports", table: "ports" },
   { key: "remarks", table: "remarks" },
   { key: "priceHistory", table: "price_history" },
+  { key: "priceSetterCreationReceipts", table: "price_setter_creation_receipts" },
   { key: "whatsappConversations", table: "whatsapp_conversations" },
   { key: "whatsappMessages", table: "whatsapp_messages" },
   { key: "spcUsers", table: "spc_users" },
@@ -302,11 +304,10 @@ const BACKUP_STREAM_REQUIRED_PROPERTIES = [
   "previousUploadedFileSha256",
 ] as const
 
-function getBackupArtifactContract(migrationHead: string) {
+function getBackupArtifactContract(migrationHead: string, pricingSchemaVersion: PricingBackupSchemaVersion = "none") {
   const tableSections = BACKUP_TABLE_SECTIONS.filter(
     (section) =>
-      !("introducedAt" in section) ||
-      migrationHead >= section.introducedAt
+      section.table === "price_setter_creation_receipts" ? pricingSchemaVersion !== "none" : !("introducedAt" in section) || migrationHead >= section.introducedAt
   )
   const ephemeralTables = [
     ...BACKUP_BASE_EPHEMERAL_TABLES,
@@ -1197,7 +1198,8 @@ async function getCurrentBackupInventory() {
   if (!/^\d{14}$/.test(migrationHead)) {
     throw new Error("Live backup database inventory has no migration head.")
   }
-  const backupContract = getBackupArtifactContract(migrationHead)
+  const pricingSchema = pricingBackupSchemaFromInventory(inventory)
+  const backupContract = getBackupArtifactContract(migrationHead, pricingBackupSchemaVersion(pricingSchema))
   const liveTables = requireSortedUniqueStrings(
     inventory.tables,
     "Live backup database tables"
@@ -1228,7 +1230,7 @@ async function getCurrentBackupInventory() {
       `Live database is outside the backup table contract: missing=${missingRequired.join(",") || "none"}; unregistered=${unregistered.join(",") || "none"}; unfenced=${unfencedTables.join(",") || "none"}.`
     )
   }
-  return { migrationHead, liveTables, catalogSha256 }
+  return { migrationHead, liveTables, catalogSha256, pricingSchema }
 }
 
 async function listActiveDriveBackupFiles(
@@ -1685,7 +1687,7 @@ async function verifyStreamedBackupFile(
     `${label} latest Exchange projection snapshot SHA-256`
   )
 
-  const backupContract = getBackupArtifactContract(migrationHead)
+  const backupContract = getBackupArtifactContract(migrationHead, parsePricingBackupSchemaVersion(properties.pricingSchemaVersion))
   if (
     sectionCount !== backupContract.requiredDataKeys.length ||
     liveTableCount < backupContract.requiredLiveTables.length ||
@@ -1818,7 +1820,8 @@ function verifyBackupArtifact(
   ) {
     throw new Error("Latest backup predates the required v2 migration contract.")
   }
-  const backupContract = getBackupArtifactContract(migrationHead)
+  const pricingSchema = pricingBackupSchemaFromArtifact(backup.databaseInventory)
+  const backupContract = getBackupArtifactContract(migrationHead, pricingBackupSchemaVersion(pricingSchema))
   if (
     backup.deploymentCommit !== null &&
     !/^[0-9a-f]{7,64}$/i.test(String(backup.deploymentCommit || ""))
@@ -1845,6 +1848,7 @@ function verifyBackupArtifact(
       "registeredTables",
       "explicitlyEphemeralTables",
       "excludedCredentialFields",
+      ...(Object.hasOwn(inventory, "pricingSchema") ? ["pricingSchema"] : []),
     ],
     "Backup database inventory"
   )
@@ -2386,6 +2390,8 @@ function verifyBackupArtifact(
 
   const uploadedFileSha256 = sha256(bytes)
   if (
+    (Object.hasOwn(inventory, "pricingSchema") && appProperties?.pricingSchemaVersion !== pricingBackupSchemaVersion(pricingSchema)) ||
+    parsePricingBackupSchemaVersion(appProperties?.pricingSchemaVersion) !== pricingBackupSchemaVersion(pricingSchema) ||
     appProperties?.backupSchema !== BACKUP_FILE_SCHEMA ||
     appProperties?.verificationStatus !== "complete" ||
     appProperties?.artifactSha256 !== artifactSha256 ||

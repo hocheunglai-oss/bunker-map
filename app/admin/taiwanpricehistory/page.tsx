@@ -1,71 +1,21 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { supabase } from "@/lib/supabase"
+import { useMemo, useRef, useState } from "react"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
-import { buildTaiwanReportRows, formatReportDate, type TaiwanReportRow } from "@/lib/taiwanReport"
-import { saveReportSnapshot } from "@/lib/reportSnapshots"
-import { syncPortFromLatestHistory } from "@/lib/priceHistorySync"
+import { useReportPublication } from "@/lib/useReportPublication"
+import { ReportPublicationStatus } from "@/components/ReportPublicationStatus"
+import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
+import { historyPrice, marketPortHasName } from "@/lib/marketPriceHistory"
+import { useMarketPriceHistory } from "@/lib/useMarketPriceHistory"
+import { combineTaiwanPriceHistory, formatPriceHistoryDate, getPriceHistoryDateParts as getTaiwanDateParts, type CombinedTaiwanHistoryRow as CombinedHistoryRow } from "@/lib/adminPriceHistory"
 import {
-  getMarketDateKey,
-  getNextMarketDateKey,
-  savePriceHistoryForMarketDate,
-  type PriceHistoryPortId,
   type PriceHistoryRecordId,
 } from "@/lib/priceHistoryRecords"
-
-type HistoryRow = {
-  id: PriceHistoryRecordId
-  port_id: PriceHistoryPortId
-  hsfo: number | null
-  vlsfo: number | null
-  mgo: number | null
-  recorded_at: string
-}
-
-type CombinedHistoryRow = {
-  dateKey: string
-  recorded_at: string
-  kaohsiungRow: HistoryRow | null
-  taichungRow: HistoryRow | null
-  hsfo: number | null
-  vlsfoKaohsiung: number | null
-  vlsfoTaichung: number | null
-  mgoKaohsiung: number | null
-  mgoTaichung: number | null
-}
-
-const TAIWAN_SPLIT_EFFECTIVE_FROM = "2026-04-21"
 
 const monthFormatter = new Intl.DateTimeFormat("en-GB", {
   month: "long",
   timeZone: "Asia/Taipei",
 })
-
-const dateFormatter = new Intl.DateTimeFormat("en-GB", {
-  year: "numeric",
-  month: "short",
-  day: "2-digit",
-  timeZone: "Asia/Taipei",
-})
-
-function getTaiwanDateParts(value: string) {
-  const date = new Date(value)
-  const year = new Intl.DateTimeFormat("en-CA", {
-    year: "numeric",
-    timeZone: "Asia/Taipei",
-  }).format(date)
-  const month = new Intl.DateTimeFormat("en-CA", {
-    month: "2-digit",
-    timeZone: "Asia/Taipei",
-  }).format(date)
-  const day = new Intl.DateTimeFormat("en-CA", {
-    day: "2-digit",
-    timeZone: "Asia/Taipei",
-  }).format(date)
-
-  return { year, month, day, dateKey: `${year}-${month}-${day}` }
-}
 
 function average(values: Array<number | null>) {
   const numbers = values.filter((value): value is number => value != null)
@@ -128,11 +78,14 @@ const secondaryButtonStyle: React.CSSProperties = {
 const taiwanEntryGridColumns = "220px 120px repeat(4, 128px) minmax(196px, 1fr)"
 
 export default function TaiwanPriceHistoryPage() {
-  const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
-  const [rows, setRows] = useState<HistoryRow[]>([])
-  const [kaohsiungPortId, setKaohsiungPortId] = useState<PriceHistoryPortId | null>(null)
-  const [taichungPortId, setTaichungPortId] = useState<PriceHistoryPortId | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { loading: adminLoading, authenticated, role, permissions } = useSimpleAdminAuth()
+  const canEdit = isAdminRole(role) || canAccessAdminPage(permissions, "taiwan-price-history", "edit")
+  const history = useMarketPriceHistory("taiwan", !adminLoading && authenticated, canEdit)
+  const publication = useReportPublication("taiwan", "taiwan-price-history", !adminLoading && authenticated, canEdit)
+  const rows = history.snapshot?.rows
+  const kaohsiungPortId = history.snapshot?.ports.find(port => marketPortHasName(port, "Kaohsiung"))?.id ?? null
+  const taichungPortId = history.snapshot?.ports.find(port => marketPortHasName(port, "Taichung"))?.id ?? null
+  const loading = history.loading
   const [deletingId, setDeletingId] = useState<PriceHistoryRecordId | null>(null)
   const [saving, setSaving] = useState(false)
   const [selectedYear, setSelectedYear] = useState("all")
@@ -143,126 +96,13 @@ export default function TaiwanPriceHistoryPage() {
   const [formVlsfoTaichung, setFormVlsfoTaichung] = useState("")
   const [formMgoKaohsiung, setFormMgoKaohsiung] = useState("")
   const [formMgoTaichung, setFormMgoTaichung] = useState("")
-  const [publishing, setPublishing] = useState(false)
-  const [published, setPublished] = useState(false)
+  const { publishing, published } = publication
+  const [publishMessage, setPublishMessage] = useState("")
   const [showDeleteButtons, setShowDeleteButtons] = useState(false)
+  const actionLock = useRef(false)
+  const busy = saving || deletingId !== null || publishing || history.changing || loading
 
-  async function buildTaiwanSnapshot(): Promise<{
-    reportDate: string
-    rows: TaiwanReportRow[]
-    remark: string
-    specialNotice: string
-  } | null> {
-    const portsWanted = ["Kaohsiung", "Keelung", "Taichung", "Suao", "Hualien"]
-    const { data: portsData } = await supabase
-      .from("ports")
-      .select("*")
-      .in("name", portsWanted)
-
-    if (!portsData) return null
-
-    const portIds = portsData.map((port) => port.id)
-    const { data: historyData } = await supabase
-      .from("price_history")
-      .select("*")
-      .in("port_id", portIds)
-      .order("recorded_at", { ascending: false })
-
-    if (!historyData || historyData.length === 0) return null
-
-    const { data: remarksData } = await supabase
-      .from("remarks")
-      .select("*")
-      .in("id", [1, 2])
-
-    const remarkData = remarksData?.find((item) => item.id === 1)
-    const noticeData = remarksData?.find((item) => item.id === 2)
-
-    return {
-      reportDate: formatReportDate(historyData[0].recorded_at),
-      rows: buildTaiwanReportRows(portsData, historyData, portsWanted),
-      remark: remarkData?.content || "",
-      specialNotice: noticeData?.content || "",
-    }
-  }
-
-  useEffect(() => {
-    async function load() {
-      setLoading(true)
-
-      const { data: portData } = await supabase
-        .from("ports")
-        .select("id,name")
-        .in("name", ["Kaohsiung", "Taichung"])
-
-      const kaohsiung = portData?.find((port) => port.name === "Kaohsiung") ?? null
-      const taichung = portData?.find((port) => port.name === "Taichung") ?? null
-
-      if (!kaohsiung || !taichung) {
-        setRows([])
-        setLoading(false)
-        return
-      }
-
-      setKaohsiungPortId(kaohsiung.id)
-      setTaichungPortId(taichung.id)
-
-      const { data: historyData } = await supabase
-        .from("price_history")
-        .select("id,port_id,hsfo,vlsfo,mgo,recorded_at")
-        .in("port_id", [kaohsiung.id, taichung.id])
-        .order("recorded_at", { ascending: false })
-
-      setRows(historyData ?? [])
-      setLoading(false)
-    }
-
-    load()
-  }, [])
-
-  const combinedRows = useMemo<CombinedHistoryRow[]>(() => {
-    const grouped = new Map<
-      string,
-      { recorded_at: string; kaohsiungRow: HistoryRow | null; taichungRow: HistoryRow | null }
-    >()
-
-    for (const row of rows) {
-      const { dateKey } = getTaiwanDateParts(row.recorded_at)
-      const current = grouped.get(dateKey) ?? {
-        recorded_at: row.recorded_at,
-        kaohsiungRow: null,
-        taichungRow: null,
-      }
-
-      if (new Date(row.recorded_at) > new Date(current.recorded_at)) {
-        current.recorded_at = row.recorded_at
-      }
-
-      if (row.port_id === kaohsiungPortId) current.kaohsiungRow = row
-      if (row.port_id === taichungPortId) current.taichungRow = row
-      grouped.set(dateKey, current)
-    }
-
-    return Array.from(grouped.entries())
-      .map(([dateKey, value]) => {
-        const isBeforeSplit = dateKey < TAIWAN_SPLIT_EFFECTIVE_FROM
-        const khh = value.kaohsiungRow
-        const txg = value.taichungRow
-
-        return {
-          dateKey,
-          recorded_at: value.recorded_at,
-          kaohsiungRow: khh,
-          taichungRow: txg,
-          hsfo: khh?.hsfo ?? null,
-          vlsfoKaohsiung: khh?.vlsfo ?? null,
-          vlsfoTaichung: txg?.vlsfo ?? (isBeforeSplit ? khh?.vlsfo ?? null : null),
-          mgoKaohsiung: khh?.mgo ?? null,
-          mgoTaichung: txg?.mgo ?? (isBeforeSplit ? khh?.mgo ?? null : null),
-        }
-      })
-      .sort((a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime())
-  }, [kaohsiungPortId, rows, taichungPortId])
+  const combinedRows = useMemo(() => combineTaiwanPriceHistory(rows ?? [], kaohsiungPortId, taichungPortId), [kaohsiungPortId, rows, taichungPortId])
 
   const years = useMemo(() => {
     return [...new Set(combinedRows.map((row) => getTaiwanDateParts(row.recorded_at).year))]
@@ -294,61 +134,23 @@ export default function TaiwanPriceHistoryPage() {
   }, [filteredRows, showMonthlyAverage])
 
   async function deleteHistoryRow(row: CombinedHistoryRow) {
+    if (!canEdit || !history.ready || actionLock.current) return
     const firstConfirm = window.confirm(
-      `Delete the history record on ${dateFormatter.format(new Date(row.recorded_at))}?`
+      `Delete the history record on ${formatPriceHistoryDate(row.recorded_at)}?`
     )
     if (!firstConfirm) return
 
     const secondConfirm = window.confirm(
-      "Please confirm again. This history record will be permanently deleted."
+      "Please confirm again. All records for both Taiwan ports on this day will be permanently deleted. Current prices will follow the remaining latest day, or become empty if none remains."
     )
     if (!secondConfirm) return
 
-    const portIds = [kaohsiungPortId, taichungPortId].filter(
-      (value): value is PriceHistoryPortId => value != null
-    )
-    if (portIds.length === 0) return
-
+    actionLock.current = true
     setDeletingId(row.kaohsiungRow?.id ?? row.taichungRow?.id ?? null)
-    await supabase
-      .from("price_history")
-      .delete()
-      .in("port_id", portIds)
-      .gte("recorded_at", `${row.dateKey}T00:00:00`)
-      .lt("recorded_at", `${getNextMarketDateKey(row.dateKey)}T00:00:00`)
-    setRows((prev) =>
-      prev.filter((item) => getMarketDateKey(item.recorded_at) !== row.dateKey)
-    )
-    if (kaohsiungPortId) await syncPortFromLatestHistory(supabase, kaohsiungPortId)
-    if (taichungPortId) await syncPortFromLatestHistory(supabase, taichungPortId)
-    setDeletingId(null)
-  }
-
-  async function insertTaiwanHistory(recordedAt: string) {
-    if (!kaohsiungPortId || !taichungPortId) return []
-
-    const [kaohsiungRow, taichungRow] = await Promise.all([
-      savePriceHistoryForMarketDate(supabase, {
-        portId: kaohsiungPortId,
-        recordedAt,
-        values: {
-          hsfo: formHsfo ? Number(formHsfo) : null,
-          vlsfo: formVlsfoKaohsiung ? Number(formVlsfoKaohsiung) : null,
-          mgo: formMgoKaohsiung ? Number(formMgoKaohsiung) : null,
-        },
-      }),
-      savePriceHistoryForMarketDate(supabase, {
-        portId: taichungPortId,
-        recordedAt,
-        values: {
-          hsfo: null,
-          vlsfo: formVlsfoTaichung ? Number(formVlsfoTaichung) : null,
-          mgo: formMgoTaichung ? Number(formMgoTaichung) : null,
-        },
-      }),
-    ])
-
-    return [kaohsiungRow, taichungRow]
+    publication.invalidate()
+    try {
+      if (await history.change(row.dateKey, "delete", [])) await publication.reload(true)
+    } finally { setDeletingId(null); actionLock.current = false }
   }
 
   function resetForm() {
@@ -361,31 +163,7 @@ export default function TaiwanPriceHistoryPage() {
   }
 
   async function addMissingRecord() {
-    if (!formDate) return
-    const firstConfirm = window.confirm(`Add a missing history record for ${formDate}?`)
-    if (!firstConfirm) return
-
-    setSaving(true)
-    const inserted = await insertTaiwanHistory(`${formDate}T12:00:00+08:00`)
-
-    if (inserted.length > 0) {
-      setRows((prev) =>
-        [
-          ...prev.filter(
-            (row) => getMarketDateKey(row.recorded_at) !== getMarketDateKey(`${formDate}T12:00:00+08:00`)
-          ),
-          ...inserted,
-        ].sort(
-          (a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime()
-        )
-      )
-      resetForm()
-      if (kaohsiungPortId) await syncPortFromLatestHistory(supabase, kaohsiungPortId)
-      if (taichungPortId) await syncPortFromLatestHistory(supabase, taichungPortId)
-      setPublished(false)
-    }
-
-    setSaving(false)
+    await saveDay(formDate, true)
   }
 
   async function addAsLatestRecord() {
@@ -396,44 +174,40 @@ export default function TaiwanPriceHistoryPage() {
       day: "2-digit",
     }).format(new Date())
 
-    const firstConfirm = window.confirm(`Add today's price as the latest record for ${today}?`)
-    if (!firstConfirm) return
+    await saveDay(today, false)
+  }
 
+  async function saveDay(day: string, resetDate: boolean) {
+    if (!canEdit || !day || !kaohsiungPortId || !taichungPortId || !history.ready || actionLock.current) return
+    if (!window.confirm(`Save history prices for ${day}? Any existing prices for both Taiwan ports on this day will be replaced.`)) return
+    actionLock.current = true
     setSaving(true)
-    const inserted = await insertTaiwanHistory(`${today}T12:00:00+08:00`)
-
-    if (inserted.length > 0) {
-      setRows((prev) =>
-        [
-          ...prev.filter(
-            (row) => getMarketDateKey(row.recorded_at) !== getMarketDateKey(`${today}T12:00:00+08:00`)
-          ),
-          ...inserted,
-        ].sort(
-          (a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime()
-        )
-      )
-      setFormHsfo("")
-      setFormVlsfoKaohsiung("")
-      setFormVlsfoTaichung("")
-      setFormMgoKaohsiung("")
-      setFormMgoTaichung("")
-      if (kaohsiungPortId) await syncPortFromLatestHistory(supabase, kaohsiungPortId)
-      if (taichungPortId) await syncPortFromLatestHistory(supabase, taichungPortId)
-      setPublished(false)
-    }
-
-    setSaving(false)
+    setPublishMessage("")
+    try {
+      const values = [
+        { port_id: kaohsiungPortId, hsfo: historyPrice(formHsfo), vlsfo: historyPrice(formVlsfoKaohsiung), mgo: historyPrice(formMgoKaohsiung) },
+        { port_id: taichungPortId, hsfo: null, vlsfo: historyPrice(formVlsfoTaichung), mgo: historyPrice(formMgoTaichung) },
+      ]
+      publication.invalidate()
+      if (await history.change(day, "save", values)) {
+        const previousDate = formDate
+        resetForm()
+        if (!resetDate) setFormDate(previousDate)
+        await publication.reload(true)
+      }
+    } catch { setPublishMessage("Check the prices. Use positive numbers, zero or empty fields.") }
+    finally { setSaving(false); actionLock.current = false }
   }
 
   async function handlePublish() {
-    setPublishing(true)
-    const snapshot = await buildTaiwanSnapshot()
-    if (snapshot) {
-      await saveReportSnapshot("taiwan", snapshot)
-      setPublished(true)
-    }
-    setPublishing(false)
+    if (!canEdit || !history.ready || !publication.ready || actionLock.current) return
+    if ((formDate || formHsfo || formVlsfoKaohsiung || formVlsfoTaichung || formMgoKaohsiung || formMgoTaichung)
+      && !window.confirm("Publish saved history only? Your unsaved inputs will not be included.")) return
+    actionLock.current = true
+    setPublishMessage("")
+    try {
+      await publication.publish()
+    } finally { actionLock.current = false }
   }
 
   if (!adminLoading && !authenticated) return <p style={{ padding: "40px" }}>Access Denied</p>
@@ -477,7 +251,7 @@ export default function TaiwanPriceHistoryPage() {
 
             <button
               onClick={handlePublish}
-              disabled={publishing}
+              disabled={!canEdit || busy || !history.ready || !publication.ready}
               style={{
                 ...secondaryButtonStyle,
                 border: published ? "1px solid var(--fc-admin-border)" : "1px solid var(--fc-admin-selected-border)",
@@ -495,6 +269,7 @@ export default function TaiwanPriceHistoryPage() {
             <button
               type="button"
               onClick={() => setShowDeleteButtons((prev) => !prev)}
+              disabled={!canEdit || busy || !history.ready}
               style={{
                 ...secondaryButtonStyle,
                 cursor: "pointer",
@@ -507,6 +282,14 @@ export default function TaiwanPriceHistoryPage() {
             </button>
           </div>
         </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "14px" }}>
+          <button onClick={() => { if (!actionLock.current) void history.reload() }} disabled={busy} style={secondaryButtonStyle}>Reload saved history</button>
+          {!canEdit && <span>View only</span>}
+          {history.message && <p role={history.needsReload ? "alert" : "status"}>{history.message}</p>}
+        </div>
+        <ReportPublicationStatus title="Taiwan" publication={publication} busy={busy} />
+        {publishMessage && <p role="status">{publishMessage}</p>}
 
         <div style={{ ...sectionCardStyle, padding: "16px", marginBottom: "14px" }}>
           <div
@@ -585,7 +368,7 @@ export default function TaiwanPriceHistoryPage() {
           </div>
         </div>
 
-        <div style={{ ...sectionCardStyle, padding: "10px 16px 12px", marginBottom: "14px", overflowX: "auto" }}>
+        <fieldset disabled={!canEdit || busy || !history.ready} style={{ ...sectionCardStyle, margin: "0 0 14px", minWidth: 0, padding: "10px 16px 12px", overflowX: "auto" }}>
           <div style={{ display: "grid", gap: "2px" }}>
             <div
               style={{
@@ -653,6 +436,7 @@ export default function TaiwanPriceHistoryPage() {
               <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--fc-admin-panel-text)", textAlign: "center", letterSpacing: "0.02em", lineHeight: 1.1 }}>Kaohsiung</span>
               <input
                 value={formVlsfoKaohsiung}
+                aria-label="VLSFO Kaohsiung"
                 onChange={(event) => setFormVlsfoKaohsiung(event.target.value)}
                 style={{ ...controlStyle, width: "100%", height: "38px", textAlign: "center" }}
               />
@@ -662,6 +446,7 @@ export default function TaiwanPriceHistoryPage() {
               <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--fc-admin-panel-text)", textAlign: "center", letterSpacing: "0.02em", lineHeight: 1.1 }}>Taichung</span>
               <input
                 value={formVlsfoTaichung}
+                aria-label="VLSFO Taichung"
                 onChange={(event) => setFormVlsfoTaichung(event.target.value)}
                 style={{ ...controlStyle, width: "100%", height: "38px", textAlign: "center" }}
               />
@@ -671,6 +456,7 @@ export default function TaiwanPriceHistoryPage() {
               <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--fc-admin-panel-text)", textAlign: "center", letterSpacing: "0.02em", lineHeight: 1.1 }}>Kaohsiung</span>
               <input
                 value={formMgoKaohsiung}
+                aria-label="MGO Kaohsiung"
                 onChange={(event) => setFormMgoKaohsiung(event.target.value)}
                 style={{ ...controlStyle, width: "100%", height: "38px", textAlign: "center" }}
               />
@@ -680,6 +466,7 @@ export default function TaiwanPriceHistoryPage() {
               <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--fc-admin-panel-text)", textAlign: "center", letterSpacing: "0.02em", lineHeight: 1.1 }}>Taichung</span>
               <input
                 value={formMgoTaichung}
+                aria-label="MGO Taichung"
                 onChange={(event) => setFormMgoTaichung(event.target.value)}
                 style={{ ...controlStyle, width: "100%", height: "38px", textAlign: "center" }}
               />
@@ -688,7 +475,7 @@ export default function TaiwanPriceHistoryPage() {
             <div style={{ display: "grid", gap: "6px", alignSelf: "end" }}>
               <button
                 onClick={addMissingRecord}
-                disabled={saving || !formDate}
+                disabled={!canEdit || busy || !history.ready || !formDate}
                 style={{
                   ...secondaryButtonStyle,
                   width: "100%",
@@ -708,7 +495,7 @@ export default function TaiwanPriceHistoryPage() {
 
               <button
                 onClick={addAsLatestRecord}
-                disabled={saving}
+                disabled={!canEdit || busy || !history.ready}
                 style={{
                   ...secondaryButtonStyle,
                   width: "100%",
@@ -725,10 +512,10 @@ export default function TaiwanPriceHistoryPage() {
             </div>
           </div>
           </div>
-        </div>
+        </fieldset>
 
         <div style={{ ...sectionCardStyle, overflow: "hidden" }}>
-          {loading ? (
+          {history.needsReload ? <p role="status" style={{ padding: "14px" }}>History is not verified. Reload saved history before making changes.</p> : loading ? (
             <p style={{ margin: 0, padding: "14px", color: "var(--fc-admin-panel-text)" }}>Loading history...</p>
           ) : (
             <div style={{ overflowX: "auto" }}>
@@ -827,7 +614,7 @@ export default function TaiwanPriceHistoryPage() {
                       }}
                     >
                       <td style={{ padding: "8px 12px", fontSize: "13px", whiteSpace: "nowrap", color: "var(--fc-admin-panel-text)" }}>
-                        {dateFormatter.format(new Date(row.recorded_at))}
+                        {formatPriceHistoryDate(row.recorded_at)}
                       </td>
                       <td style={{ padding: "8px 12px", fontSize: "13px", color: "var(--fc-admin-panel-text)", textAlign: "center" }}>{row.hsfo ?? "-"}</td>
                       <td style={{ padding: "8px 12px", fontSize: "13px", color: "var(--fc-admin-panel-text)", textAlign: "center" }}>{row.vlsfoKaohsiung ?? "-"}</td>
@@ -838,7 +625,7 @@ export default function TaiwanPriceHistoryPage() {
                         <td style={{ padding: "8px 12px" }}>
                           <button
                             onClick={() => deleteHistoryRow(row)}
-                            disabled={deletingId === row.kaohsiungRow?.id || deletingId === row.taichungRow?.id}
+                            disabled={!canEdit || busy || !history.ready}
                             style={{
                               background: "var(--fc-admin-danger-bg)",
                               color: "var(--fc-admin-danger-text)",

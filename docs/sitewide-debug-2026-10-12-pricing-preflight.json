@@ -1,0 +1,1684 @@
+{
+  "formatVersion": 1,
+  "scope": "Historical read-only hosted pricing preflight and isolated candidate regression proof before hosted migration-version alignment; old version/path/hash facts are retained, not current migration references or a release certification. Current paths are in the final manifest and metadata-alignment proof.",
+  "hostedWrites": 0,
+  "businessDataWrites": 0,
+  "browserIsolation": "Dedicated headless isolated contexts only; external requests blocked; no personal Chrome control",
+  "checkedAt": "2026-10-12T11:12:03Z through 11:33Z",
+  "metadata": {
+    "tables": [
+      {
+        "rls": true,
+        "name": "ports",
+        "grants": {
+          "anon": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          },
+          "service_role": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          },
+          "authenticated": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "columns": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "default": "gen_random_uuid()",
+            "notNull": true
+          },
+          {
+            "name": "name",
+            "type": "text",
+            "default": null,
+            "notNull": true
+          },
+          {
+            "name": "region",
+            "type": "text",
+            "default": null,
+            "notNull": false
+          },
+          {
+            "name": "lat",
+            "type": "numeric",
+            "default": null,
+            "notNull": false
+          },
+          {
+            "name": "lng",
+            "type": "numeric",
+            "default": null,
+            "notNull": false
+          },
+          {
+            "name": "hsfo",
+            "type": "numeric",
+            "default": null,
+            "notNull": false
+          },
+          {
+            "name": "vlsfo",
+            "type": "numeric",
+            "default": null,
+            "notNull": false
+          },
+          {
+            "name": "mgo",
+            "type": "numeric",
+            "default": null,
+            "notNull": false
+          },
+          {
+            "name": "updated_at",
+            "type": "date",
+            "default": null,
+            "notNull": false
+          },
+          {
+            "name": "hsfo_formula",
+            "type": "text",
+            "default": null,
+            "notNull": false
+          },
+          {
+            "name": "vlsfo_formula",
+            "type": "text",
+            "default": null,
+            "notNull": false
+          },
+          {
+            "name": "mgo_formula",
+            "type": "text",
+            "default": null,
+            "notNull": false
+          },
+          {
+            "name": "display_order",
+            "type": "integer",
+            "default": null,
+            "notNull": false
+          },
+          {
+            "name": "type",
+            "type": "text",
+            "default": "'port'::text",
+            "notNull": false
+          }
+        ],
+        "forceRls": false
+      },
+      {
+        "rls": true,
+        "name": "price_history",
+        "grants": {
+          "anon": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          },
+          "service_role": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          },
+          "authenticated": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "columns": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "default": "gen_random_uuid()",
+            "notNull": true
+          },
+          {
+            "name": "port_id",
+            "type": "uuid",
+            "default": null,
+            "notNull": false
+          },
+          {
+            "name": "hsfo",
+            "type": "numeric",
+            "default": null,
+            "notNull": false
+          },
+          {
+            "name": "vlsfo",
+            "type": "numeric",
+            "default": null,
+            "notNull": false
+          },
+          {
+            "name": "mgo",
+            "type": "numeric",
+            "default": null,
+            "notNull": false
+          },
+          {
+            "name": "recorded_at",
+            "type": "timestamp without time zone",
+            "default": "now()",
+            "notNull": false
+          }
+        ],
+        "forceRls": false
+      },
+      {
+        "rls": true,
+        "name": "remarks",
+        "grants": {
+          "anon": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          },
+          "service_role": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          },
+          "authenticated": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "columns": [
+          {
+            "name": "id",
+            "type": "integer",
+            "default": null,
+            "notNull": true
+          },
+          {
+            "name": "content",
+            "type": "text",
+            "default": null,
+            "notNull": false
+          }
+        ],
+        "forceRls": false
+      }
+    ],
+    "indexes": [
+      {
+        "name": "ports_pkey",
+        "table": "ports",
+        "definition": "CREATE UNIQUE INDEX ports_pkey ON public.ports USING btree (id)"
+      },
+      {
+        "name": "price_history_pkey",
+        "table": "price_history",
+        "definition": "CREATE UNIQUE INDEX price_history_pkey ON public.price_history USING btree (id)"
+      },
+      {
+        "name": "price_history_port_id_idx",
+        "table": "price_history",
+        "definition": "CREATE INDEX price_history_port_id_idx ON public.price_history USING btree (port_id)"
+      },
+      {
+        "name": "remarks_pkey",
+        "table": "remarks",
+        "definition": "CREATE UNIQUE INDEX remarks_pkey ON public.remarks USING btree (id)"
+      }
+    ],
+    "database": "postgres",
+    "policies": [
+      {
+        "name": "ports_public_read",
+        "check": null,
+        "roles": [
+          "anon",
+          "authenticated"
+        ],
+        "table": "ports",
+        "using": "true",
+        "command": "SELECT"
+      },
+      {
+        "name": "price_history_public_read",
+        "check": null,
+        "roles": [
+          "anon",
+          "authenticated"
+        ],
+        "table": "price_history",
+        "using": "true",
+        "command": "SELECT"
+      },
+      {
+        "name": "remarks_public_read",
+        "check": null,
+        "roles": [
+          "anon",
+          "authenticated"
+        ],
+        "table": "remarks",
+        "using": "true",
+        "command": "SELECT"
+      }
+    ],
+    "triggers": [
+      {
+        "name": "bunker_map_backup_epoch_fence",
+        "type": 60,
+        "table": "audit_logs",
+        "enabled": "O",
+        "function": "private.record_bunker_map_backup_mutation()",
+        "definition": "CREATE TRIGGER bunker_map_backup_epoch_fence AFTER INSERT OR DELETE OR UPDATE OR TRUNCATE ON public.audit_logs FOR EACH STATEMENT EXECUTE FUNCTION private.record_bunker_map_backup_mutation()"
+      },
+      {
+        "name": "capture_spc_audit_actor_user_id",
+        "type": 7,
+        "table": "audit_logs",
+        "enabled": "O",
+        "function": "private.capture_spc_audit_actor_user_id()",
+        "definition": "CREATE TRIGGER capture_spc_audit_actor_user_id BEFORE INSERT ON public.audit_logs FOR EACH ROW EXECUTE FUNCTION private.capture_spc_audit_actor_user_id()"
+      },
+      {
+        "name": "outlook_exchange_truth_audit_undo",
+        "type": 17,
+        "table": "audit_logs",
+        "enabled": "O",
+        "function": "record_outlook_exchange_audit_truth()",
+        "definition": "CREATE TRIGGER outlook_exchange_truth_audit_undo AFTER UPDATE OF undone_at, undone_by_log_id ON public.audit_logs FOR EACH ROW EXECUTE FUNCTION record_outlook_exchange_audit_truth()"
+      },
+      {
+        "name": "protect_audit_actor_user_id",
+        "type": 19,
+        "table": "audit_logs",
+        "enabled": "O",
+        "function": "private.protect_audit_actor_user_id()",
+        "definition": "CREATE TRIGGER protect_audit_actor_user_id BEFORE UPDATE OF actor_user_id ON public.audit_logs FOR EACH ROW EXECUTE FUNCTION private.protect_audit_actor_user_id()"
+      },
+      {
+        "name": "protect_outlook_exchange_audit_truncate",
+        "type": 34,
+        "table": "audit_logs",
+        "enabled": "O",
+        "function": "protect_outlook_exchange_audit_truth()",
+        "definition": "CREATE TRIGGER protect_outlook_exchange_audit_truncate BEFORE TRUNCATE ON public.audit_logs FOR EACH STATEMENT EXECUTE FUNCTION protect_outlook_exchange_audit_truth()"
+      },
+      {
+        "name": "protect_outlook_exchange_audit_update_delete",
+        "type": 27,
+        "table": "audit_logs",
+        "enabled": "O",
+        "function": "protect_outlook_exchange_audit_truth()",
+        "definition": "CREATE TRIGGER protect_outlook_exchange_audit_update_delete BEFORE DELETE OR UPDATE ON public.audit_logs FOR EACH ROW EXECUTE FUNCTION protect_outlook_exchange_audit_truth()"
+      },
+      {
+        "name": "protect_outlook_template_insertion_audit_event",
+        "type": 31,
+        "table": "audit_logs",
+        "enabled": "O",
+        "function": "private.protect_outlook_template_insertion_audit_event()",
+        "definition": "CREATE TRIGGER protect_outlook_template_insertion_audit_event BEFORE INSERT OR DELETE OR UPDATE ON public.audit_logs FOR EACH ROW EXECUTE FUNCTION private.protect_outlook_template_insertion_audit_event()"
+      },
+      {
+        "name": "protect_spc_user_management_audit_record",
+        "type": 31,
+        "table": "audit_logs",
+        "enabled": "O",
+        "function": "private.protect_spc_user_management_audit_record()",
+        "definition": "CREATE TRIGGER protect_spc_user_management_audit_record BEFORE INSERT OR DELETE OR UPDATE ON public.audit_logs FOR EACH ROW EXECUTE FUNCTION private.protect_spc_user_management_audit_record()"
+      },
+      {
+        "name": "protect_spc_user_management_audit_truncate",
+        "type": 34,
+        "table": "audit_logs",
+        "enabled": "O",
+        "function": "private.protect_spc_user_management_audit_truncate()",
+        "definition": "CREATE TRIGGER protect_spc_user_management_audit_truncate BEFORE TRUNCATE ON public.audit_logs FOR EACH STATEMENT EXECUTE FUNCTION private.protect_spc_user_management_audit_truncate()"
+      },
+      {
+        "name": "redact_admin_user_audit_snapshot",
+        "type": 23,
+        "table": "audit_logs",
+        "enabled": "O",
+        "function": "private.redact_admin_user_audit_snapshot()",
+        "definition": "CREATE TRIGGER redact_admin_user_audit_snapshot BEFORE INSERT OR UPDATE OF table_schema, table_name, changed_fields, before_row, after_row ON public.audit_logs FOR EACH ROW EXECUTE FUNCTION private.redact_admin_user_audit_snapshot()"
+      },
+      {
+        "name": "validate_spc_mfa_test_audit_record",
+        "type": 7,
+        "table": "audit_logs",
+        "enabled": "O",
+        "function": "private.validate_spc_mfa_test_audit_record()",
+        "definition": "CREATE TRIGGER validate_spc_mfa_test_audit_record BEFORE INSERT ON public.audit_logs FOR EACH ROW WHEN (((new.table_schema = 'app'::text) AND (new.table_name = 'spc_mfa_test_events'::text))) EXECUTE FUNCTION private.validate_spc_mfa_test_audit_record()"
+      },
+      {
+        "name": "bunker_audit_log",
+        "type": 29,
+        "table": "ports",
+        "enabled": "O",
+        "function": "audit_table_changes()",
+        "definition": "CREATE TRIGGER bunker_audit_log AFTER INSERT OR DELETE OR UPDATE ON public.ports FOR EACH ROW EXECUTE FUNCTION audit_table_changes()"
+      },
+      {
+        "name": "bunker_map_backup_epoch_fence",
+        "type": 60,
+        "table": "ports",
+        "enabled": "O",
+        "function": "private.record_bunker_map_backup_mutation()",
+        "definition": "CREATE TRIGGER bunker_map_backup_epoch_fence AFTER INSERT OR DELETE OR UPDATE OR TRUNCATE ON public.ports FOR EACH STATEMENT EXECUTE FUNCTION private.record_bunker_map_backup_mutation()"
+      },
+      {
+        "name": "bunker_audit_log",
+        "type": 29,
+        "table": "price_history",
+        "enabled": "O",
+        "function": "audit_table_changes()",
+        "definition": "CREATE TRIGGER bunker_audit_log AFTER INSERT OR DELETE OR UPDATE ON public.price_history FOR EACH ROW EXECUTE FUNCTION audit_table_changes()"
+      },
+      {
+        "name": "bunker_map_backup_epoch_fence",
+        "type": 60,
+        "table": "price_history",
+        "enabled": "O",
+        "function": "private.record_bunker_map_backup_mutation()",
+        "definition": "CREATE TRIGGER bunker_map_backup_epoch_fence AFTER INSERT OR DELETE OR UPDATE OR TRUNCATE ON public.price_history FOR EACH STATEMENT EXECUTE FUNCTION private.record_bunker_map_backup_mutation()"
+      },
+      {
+        "name": "bunker_audit_log",
+        "type": 29,
+        "table": "remarks",
+        "enabled": "O",
+        "function": "audit_table_changes()",
+        "definition": "CREATE TRIGGER bunker_audit_log AFTER INSERT OR DELETE OR UPDATE ON public.remarks FOR EACH ROW EXECUTE FUNCTION audit_table_changes()"
+      },
+      {
+        "name": "bunker_map_backup_epoch_fence",
+        "type": 60,
+        "table": "remarks",
+        "enabled": "O",
+        "function": "private.record_bunker_map_backup_mutation()",
+        "definition": "CREATE TRIGGER bunker_map_backup_epoch_fence AFTER INSERT OR DELETE OR UPDATE OR TRUNCATE ON public.remarks FOR EACH STATEMENT EXECUTE FUNCTION private.record_bunker_map_backup_mutation()"
+      }
+    ],
+    "checkedAt": "2026-10-12T11:12:03.491561+00:00",
+    "functions": [
+      {
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "grants": {
+          "anon": false,
+          "service_role": true,
+          "authenticated": false
+        },
+        "bodyMd5": "0385bd434dc861f1024328260eda5467",
+        "identity": "audit_enable_table(regclass)",
+        "securityDefiner": true
+      },
+      {
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "grants": {
+          "anon": true,
+          "service_role": true,
+          "authenticated": true
+        },
+        "bodyMd5": "d86aec301be28e80328a5ba9ab70d798",
+        "identity": "audit_json_setting(text)",
+        "securityDefiner": false
+      },
+      {
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "grants": {
+          "anon": true,
+          "service_role": true,
+          "authenticated": true
+        },
+        "bodyMd5": "a17a645f7ed872b763ca84dced47d3fd",
+        "identity": "audit_request_header(text)",
+        "securityDefiner": false
+      },
+      {
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "grants": {
+          "anon": false,
+          "service_role": true,
+          "authenticated": false
+        },
+        "bodyMd5": "a3838109d758bab5843b5d716c16c5e8",
+        "identity": "audit_table_changes()",
+        "securityDefiner": true
+      },
+      {
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "grants": {
+          "anon": true,
+          "service_role": true,
+          "authenticated": true
+        },
+        "bodyMd5": "5f401ab76863dd82591935d43a499bda",
+        "identity": "audit_text_setting(text)",
+        "securityDefiner": false
+      },
+      {
+        "config": [
+          "search_path=pg_catalog, pg_temp"
+        ],
+        "grants": {
+          "anon": false,
+          "service_role": true,
+          "authenticated": false
+        },
+        "bodyMd5": "e1d664b90ac1de3b97736597f5e9bdd3",
+        "identity": "get_bunker_map_backup_export_fence()",
+        "securityDefiner": true
+      },
+      {
+        "config": [
+          "search_path=pg_catalog, pg_temp"
+        ],
+        "grants": {
+          "anon": false,
+          "service_role": false,
+          "authenticated": false
+        },
+        "bodyMd5": "4abd687530756cca2b806d0bc36cd709",
+        "identity": "private.record_bunker_map_backup_mutation()",
+        "securityDefiner": true
+      }
+    ],
+    "constraints": [
+      {
+        "name": "ports_pkey",
+        "table": "ports",
+        "validated": true,
+        "definition": "PRIMARY KEY (id)"
+      },
+      {
+        "name": "price_history_pkey",
+        "table": "price_history",
+        "validated": true,
+        "definition": "PRIMARY KEY (id)"
+      },
+      {
+        "name": "price_history_port_id_fkey",
+        "table": "price_history",
+        "validated": true,
+        "definition": "FOREIGN KEY (port_id) REFERENCES ports(id) ON DELETE CASCADE"
+      },
+      {
+        "name": "remarks_pkey",
+        "table": "remarks",
+        "validated": true,
+        "definition": "PRIMARY KEY (id)"
+      }
+    ],
+    "serviceRole": {
+      "exists": true,
+      "bypassRls": true
+    },
+    "serverVersion": "17.6",
+    "serverTimezone": "UTC",
+    "receiptsTableExists": false
+  },
+  "migrations": {
+    "checkedAt": "2026-10-12T11:12:28.309531+00:00",
+    "recentApplied": [
+      {
+        "name": "atomic_ccinfo_country_rename",
+        "version": "20261012111112"
+      },
+      {
+        "name": "advance_ccinfo_record_versions",
+        "version": "20261012102317"
+      },
+      {
+        "name": "atomic_parser_report_review",
+        "version": "20261012095521"
+      },
+      {
+        "name": "block_task_calendar_snapshot_undo",
+        "version": "20261007115435"
+      },
+      {
+        "name": "outlook_exchange_alert_delivery",
+        "version": "20261007065554"
+      },
+      {
+        "name": "phonebook_carddav_authoritative_reconciliation",
+        "version": "20260930080003"
+      }
+    ],
+    "candidateMembership": [
+      {
+        "applied": false,
+        "version": "20261008112629",
+        "appliedName": null
+      },
+      {
+        "applied": false,
+        "version": "20261009025254",
+        "appliedName": null
+      },
+      {
+        "applied": false,
+        "version": "20261009032431",
+        "appliedName": null
+      },
+      {
+        "applied": false,
+        "version": "20261009043924",
+        "appliedName": null
+      },
+      {
+        "applied": false,
+        "version": "20261009044514",
+        "appliedName": null
+      },
+      {
+        "applied": false,
+        "version": "20261009045645",
+        "appliedName": null
+      },
+      {
+        "applied": false,
+        "version": "20261009050520",
+        "appliedName": null
+      },
+      {
+        "applied": false,
+        "version": "20261009051842",
+        "appliedName": null
+      },
+      {
+        "applied": false,
+        "version": "20261009054830",
+        "appliedName": null
+      },
+      {
+        "applied": false,
+        "version": "20261009070459",
+        "appliedName": null
+      },
+      {
+        "applied": false,
+        "version": "20261009110700",
+        "appliedName": null
+      }
+    ]
+  },
+  "preconditions": {
+    "ports": {
+      "real": 65,
+      "total": 76,
+      "dividers": 11,
+      "blankNames": 0,
+      "overlongNames": 0,
+      "nonfiniteDates": 0,
+      "whitespaceNames": 0,
+      "unsupportedTypes": 0,
+      "nullDisplayOrders": 0,
+      "invalidCoordinates": 0,
+      "requiredRootCounts": {
+        "suao": 1,
+        "hualien": 1,
+        "keelung": 1,
+        "taichung": 1,
+        "hong kong": 1,
+        "kaohsiung": 1
+      },
+      "invalidNumericPrices": 0,
+      "duplicateDisplayOrderGroups": 0,
+      "duplicateNormalizedNameGroups": 0
+    },
+    "history": {
+      "total": 1907,
+      "hongKongRows": 452,
+      "missingPortId": 0,
+      "orphanedPortId": 0,
+      "taiwanBasisRows": 566,
+      "missingRecordedAt": 0,
+      "nonfiniteRecordedAt": 0,
+      "invalidNumericPrices": 0,
+      "duplicatePortDayGroups": 5,
+      "duplicatePortDayExcessRows": 7,
+      "latestBasisRootCurrentMismatch": 0
+    },
+    "formulas": {
+      "total": 115,
+      "overlong": 0,
+      "invalidSyntax": 0,
+      "depthLimitReached": 0,
+      "missingReferences": 0,
+      "ambiguousReferences": 0,
+      "cyclicStartFuelPairs": 0,
+      "mixedDirectFormulaRows": 0
+    },
+    "checkedAt": "2026-10-12T11:13:36.360032+00:00",
+    "fallbacks": {
+      "rowExists": true,
+      "jsonObject": true,
+      "blankOrNull": false,
+      "invalidEntryCount": 0,
+      "entriesReferencingMissingPorts": 0
+    },
+    "publicationRows": [
+      {
+        "id": 101,
+        "present": true,
+        "byteLength": 1157,
+        "jsonObject": true
+      },
+      {
+        "id": 102,
+        "present": true,
+        "byteLength": 298,
+        "jsonObject": true
+      },
+      {
+        "id": 103,
+        "present": true,
+        "byteLength": 2620,
+        "jsonObject": true
+      },
+      {
+        "id": 104,
+        "present": true,
+        "byteLength": 4005,
+        "jsonObject": true
+      }
+    ]
+  },
+  "duplicates": {
+    "excessRows": 7,
+    "duplicateGroups": 5,
+    "currentMarketDayGroups": 0,
+    "groupsWithTimestampTies": 0,
+    "requiredReportRootGroups": 0,
+    "groupsWithDifferentSavedPrices": 1,
+    "conflictingGroup": {
+      "portName": "Tokyo",
+      "day": "2026-03-13",
+      "rowCount": 2,
+      "priceVariants": 2,
+      "uniqueLatestTimestamp": true
+    },
+    "decision": "Preserve every historical row; latest-per-day deterministic. Historical Tokyo differing-value retention merits human double-check; no cleanup needed to release this candidate."
+  },
+  "auditComparison": {
+    "liveDefinitionsExactlyVerified": [
+      {
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "bodyMd5": "0385bd434dc861f1024328260eda5467",
+        "identity": "audit_enable_table(regclass)",
+        "exactLiveDefinition": true
+      },
+      {
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "bodyMd5": "d86aec301be28e80328a5ba9ab70d798",
+        "identity": "audit_json_setting(text)",
+        "exactLiveDefinition": true
+      },
+      {
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "bodyMd5": "a17a645f7ed872b763ca84dced47d3fd",
+        "identity": "audit_request_header(text)",
+        "exactLiveDefinition": true
+      },
+      {
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "bodyMd5": "a3838109d758bab5843b5d716c16c5e8",
+        "identity": "audit_table_changes()",
+        "exactLiveDefinition": true
+      },
+      {
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "bodyMd5": "5f401ab76863dd82591935d43a499bda",
+        "identity": "audit_text_setting(text)",
+        "exactLiveDefinition": true
+      },
+      {
+        "config": [
+          "search_path=pg_catalog, pg_temp"
+        ],
+        "bodyMd5": "e1d664b90ac1de3b97736597f5e9bdd3",
+        "identity": "get_bunker_map_backup_export_fence()",
+        "exactLiveDefinition": true
+      },
+      {
+        "config": [
+          "search_path=pg_catalog, pg_temp"
+        ],
+        "bodyMd5": "4abd687530756cca2b806d0bc36cd709",
+        "identity": "private.record_bunker_map_backup_mutation()",
+        "exactLiveDefinition": true
+      }
+    ],
+    "sourceDifference": "audit_table_changes differs only in line formatting; pure helpers prosrc exact but initial fixture omitted live fixed search_path; clean native fixture now explicitly reproduces it.",
+    "limitation": "Actual hosted audit_logs ancillary full-site trigger chain was inspected read-only, not fully reproduced/executed by isolated pricing/country fixture."
+  },
+  "sourceManifest": {
+    "source": "/Users/ottolai/Documents/Codex/bunker-map",
+    "target": "/private/tmp/fcuno-public-reader-release-FYIfQC/site",
+    "targetHead": "ab9d32de82295baf69fd7336658b4c5c2a59d716",
+    "files": [
+      {
+        "path": "supabase/migrations/20261008112629_atomic_price_setter_save.sql",
+        "category": "migrations",
+        "sourceSha256": "c0e54c8737c1867ff8a15b5dbe7f0969650a75f335e617686f7cc5c243c2affc",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "supabase/migrations/20261009025254_atomic_market_history_changes.sql",
+        "category": "migrations",
+        "sourceSha256": "dbce5aa16d7895a50439f1ea4399141c3ee41a6673d2b3ed44dfe0e1132fb2c4",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "supabase/migrations/20261009032431_coherent_report_publication.sql",
+        "category": "migrations",
+        "sourceSha256": "b70643ca9576f04430f98cf25efba6bb3d6355cbb43c86245d878c68fe88770a",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "supabase/migrations/20261009043924_recover_damaged_report_publications.sql",
+        "category": "migrations",
+        "sourceSha256": "537b65222ac8de94f7417e66ba975cdc55786771419e9ffeb71adae4703233aa",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "supabase/migrations/20261009044514_protect_price_setter_port_deletion.sql",
+        "category": "migrations",
+        "sourceSha256": "d8826d010865452cfe386c4f5c944361eb13b17c91b4e723fbddb531e959e52f",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "supabase/migrations/20261009045645_protect_required_report_port_identity.sql",
+        "category": "migrations",
+        "sourceSha256": "ca51ecac77c903bd13de0c0cc797b642ee0b40cdcffb6d142b9fb71cad02edbe",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "supabase/migrations/20261009050520_idempotent_price_setter_port_creation.sql",
+        "category": "migrations",
+        "sourceSha256": "bbc46a352723693651e56a7177b787a757bbd26d81a3267e7f7d0653f610521e",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "supabase/migrations/20261009051842_complete_price_setter_inventory.sql",
+        "category": "migrations",
+        "sourceSha256": "21854ed96faee81e568a8a7358261a3624f5d431ce8d5f78fbb6572806f96a15",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "supabase/migrations/20261009054830_durable_price_setter_creation_recovery.sql",
+        "category": "migrations",
+        "sourceSha256": "ff43f9054cb0cda7f68b5b16a4dc6a9773a8b21d2500f1a8f71978482a73eca8",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "supabase/migrations/20261009070459_fence_legacy_price_setter_creation.sql",
+        "category": "migrations",
+        "sourceSha256": "2566fba0a5e2b7a22a8f9f006174662f0b4aab07e15d33472b3795a81518024f",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "supabase/migrations/20261009110700_order_divider_rename_locks.sql",
+        "category": "migrations",
+        "sourceSha256": "4ad07df03f839bea15cd5b7469ccc197e579954f70351a8ca2066bf7d7d06e05",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "app/api/admin/prices/route.ts",
+        "category": "apis",
+        "sourceSha256": "f7a4989ee20caccca0aed2e15d01b91341af1a823d196218802dc122224439a6",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "app/api/admin/prices/creation/route.ts",
+        "category": "apis",
+        "sourceSha256": "be6686f957a4d92ff7239e813e9eecaefcc9f5e3e524a93e09132a1edc96149d",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "app/api/admin/price-history/route.ts",
+        "category": "apis",
+        "sourceSha256": "e045d8b3b120403de72636cf08120b25a6d1bb118a5b82ddffec054d4b60b952",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "app/api/admin/report-publication/route.ts",
+        "category": "apis",
+        "sourceSha256": "517a8ea64adeaf32bf6452e5fd82219e2b095efc051720ea9e3e8753bb1e6eea",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "app/admin/pricesetter/page.tsx",
+        "category": "pages",
+        "sourceSha256": "2c4754d06e36177534f70a8cf41e637a69456d07c6287f8eeea73c4a258c3188",
+        "baselineSha256": "c8409e866d0c36d5f25feeb8f6c04b99f03db04e4a2cc9b24c885d786a2c009b",
+        "baselineEqual": false,
+        "disposition": "review-overlay"
+      },
+      {
+        "path": "app/admin/hongkongpricehistory/page.tsx",
+        "category": "pages",
+        "sourceSha256": "cf04a7b1caebefa23f23253561a13e2eae8beafe96371b60f7344472d305452b",
+        "baselineSha256": "f4ea44546256a1e21b097ee6a0d77519bec7f64c3d52f3af909f302aceb39c32",
+        "baselineEqual": false,
+        "disposition": "review-overlay"
+      },
+      {
+        "path": "app/admin/taiwanpricehistory/page.tsx",
+        "category": "pages",
+        "sourceSha256": "d387ab62c5da799cc2cdf47500697fdbe45a591d5aba6940f0d96b6915399c40",
+        "baselineSha256": "c4b5aa473f39c05af11d3bc563c79103af001181d24b0e8229614220a25a20ec",
+        "baselineEqual": false,
+        "disposition": "review-overlay"
+      },
+      {
+        "path": "lib/priceSetterMutation.ts",
+        "category": "helpers",
+        "sourceSha256": "780922a7aae16fd5f30d179cc6260eb14bbcb59e5dcb9b1c672f8efc8f8a15d2",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "lib/priceSetterSettings.ts",
+        "category": "helpers",
+        "sourceSha256": "fab6219bab7407fa314d0273be95795e34018a66a29d5642d73495b3c7f7d6fd",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "lib/priceSetterOrder.ts",
+        "category": "helpers",
+        "sourceSha256": "52548b2877e7af42c025562611cd40f38c383e29249a5157654ffc91b63f1c9c",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "lib/priceSetterInventory.ts",
+        "category": "helpers",
+        "sourceSha256": "ec058f81c0da6b6ab0818979630fdea9c1d0a96c2b566d391b4961ad052c90de",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "lib/priceSetterCreationRecovery.ts",
+        "category": "helpers",
+        "sourceSha256": "d58cd0947fb9c682d1d671d2eac10b4b8edb40bc876328850c72d8451f733541",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "lib/priceSetterFuelInputs.ts",
+        "category": "helpers",
+        "sourceSha256": "fc386e6bed439870c7ea0361b8d0ad5a1b4cab35fc0910145579866944bcae40",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "lib/priceSetterRequest.ts",
+        "category": "helpers",
+        "sourceSha256": "347fdbd879957f484edf89799d96ea6ea0797d53f02ad12fe12494b4e2093392",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "lib/priceSetterLegacyWrites.ts",
+        "category": "helpers",
+        "sourceSha256": "0921d1125b1ef769ce18ac24ac1bb75d17669dbf5c133a367f1bcfc30737ca14",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "lib/adminPriceHistory.ts",
+        "category": "helpers",
+        "sourceSha256": "ae54da5a4d8f53234dc33d8d6b2bedd0891b7c05db3199af2dbe8e09945d6a29",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "lib/marketPriceHistory.ts",
+        "category": "helpers",
+        "sourceSha256": "353cd8fa67389aadb110a9ffadf557ee18439a03b8608882895e044a45bc1e72",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "lib/useMarketPriceHistory.ts",
+        "category": "helpers",
+        "sourceSha256": "d63f2f054257be7312657df79bc0765b661bb107eca25da1604f3a3fef1bce39",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "lib/reportPublication.ts",
+        "category": "helpers",
+        "sourceSha256": "6640d1c5dd01ec567e62bd063e8d2b2b529f02bf2bcde74db9b986afddcdc9fd",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "lib/reportPublicationClient.ts",
+        "category": "helpers",
+        "sourceSha256": "f1c6223ae497036d7110a400e701fd0f8d59c15392ba6ca87601841d31e6c4b4",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "lib/useReportPublication.ts",
+        "category": "helpers",
+        "sourceSha256": "218cf3066fb8d8706929899bb63e60d46e3a56d83f66ffd6f48cd20ce67fb78a",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "lib/priceHistoryRecords.ts",
+        "category": "helpers",
+        "sourceSha256": "7d496f469a79a5456fe048e50985a8d89a6f62bb95c13ab423b65dd5735a443c",
+        "baselineSha256": "2e6fe56dd318349b3fca3945322fc9e5929e84435181be321f31b5c8589453f3",
+        "baselineEqual": false,
+        "disposition": "review-overlay"
+      },
+      {
+        "path": "lib/taiwanReport.ts",
+        "category": "helpers",
+        "sourceSha256": "f1acfe4dc3fa5bf51ba2cd9bb35358116db3542086d9a3eed355d85e5e88463b",
+        "baselineSha256": "84770511018c73c6e6f1dc8fb88541eb0ff2630c30df218cbed69c933458cbc0",
+        "baselineEqual": false,
+        "disposition": "review-overlay"
+      },
+      {
+        "path": "lib/chinaReport.ts",
+        "category": "helpers",
+        "sourceSha256": "c65e87a2785c365c77733a4d5508308c145a6f4fef58474f272a89f16769640f",
+        "baselineSha256": "1560ac1082b8c83401ea19f83f129e66a9323b88ca7420951b6f3f3f7ba61242",
+        "baselineEqual": false,
+        "disposition": "review-overlay"
+      },
+      {
+        "path": "lib/reportFallbacks.ts",
+        "category": "helpers",
+        "sourceSha256": "fe079324228f14c93b2c085768027c9a405c026af7193c1343e2e2b448ea2c90",
+        "baselineSha256": "ed8ac45b34ef7c32d5078880e30f2260b724a341b5160e6af5d55b3f2a351d7b",
+        "baselineEqual": false,
+        "disposition": "review-overlay"
+      },
+      {
+        "path": "lib/reportSnapshots.ts",
+        "category": "helpers",
+        "sourceSha256": "89298e90bbd9eb1bd91fe45e3dea91cf91c5030b89e5b478d7ce33887b914dbf",
+        "baselineSha256": "30629c604c3ee966ffdb57131c8d26642fb89c663aab8d1a545dee093372ea1e",
+        "baselineEqual": false,
+        "disposition": "review-overlay"
+      },
+      {
+        "path": "components/ReportPublicationStatus.tsx",
+        "category": "helpers",
+        "sourceSha256": "9911c3f0da550835cb2fb897e1bae2d88a1b4a4e5fa83f9c44ae93509cacd43f",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "app/api/admin/supabase/route.ts",
+        "category": "proxyPartialOnly",
+        "sourceSha256": "b5803634c9cb7bb5680b636db8bdd1b75e8ae70e9734ed8813c65f5d230af668",
+        "baselineSha256": "37f8c2ebd4c59eda65fa3d7a022ef46a5c0d6179ccd5d451a76f91a8daf4be21",
+        "baselineEqual": false,
+        "disposition": "partial-patch-only"
+      },
+      {
+        "path": "lib/adminAuth.ts",
+        "category": "stableDependencies",
+        "sourceSha256": "476c5e686c29e12773d4bdb4354ea3e80155534fd6471753fbd1d7d2773ee1d5",
+        "baselineSha256": "476c5e686c29e12773d4bdb4354ea3e80155534fd6471753fbd1d7d2773ee1d5",
+        "baselineEqual": true,
+        "disposition": "preserve-baseline"
+      },
+      {
+        "path": "lib/adminAudit.ts",
+        "category": "stableDependencies",
+        "sourceSha256": "1208408822e4da0a8ad43f0adf762c3095ac93eaeb9b6f842a2af80d7ff055a4",
+        "baselineSha256": "1208408822e4da0a8ad43f0adf762c3095ac93eaeb9b6f842a2af80d7ff055a4",
+        "baselineEqual": true,
+        "disposition": "preserve-baseline"
+      },
+      {
+        "path": "lib/portPricing.ts",
+        "category": "stableDependencies",
+        "sourceSha256": "59fcdb2b30cbf79f7b94b9131c890e5659f1ca9b8f892006715dea22706e0c2b",
+        "baselineSha256": "59fcdb2b30cbf79f7b94b9131c890e5659f1ca9b8f892006715dea22706e0c2b",
+        "baselineEqual": true,
+        "disposition": "preserve-baseline"
+      },
+      {
+        "path": "lib/hongKongReport.ts",
+        "category": "stableDependencies",
+        "sourceSha256": "dcd29b6fabbdead096162526ac5aaa2c8092795aca99473ff6044cafeca4bb2b",
+        "baselineSha256": "dcd29b6fabbdead096162526ac5aaa2c8092795aca99473ff6044cafeca4bb2b",
+        "baselineEqual": true,
+        "disposition": "preserve-baseline"
+      },
+      {
+        "path": "lib/reportFallbackKeys.ts",
+        "category": "stableDependencies",
+        "sourceSha256": "f9a02908e9892e15f17db7ba64c6c7c7175518ba5e01859e4aa716ce73530c3a",
+        "baselineSha256": "f9a02908e9892e15f17db7ba64c6c7c7175518ba5e01859e4aa716ce73530c3a",
+        "baselineEqual": true,
+        "disposition": "preserve-baseline"
+      },
+      {
+        "path": "lib/useSimpleAdminAuth.ts",
+        "category": "stableDependencies",
+        "sourceSha256": "f166b0bc3a1962cd0176bbf8cdd8b0603e2d2207dded9a59fcb23c41b7e442e6",
+        "baselineSha256": "f166b0bc3a1962cd0176bbf8cdd8b0603e2d2207dded9a59fcb23c41b7e442e6",
+        "baselineEqual": true,
+        "disposition": "preserve-baseline"
+      },
+      {
+        "path": "lib/adminPages.ts",
+        "category": "stableDependencies",
+        "sourceSha256": "2338d4eb4409bb86e9bad3f2d2a51c54eddb74cb533bc77f6099ee78e0237d58",
+        "baselineSha256": "2338d4eb4409bb86e9bad3f2d2a51c54eddb74cb533bc77f6099ee78e0237d58",
+        "baselineEqual": true,
+        "disposition": "preserve-baseline"
+      },
+      {
+        "path": "lib/useIsMobile.ts",
+        "category": "stableDependencies",
+        "sourceSha256": "c3d12d6468271a95aa309c98dafe0cff268aba963a56b59e8d059f4bc02f11f5",
+        "baselineSha256": "c3d12d6468271a95aa309c98dafe0cff268aba963a56b59e8d059f4bc02f11f5",
+        "baselineEqual": true,
+        "disposition": "preserve-baseline"
+      },
+      {
+        "path": "lib/publicReportValidation.ts",
+        "category": "stableDependencies",
+        "sourceSha256": "7ae3e3701217fa986a45d9a6b30684764ca841ddd75e95d18ddc19024e810927",
+        "baselineSha256": "7ae3e3701217fa986a45d9a6b30684764ca841ddd75e95d18ddc19024e810927",
+        "baselineEqual": true,
+        "disposition": "preserve-baseline"
+      },
+      {
+        "path": "lib/publicMarketData.ts",
+        "category": "stableDependencies",
+        "sourceSha256": "f6b8a5a499acbf67e1a5ee2177875a286f3f1bb01fd92e854642511cf86f142c",
+        "baselineSha256": "f6b8a5a499acbf67e1a5ee2177875a286f3f1bb01fd92e854642511cf86f142c",
+        "baselineEqual": true,
+        "disposition": "preserve-baseline"
+      },
+      {
+        "path": "lib/supabase.ts",
+        "category": "stableDependencies",
+        "sourceSha256": "067afb481a829c59d05ec25d85a12c2aa9e3d9b42839a46e51d70d4238e4ce52",
+        "baselineSha256": "067afb481a829c59d05ec25d85a12c2aa9e3d9b42839a46e51d70d4238e4ce52",
+        "baselineEqual": true,
+        "disposition": "preserve-baseline"
+      },
+      {
+        "path": "lib/taiwanOperationalNotice.ts",
+        "category": "stableDependencies",
+        "sourceSha256": "1684bd68137328d8f300fccbc9cfc07405cdc94b78993e9b1ed863f26f300349",
+        "baselineSha256": "1684bd68137328d8f300fccbc9cfc07405cdc94b78993e9b1ed863f26f300349",
+        "baselineEqual": true,
+        "disposition": "preserve-baseline"
+      },
+      {
+        "path": "data/reportSections.ts",
+        "category": "stableDependencies",
+        "sourceSha256": "e175ffebaedafdcb81744fcf55b93269177cc65f8c0ab36ced0dddc244000125",
+        "baselineSha256": "e175ffebaedafdcb81744fcf55b93269177cc65f8c0ab36ced0dddc244000125",
+        "baselineEqual": true,
+        "disposition": "preserve-baseline"
+      },
+      {
+        "path": "data/priceSetterTabs.ts",
+        "category": "stableDependencies",
+        "sourceSha256": "1fe1fd7842ef6271fcdd371b102b5e7e215901a9f46e36b50487ed5d1285a1a6",
+        "baselineSha256": "1fe1fd7842ef6271fcdd371b102b5e7e215901a9f46e36b50487ed5d1285a1a6",
+        "baselineEqual": true,
+        "disposition": "preserve-baseline"
+      },
+      {
+        "path": "app/api/reports/[key]/route.ts",
+        "category": "stableDependencies",
+        "sourceSha256": "93a1e95cc9d8467028c30842462d919215c92864e8c000a523db71e0f8314cce",
+        "baselineSha256": "93a1e95cc9d8467028c30842462d919215c92864e8c000a523db71e0f8314cce",
+        "baselineEqual": true,
+        "disposition": "preserve-baseline"
+      },
+      {
+        "path": "app/api/backups/bunker-map-drive/route.ts",
+        "category": "agentOwnedBackup",
+        "sourceSha256": "4264e6cd48c64f89a316eb2f81791e7c29d6701739448eb82e90bb6dac3667d2",
+        "baselineSha256": "79c27c0a5ed46250db8eeb371a53f5ae7d607fc4045f57e87e9169dfc19e2591",
+        "baselineEqual": false,
+        "disposition": "agent-owned-do-not-copy"
+      },
+      {
+        "path": "lib/systemHealth.ts",
+        "category": "agentOwnedBackup",
+        "sourceSha256": "d1fbf1dff918f9ae6764b2cc7258e496736ab27d9e8b9875a9db4efdbf1697c8",
+        "baselineSha256": "5d7667f144c2946249a2f9499263440da3e7348e07631326e7f0ae80b0cb8529",
+        "baselineEqual": false,
+        "disposition": "agent-owned-do-not-copy"
+      },
+      {
+        "path": "scripts/validate-backup.mjs",
+        "category": "agentOwnedBackup",
+        "sourceSha256": "05c1043f76caa748bd782b3f5f3135afbfb314d81f1b0b9fcafe1e75e9c8fa74",
+        "baselineSha256": "c0ee7ecc611635cd0dfb0e286ac632b895d1de99c29162d6e3f6fbeaa9fd59a7",
+        "baselineEqual": false,
+        "disposition": "agent-owned-do-not-copy"
+      },
+      {
+        "path": "tests/price-setter-creation-backup.test.ts",
+        "category": "agentOwnedBackup",
+        "sourceSha256": "95973d248339172cb00c8edf85b928a5bf293ba0550c815252267aff7168ff74",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "agent-owned-do-not-copy"
+      },
+      {
+        "path": "tests/admin-price-history.browser.test.cjs",
+        "category": "tests",
+        "sourceSha256": "065c2614e6bac797ac84647662af0748014895edf5d73925ccbea9908da47373",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/admin-price-history.test.ts",
+        "category": "tests",
+        "sourceSha256": "8d10270840c0fdd6895668a7c972794e9d12fc46c0511e87d029efb58677221b",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/market-price-history-api-sql.test.mjs",
+        "category": "tests",
+        "sourceSha256": "61259a92c4058b05970db3ef86ee3e535aa9dfd9fbee642cddee9735bd4a004d",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/market-price-history-flow.browser.test.mjs",
+        "category": "tests",
+        "sourceSha256": "a637918f15caeb61cd4c9250b65e7139b2372de1dbce328997b042593aac0591",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/market-price-history-read-sql.test.mjs",
+        "category": "tests",
+        "sourceSha256": "32a2865835e4e4b92748e4f4b8205cbe3453f2fd645a4615889cf77f37158c5b",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/market-price-history-sql.test.mjs",
+        "category": "tests",
+        "sourceSha256": "f3dedc4765afda310ed692e955e5a8af983ae69007880657c7dd2b5fde459e1e",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/market-price-history.test.ts",
+        "category": "tests",
+        "sourceSha256": "2bc0a7788eae4505d643ed13ecabe2d0061316110edd7f2e0fa3a86df6b7d937",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-history-records.test.ts",
+        "category": "tests",
+        "sourceSha256": "3adafcb60cb73d9d47c668778f5f7f422a3df6bdb8bc52ee9ce7355f620283d1",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-api-sql.test.mjs",
+        "category": "tests",
+        "sourceSha256": "98a962346925b787fb3753d910a1c1fea5b2e538e54a971e01df9df4c1f401e1",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-api.test.ts",
+        "category": "tests",
+        "sourceSha256": "c4fd53365cbb87005d297e2b1d653c7afd5a40b2a4782d84c1368a0d4bc001bb",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-atomic-sql.test.mjs",
+        "category": "tests",
+        "sourceSha256": "52b75dae2e0c28f4046427f6ae33180ce29f9503b6bf6552a922642d36aa6965",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-creation-recovery-api-sql.test.mjs",
+        "category": "tests",
+        "sourceSha256": "6fa16e3f1fa580828c7578e9fe1167c9fd420b37803f52c5b8f7b05e472eb122",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-creation-recovery-sql.test.mjs",
+        "category": "tests",
+        "sourceSha256": "fef107262261cfcea6d3a49eee046c6066f718dc9147cf136d99def9844d5103",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-creation-recovery.test.ts",
+        "category": "tests",
+        "sourceSha256": "4a620fc15b37d237c96e76cfb3a3a05564b2b863fc31c2341df26753e02e8a57",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-creation-sql.test.mjs",
+        "category": "tests",
+        "sourceSha256": "3b3714728e523f7502f49c7a71beb4a24f2a0b529ff1f270295e862272d241e8",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-delete-sql.test.mjs",
+        "category": "tests",
+        "sourceSha256": "1b15d6cf139d765396fc27f0df3bdd1831d428072704d7e3e2122c1f91ad3af4",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-fuel-inputs.test.ts",
+        "category": "tests",
+        "sourceSha256": "05de12fdeb2dd496ccfb08810bb02c71ae72194eb6926fb06709ae5e1df75048",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-inventory-sql.test.mjs",
+        "category": "tests",
+        "sourceSha256": "e56c80e1f03a29decacf48580c546ebf80456421331e07724db7322460ba7c3c",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-inventory.test.ts",
+        "category": "tests",
+        "sourceSha256": "7288928c0cb9ed05d237d793101633ea656f40eed818798b16356b4c4e293d04",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-legacy-proxy.test.ts",
+        "category": "tests",
+        "sourceSha256": "78f4f3451d7a12755a3b84e3af2d039aab5779389d86dd77105cfc005418ba3a",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-legacy-writes.test.ts",
+        "category": "tests",
+        "sourceSha256": "bdf052a8f58986553015200e57236929de3500cb1aafa854878b357d5ef37b96",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-mutation.test.ts",
+        "category": "tests",
+        "sourceSha256": "d3c70d7a0e30989a84c1405680e608d2045e60b9ea118d8a640bab74fe76eff5",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-order-sql.test.mjs",
+        "category": "tests",
+        "sourceSha256": "d8f9189ab73785c1b1b908a43854157d54df33abdf0d53ff2ec7d0f0eb8caa62",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-order.test.ts",
+        "category": "tests",
+        "sourceSha256": "522d7372fcd7e9c9c62961b54b1d531504c70b03ea08e0a3395d8e4e93f28b18",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-rename-fallback-sql.test.mjs",
+        "category": "tests",
+        "sourceSha256": "f3f48bd9eea13a7ef8c9bd2c7ec4584888c6b590b127b8ecff581ecf2a9f946f",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-required-port-sql.test.mjs",
+        "category": "tests",
+        "sourceSha256": "f89bc87a9286e530d2213b7c2d0560ff333ad035276c315383df9452d7003ae9",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-settings-sql.test.mjs",
+        "category": "tests",
+        "sourceSha256": "00e2cf7401dd97377717c9bdc5a373c94344824199fbbad2d2f63b1b79690094",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/price-setter-settings.test.ts",
+        "category": "tests",
+        "sourceSha256": "fda1a629d8e8b2b307cf19ecb8ad170383866d5bcb72b48f3300cb0eee6956c6",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/pricesetter-order.browser.test.mjs",
+        "category": "tests",
+        "sourceSha256": "ce5aeae5060512b6d6df29d90ae707af81ce815c6769915775e69a0011e4b84f",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/pricesetter-port-list.browser.test.cjs",
+        "category": "tests",
+        "sourceSha256": "7fbe79662035e45c70958a9ea9f0d45a4b5a2d67648b095d195f1877aabf1b83",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/pricesetter-publication-flow.browser.test.mjs",
+        "category": "tests",
+        "sourceSha256": "73e3674679dadddd502b68b2635593648c6e8bd708f57c908136add59f7c6f2e",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/pricesetter-publishing.browser.test.cjs",
+        "category": "tests",
+        "sourceSha256": "fe88a1ae50a31074d56f0422334d2f3bb9b21bde8203a39d752776fed4a19956",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/pricesetter-save.browser.test.cjs",
+        "category": "tests",
+        "sourceSha256": "9610c960c9c5a93868a2f4662717c0666e15e4eb48dd8964e33b5a9cd46d1f01",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/pricesetter-settings.browser.test.cjs",
+        "category": "tests",
+        "sourceSha256": "0fabf902d1c8dcbd9e3353ab592eb60f53e93e2db3f52b0ca7d7b6d83f26c73d",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/pricing-native-postgres.test.mjs",
+        "category": "tests",
+        "sourceSha256": "182bedf6679842afc86add262622f32e6d137cf24cf9bda2aabb46e5a9409d07",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/report-publication-api-sql.test.mjs",
+        "category": "tests",
+        "sourceSha256": "5c23cfd099dcb9f3bf9de496f01c4be9c90c98c261af6c804902b0b97fce3201",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/report-publication-client.test.ts",
+        "category": "tests",
+        "sourceSha256": "623e80ec8ae3bc344c28215ee34ac2b02981cac74b1ae84d63a59afbe9dd1c85",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/report-publication-recovery-sql.test.mjs",
+        "category": "tests",
+        "sourceSha256": "263ad63ad219dbd2fbeb0e69d0f1da2d1ca1daa6bb25cd3cb5df7f880b66b17b",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/report-publication.test.ts",
+        "category": "tests",
+        "sourceSha256": "f8c0efacf701ead64a8bb2de049f5a0e6b85e53a178924edb1349362696de3eb",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/fixtures/market-price-history-app.mjs",
+        "category": "tests",
+        "sourceSha256": "1258a910e5c01353a02fe19677d8803978e7d89adcd90c44c9433c2570903d12",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/fixtures/native-postgres-pricing.mjs",
+        "category": "tests",
+        "sourceSha256": "107115d3b590a8619ad576edb2fb1964758a77cbe62835493d4b35bbbec9eda4",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/fixtures/price-setter-sql.mjs",
+        "category": "tests",
+        "sourceSha256": "b8469a762c30d6725a9f24dfb758e6c1b3bff227f2de2a67c5b2eae55081e834",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/fixtures/report-publication-app.mjs",
+        "category": "tests",
+        "sourceSha256": "6d3ebfbfb795c83475b8c426d012540329977034789593b6f6eb2c35f7e096f9",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      },
+      {
+        "path": "tests/fixtures/report-publication-baseline.cjs",
+        "category": "tests",
+        "sourceSha256": "75ad3f55cf6263f4db0853ef7d7f7b633cead55bae8d45556595ccb821baa36c",
+        "baselineSha256": null,
+        "baselineEqual": false,
+        "disposition": "new-overlay"
+      }
+    ]
+  },
+  "cleanRootCaseFix": {
+    "status": "Implemented and verified locally only; pending production release",
+    "files": [
+      {
+        "path": "lib/marketPriceHistory.ts",
+        "sha256": "f2c9935ac5745c4340a7c05cb30727827e752da288958e8265d178e29e1b46a4"
+      },
+      {
+        "path": "app/admin/taiwanpricehistory/page.tsx",
+        "sha256": "e7ee9056702e7afb97ddc49b90365f9c465dcd2f5ec5c05abded006fe32f4738"
+      },
+      {
+        "path": "tests/fixtures/native-postgres-pricing.mjs",
+        "sha256": "423f999211e6bc1497af8ec5997988e27a8278e46e263de31c47bf681edf2ace"
+      },
+      {
+        "path": "supabase/migrations/20261012112711_normalize_market_history_root_lookup.sql",
+        "sha256": "729c6bf4548f4510cdfbcefd1dca28612a3ee6fe6b25e57bbb5929a4e859733f"
+      },
+      {
+        "path": "tests/market-price-history-root-case.test.mjs",
+        "sha256": "36396729bf8c1642bf43cad145334256434321ef69d97ae24c716febb11d92cc"
+      },
+      {
+        "path": "tests/market-price-history-root-case.browser.test.mjs",
+        "sha256": "3cdcc55ca812c2750f660cf597eb70d812409b53c2b98b5c79abc33747f936c4"
+      }
+    ],
+    "behavior": "Case/outer-space-insensitive root identity lookup; exact persisted names retained in CAS and display. Taichung HSFO scope remains restricted. No automatic business-name normalisation.",
+    "redProof": {
+      "sql": "Before fix, allowed TAICHUNG rename caused history GET503/parser rejection and SQL P0002; retained regression failed.",
+      "browser": "Actual page red run timed out while history editor stayed disabled; no unrelated external requests."
+    },
+    "greenProof": {
+      "apiSql": "7/7 passed: all six required-root names; save/delete/replay; exact raw-name CAS; stale-name conflict; direct-SQL Taichung product guard; publication reads.",
+      "actualPage": "Both HK and Taiwan real TSX→API→SQL passed with all six roots capitalised/padded, correct product mapping and preserved raw names.",
+      "native": "14/14 native PostgreSQL17.6 pricing passed with all 12 pricing SQL migrations and live audit helper settings; no skipped tests.",
+      "adjacent": "30/30 unit/API/SQL market history and required-root tests passed.",
+      "typeCheck": "Full tsc --noEmit passed",
+      "lint": "Focused market helper+Taiwan page eslint passed",
+      "diffCheck": "git diff --check passed"
+    },
+    "logs": {
+      "sqlRed": "/private/tmp/fcuno-pg17-native-vpUhfA/root-case-red.log",
+      "browserRed": "/private/tmp/fcuno-pg17-native-vpUhfA/root-case-browser-red.log",
+      "sqlGreen": "/private/tmp/fcuno-pg17-native-vpUhfA/root-case-green.log",
+      "browserGreen": "/private/tmp/fcuno-pg17-native-vpUhfA/root-case-browser-green.log",
+      "native": "/private/tmp/fcuno-pg17-native-vpUhfA/pricing-native-clean-rootfix.log",
+      "adjacent": "/private/tmp/fcuno-pg17-native-vpUhfA/root-case-adjacent-regressions.log"
+    }
+  },
+  "review": {
+    "blocksResolvedLocally": [
+      "Permitted required-root capitalisation broke history editor read/save"
+    ],
+    "releaseDependencies": [
+      "Exact membership-based backup receipt contract must ship with receipt migrations; backup agent owns this change.",
+      "Pricing legacy writer fence + all three editor pages + four APIs + helpers + migrations form one coupled cutover.",
+      "Final build, full scoped regression, immutable deployment and hosted read-only verification belong to root; none claimed here."
+    ],
+    "noOtherConfirmedBlockers": "Independent review completed all original11 SQL and four API implementations. Consistent ports→history→remarks table-lock order, source/content CAS, owned receipt revisions/tombstones and read-only lost-response reconciliation were coherent within inspected scope.",
+    "businessSemantics": [
+      "Normal Save continues existing today-date + same-day history behavior, including metadata edits; not a newly introduced date stamp.",
+      "Taiwan history is a whole-day operation over Kaohsiung and Taichung; blank latest fuel means unavailable rather than stale fallback.",
+      "Published report date remains effective saved quote day or explicit reviewed override, never forced to current date."
+    ]
+  }
+}

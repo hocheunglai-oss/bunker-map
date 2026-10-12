@@ -32,25 +32,22 @@ export async function loadReportSnapshots<T>(keys: ReportSnapshotKey[]) {
     .select("id,content")
     .in("id", ids)
 
-  if (error) return {} as Partial<Record<ReportSnapshotKey, T>>
+  if (error || !Array.isArray(data)) throw new Error("Saved report dates could not be read.")
 
   const keyById = new Map(keys.map((key) => [snapshotIds[key], key] as const))
   const snapshots: Partial<Record<ReportSnapshotKey, T>> = {}
-  for (const row of (data || []) as Array<{ id: number; content: string | null }>) {
+  for (const row of data as Array<{ id: number; content: string | null }>) {
+    if (!row || !Number.isInteger(row.id) || row.content !== null && typeof row.content !== "string") throw new Error("Saved report dates could not be read.")
     const key = keyById.get(row.id)
     if (!key || !row.content) continue
     try {
-      snapshots[key] = JSON.parse(row.content) as T
+      const parsed = JSON.parse(row.content)
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)
+        || parsed.reportDate !== undefined && (typeof parsed.reportDate !== "string" || parsed.reportDate.length > 80)) throw new Error("Invalid report date")
+      snapshots[key] = parsed as T
     } catch {
-      // Keep one malformed snapshot from blocking the other report dates.
+      throw new Error("Saved report dates could not be read.")
     }
   }
   return snapshots
-}
-
-export async function saveReportSnapshot<T>(key: ReportSnapshotKey, payload: T) {
-  return supabase.from("remarks").upsert({
-    id: snapshotIds[key],
-    content: JSON.stringify(payload),
-  }, { onConflict: "id" }).select("id").single()
 }

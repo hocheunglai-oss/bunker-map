@@ -1,0 +1,430 @@
+{
+  "schema": "fcuno.pricing-migration-metadata-alignment/v1",
+  "scope": "Local metadata-only alignment after the parent-reported verified stage-one live cutover. This reviewer made no hosted mutations.",
+  "releaseBaseCommit": "ab9d32de82295baf69fd7336658b4c5c2a59d716",
+  "metadataBaseCommit": "8cf7b4dc97d9fc2c11cd3beb883e9a58db13ed5c",
+  "stage1ApplicationTree": "75d208f154424e6d16f6ace7089491976de1da70",
+  "parentReportedLiveRelease": {
+    "deploymentId": "dpl_5JLPEJUqWunnULp5mjNJRG9228z2",
+    "protectedChecksPassed": 33,
+    "liveChecksPassed": 58,
+    "verifiedAt": "2026-10-12T11:49:50Z",
+    "businessFingerprintsUnchanged": true,
+    "contractAppliedAfterVerifiedCutover": true,
+    "evidenceOwnership": "Parent /root; not independently repeated by this metadata reviewer."
+  },
+  "allTrackedApplicationPathsUnchangedFromStage1": true,
+  "sqlFileCount": 13,
+  "everySqlFileBytesUnchangedFromStage1": true,
+  "mappingSource": "Exact hosted Supabase-generated versions provided by the parent after application, not invented local timestamps.",
+  "migrationMappings": [
+    {
+      "oldVersion": "20261012111738",
+      "hostedVersion": "20261012114540",
+      "name": "explicit_backup_schema_capabilities",
+      "oldFile": "supabase/migrations/20261012111738_explicit_backup_schema_capabilities.sql",
+      "hostedFile": "supabase/migrations/20261012114540_explicit_backup_schema_capabilities.sql",
+      "sha256": "cae1c5be312f92ba273eefaf64e923679b57a9bc94ffac8f62ea1df83a2a1051",
+      "stage1Sha256": "cae1c5be312f92ba273eefaf64e923679b57a9bc94ffac8f62ea1df83a2a1051",
+      "currentSha256": "cae1c5be312f92ba273eefaf64e923679b57a9bc94ffac8f62ea1df83a2a1051",
+      "bytesUnchanged": true,
+      "oldPathAbsent": true
+    },
+    {
+      "oldVersion": "20261008112629",
+      "hostedVersion": "20261012114603",
+      "name": "atomic_price_setter_save",
+      "oldFile": "supabase/migrations/20261008112629_atomic_price_setter_save.sql",
+      "hostedFile": "supabase/migrations/20261012114603_atomic_price_setter_save.sql",
+      "sha256": "c0e54c8737c1867ff8a15b5dbe7f0969650a75f335e617686f7cc5c243c2affc",
+      "stage1Sha256": "c0e54c8737c1867ff8a15b5dbe7f0969650a75f335e617686f7cc5c243c2affc",
+      "currentSha256": "c0e54c8737c1867ff8a15b5dbe7f0969650a75f335e617686f7cc5c243c2affc",
+      "bytesUnchanged": true,
+      "oldPathAbsent": true
+    },
+    {
+      "oldVersion": "20261009025254",
+      "hostedVersion": "20261012114634",
+      "name": "atomic_market_history_changes",
+      "oldFile": "supabase/migrations/20261009025254_atomic_market_history_changes.sql",
+      "hostedFile": "supabase/migrations/20261012114634_atomic_market_history_changes.sql",
+      "sha256": "dbce5aa16d7895a50439f1ea4399141c3ee41a6673d2b3ed44dfe0e1132fb2c4",
+      "stage1Sha256": "dbce5aa16d7895a50439f1ea4399141c3ee41a6673d2b3ed44dfe0e1132fb2c4",
+      "currentSha256": "dbce5aa16d7895a50439f1ea4399141c3ee41a6673d2b3ed44dfe0e1132fb2c4",
+      "bytesUnchanged": true,
+      "oldPathAbsent": true
+    },
+    {
+      "oldVersion": "20261009032431",
+      "hostedVersion": "20261012114638",
+      "name": "coherent_report_publication",
+      "oldFile": "supabase/migrations/20261009032431_coherent_report_publication.sql",
+      "hostedFile": "supabase/migrations/20261012114638_coherent_report_publication.sql",
+      "sha256": "b70643ca9576f04430f98cf25efba6bb3d6355cbb43c86245d878c68fe88770a",
+      "stage1Sha256": "b70643ca9576f04430f98cf25efba6bb3d6355cbb43c86245d878c68fe88770a",
+      "currentSha256": "b70643ca9576f04430f98cf25efba6bb3d6355cbb43c86245d878c68fe88770a",
+      "bytesUnchanged": true,
+      "oldPathAbsent": true
+    },
+    {
+      "oldVersion": "20261009043924",
+      "hostedVersion": "20261012114644",
+      "name": "recover_damaged_report_publications",
+      "oldFile": "supabase/migrations/20261009043924_recover_damaged_report_publications.sql",
+      "hostedFile": "supabase/migrations/20261012114644_recover_damaged_report_publications.sql",
+      "sha256": "537b65222ac8de94f7417e66ba975cdc55786771419e9ffeb71adae4703233aa",
+      "stage1Sha256": "537b65222ac8de94f7417e66ba975cdc55786771419e9ffeb71adae4703233aa",
+      "currentSha256": "537b65222ac8de94f7417e66ba975cdc55786771419e9ffeb71adae4703233aa",
+      "bytesUnchanged": true,
+      "oldPathAbsent": true
+    },
+    {
+      "oldVersion": "20261009044514",
+      "hostedVersion": "20261012114649",
+      "name": "protect_price_setter_port_deletion",
+      "oldFile": "supabase/migrations/20261009044514_protect_price_setter_port_deletion.sql",
+      "hostedFile": "supabase/migrations/20261012114649_protect_price_setter_port_deletion.sql",
+      "sha256": "d8826d010865452cfe386c4f5c944361eb13b17c91b4e723fbddb531e959e52f",
+      "stage1Sha256": "d8826d010865452cfe386c4f5c944361eb13b17c91b4e723fbddb531e959e52f",
+      "currentSha256": "d8826d010865452cfe386c4f5c944361eb13b17c91b4e723fbddb531e959e52f",
+      "bytesUnchanged": true,
+      "oldPathAbsent": true
+    },
+    {
+      "oldVersion": "20261009045645",
+      "hostedVersion": "20261012114654",
+      "name": "protect_required_report_port_identity",
+      "oldFile": "supabase/migrations/20261009045645_protect_required_report_port_identity.sql",
+      "hostedFile": "supabase/migrations/20261012114654_protect_required_report_port_identity.sql",
+      "sha256": "ca51ecac77c903bd13de0c0cc797b642ee0b40cdcffb6d142b9fb71cad02edbe",
+      "stage1Sha256": "ca51ecac77c903bd13de0c0cc797b642ee0b40cdcffb6d142b9fb71cad02edbe",
+      "currentSha256": "ca51ecac77c903bd13de0c0cc797b642ee0b40cdcffb6d142b9fb71cad02edbe",
+      "bytesUnchanged": true,
+      "oldPathAbsent": true
+    },
+    {
+      "oldVersion": "20261009050520",
+      "hostedVersion": "20261012114712",
+      "name": "idempotent_price_setter_port_creation",
+      "oldFile": "supabase/migrations/20261009050520_idempotent_price_setter_port_creation.sql",
+      "hostedFile": "supabase/migrations/20261012114712_idempotent_price_setter_port_creation.sql",
+      "sha256": "bbc46a352723693651e56a7177b787a757bbd26d81a3267e7f7d0653f610521e",
+      "stage1Sha256": "bbc46a352723693651e56a7177b787a757bbd26d81a3267e7f7d0653f610521e",
+      "currentSha256": "bbc46a352723693651e56a7177b787a757bbd26d81a3267e7f7d0653f610521e",
+      "bytesUnchanged": true,
+      "oldPathAbsent": true
+    },
+    {
+      "oldVersion": "20261009051842",
+      "hostedVersion": "20261012114717",
+      "name": "complete_price_setter_inventory",
+      "oldFile": "supabase/migrations/20261009051842_complete_price_setter_inventory.sql",
+      "hostedFile": "supabase/migrations/20261012114717_complete_price_setter_inventory.sql",
+      "sha256": "21854ed96faee81e568a8a7358261a3624f5d431ce8d5f78fbb6572806f96a15",
+      "stage1Sha256": "21854ed96faee81e568a8a7358261a3624f5d431ce8d5f78fbb6572806f96a15",
+      "currentSha256": "21854ed96faee81e568a8a7358261a3624f5d431ce8d5f78fbb6572806f96a15",
+      "bytesUnchanged": true,
+      "oldPathAbsent": true
+    },
+    {
+      "oldVersion": "20261009054830",
+      "hostedVersion": "20261012114722",
+      "name": "durable_price_setter_creation_recovery",
+      "oldFile": "supabase/migrations/20261009054830_durable_price_setter_creation_recovery.sql",
+      "hostedFile": "supabase/migrations/20261012114722_durable_price_setter_creation_recovery.sql",
+      "sha256": "ff43f9054cb0cda7f68b5b16a4dc6a9773a8b21d2500f1a8f71978482a73eca8",
+      "stage1Sha256": "ff43f9054cb0cda7f68b5b16a4dc6a9773a8b21d2500f1a8f71978482a73eca8",
+      "currentSha256": "ff43f9054cb0cda7f68b5b16a4dc6a9773a8b21d2500f1a8f71978482a73eca8",
+      "bytesUnchanged": true,
+      "oldPathAbsent": true
+    },
+    {
+      "oldVersion": "20261009110700",
+      "hostedVersion": "20261012114726",
+      "name": "order_divider_rename_locks",
+      "oldFile": "supabase/migrations/20261009110700_order_divider_rename_locks.sql",
+      "hostedFile": "supabase/migrations/20261012114726_order_divider_rename_locks.sql",
+      "sha256": "4ad07df03f839bea15cd5b7469ccc197e579954f70351a8ca2066bf7d7d06e05",
+      "stage1Sha256": "4ad07df03f839bea15cd5b7469ccc197e579954f70351a8ca2066bf7d7d06e05",
+      "currentSha256": "4ad07df03f839bea15cd5b7469ccc197e579954f70351a8ca2066bf7d7d06e05",
+      "bytesUnchanged": true,
+      "oldPathAbsent": true
+    },
+    {
+      "oldVersion": "20261012112711",
+      "hostedVersion": "20261012114731",
+      "name": "normalize_market_history_root_lookup",
+      "oldFile": "supabase/migrations/20261012112711_normalize_market_history_root_lookup.sql",
+      "hostedFile": "supabase/migrations/20261012114731_normalize_market_history_root_lookup.sql",
+      "sha256": "729c6bf4548f4510cdfbcefd1dca28612a3ee6fe6b25e57bbb5929a4e859733f",
+      "stage1Sha256": "729c6bf4548f4510cdfbcefd1dca28612a3ee6fe6b25e57bbb5929a4e859733f",
+      "currentSha256": "729c6bf4548f4510cdfbcefd1dca28612a3ee6fe6b25e57bbb5929a4e859733f",
+      "bytesUnchanged": true,
+      "oldPathAbsent": true
+    },
+    {
+      "oldVersion": "20261009070459",
+      "hostedVersion": "20261012115008",
+      "name": "fence_legacy_price_setter_creation",
+      "oldFile": "supabase/migrations/20261009070459_fence_legacy_price_setter_creation.sql",
+      "hostedFile": "supabase/migrations/20261012115008_fence_legacy_price_setter_creation.sql",
+      "sha256": "2566fba0a5e2b7a22a8f9f006174662f0b4aab07e15d33472b3795a81518024f",
+      "stage1Sha256": "2566fba0a5e2b7a22a8f9f006174662f0b4aab07e15d33472b3795a81518024f",
+      "currentSha256": "2566fba0a5e2b7a22a8f9f006174662f0b4aab07e15d33472b3795a81518024f",
+      "bytesUnchanged": true,
+      "oldPathAbsent": true
+    }
+  ],
+  "applicationChangedFilesAgainstReleaseBase": [
+    {
+      "path": "app/admin/hongkongpricehistory/page.tsx",
+      "sha256": "cf04a7b1caebefa23f23253561a13e2eae8beafe96371b60f7344472d305452b",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "app/admin/pricesetter/page.tsx",
+      "sha256": "2c4754d06e36177534f70a8cf41e637a69456d07c6287f8eeea73c4a258c3188",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "app/admin/taiwanpricehistory/page.tsx",
+      "sha256": "e7ee9056702e7afb97ddc49b90365f9c465dcd2f5ec5c05abded006fe32f4738",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "app/api/admin/price-history/route.ts",
+      "sha256": "e045d8b3b120403de72636cf08120b25a6d1bb118a5b82ddffec054d4b60b952",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "app/api/admin/prices/creation/route.ts",
+      "sha256": "be6686f957a4d92ff7239e813e9eecaefcc9f5e3e524a93e09132a1edc96149d",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "app/api/admin/prices/route.ts",
+      "sha256": "f7a4989ee20caccca0aed2e15d01b91341af1a823d196218802dc122224439a6",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "app/api/admin/report-publication/route.ts",
+      "sha256": "517a8ea64adeaf32bf6452e5fd82219e2b095efc051720ea9e3e8753bb1e6eea",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "app/api/admin/supabase/route.ts",
+      "sha256": "b5803634c9cb7bb5680b636db8bdd1b75e8ae70e9734ed8813c65f5d230af668",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "app/api/backups/bunker-map-drive/route.ts",
+      "sha256": "8afaf09adfee889cb10618f91e9884dce56d5c216375d4da8bdfc5c4ab7b9934",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "components/ReportPublicationStatus.tsx",
+      "sha256": "9911c3f0da550835cb2fb897e1bae2d88a1b4a4e5fa83f9c44ae93509cacd43f",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/adminPriceHistory.ts",
+      "sha256": "ae54da5a4d8f53234dc33d8d6b2bedd0891b7c05db3199af2dbe8e09945d6a29",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/backupPricingSchema.d.mts",
+      "sha256": "c942920194bd6b558e8edb14d5dc161b5ad79b58708f278c045f8caf7b676495",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/backupPricingSchema.mjs",
+      "sha256": "c04cf51a0665c7e273756ff3604a1668031dbf7c1d44fc78ccf8a9f66ea49721",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/chinaReport.ts",
+      "sha256": "c65e87a2785c365c77733a4d5508308c145a6f4fef58474f272a89f16769640f",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/marketPriceHistory.ts",
+      "sha256": "f2c9935ac5745c4340a7c05cb30727827e752da288958e8265d178e29e1b46a4",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/priceHistoryRecords.ts",
+      "sha256": "7d496f469a79a5456fe048e50985a8d89a6f62bb95c13ab423b65dd5735a443c",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/priceSetterCreationRecovery.ts",
+      "sha256": "d58cd0947fb9c682d1d671d2eac10b4b8edb40bc876328850c72d8451f733541",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/priceSetterFuelInputs.ts",
+      "sha256": "fc386e6bed439870c7ea0361b8d0ad5a1b4cab35fc0910145579866944bcae40",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/priceSetterInventory.ts",
+      "sha256": "ec058f81c0da6b6ab0818979630fdea9c1d0a96c2b566d391b4961ad052c90de",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/priceSetterLegacyWrites.ts",
+      "sha256": "0921d1125b1ef769ce18ac24ac1bb75d17669dbf5c133a367f1bcfc30737ca14",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/priceSetterMutation.ts",
+      "sha256": "780922a7aae16fd5f30d179cc6260eb14bbcb59e5dcb9b1c672f8efc8f8a15d2",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/priceSetterOrder.ts",
+      "sha256": "52548b2877e7af42c025562611cd40f38c383e29249a5157654ffc91b63f1c9c",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/priceSetterRequest.ts",
+      "sha256": "347fdbd879957f484edf89799d96ea6ea0797d53f02ad12fe12494b4e2093392",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/priceSetterSettings.ts",
+      "sha256": "fab6219bab7407fa314d0273be95795e34018a66a29d5642d73495b3c7f7d6fd",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/reportFallbacks.ts",
+      "sha256": "fe079324228f14c93b2c085768027c9a405c026af7193c1343e2e2b448ea2c90",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/reportPublication.ts",
+      "sha256": "6640d1c5dd01ec567e62bd063e8d2b2b529f02bf2bcde74db9b986afddcdc9fd",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/reportPublicationClient.ts",
+      "sha256": "f1c6223ae497036d7110a400e701fd0f8d59c15392ba6ca87601841d31e6c4b4",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/reportSnapshots.ts",
+      "sha256": "89298e90bbd9eb1bd91fe45e3dea91cf91c5030b89e5b478d7ce33887b914dbf",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/systemHealth.ts",
+      "sha256": "4af8b4d6c093717f2546e26623af29c9bebb4cbf15c1fae859890c11e9581eb6",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/taiwanReport.ts",
+      "sha256": "f1acfe4dc3fa5bf51ba2cd9bb35358116db3542086d9a3eed355d85e5e88463b",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/useMarketPriceHistory.ts",
+      "sha256": "d63f2f054257be7312657df79bc0765b661bb107eca25da1604f3a3fef1bce39",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "lib/useReportPublication.ts",
+      "sha256": "218cf3066fb8d8706929899bb63e60d46e3a56d83f66ffd6f48cd20ce67fb78a",
+      "bytesUnchanged": true
+    },
+    {
+      "path": "scripts/validate-backup.mjs",
+      "sha256": "feb8e4ebb5f26cc29fdd3fc5a18c0e3ca7e1c9be93c87cbcbc87385716c86bd9",
+      "bytesUnchanged": true
+    }
+  ],
+  "testFixtureOrder": {
+    "pricingNative": "All 12 pricing SQL files now apply in hosted timestamp order, with the contract/revoke migration last.",
+    "backupCapability": "Separate native inventory test installs the capability RPC before receipt-table/recovery changes and proves unchanged catalog SHA-256/fence behavior. No claim that its synthetic schema is a full hosted clone.",
+    "sqlReceiptFixture": "Divider lock repair precedes optional contract/revoke phase, matching hosted order."
+  },
+  "freshLocalVerification": {
+    "types": "PASS: full --noEmit --incremental false",
+    "unitAndActualApi": {
+      "pass": 124,
+      "fail": 0,
+      "skipped": 0
+    },
+    "pricingAndCapabilitySql": {
+      "pass": 109,
+      "fail": 0,
+      "skipped": 0
+    },
+    "nativePostgres": {
+      "version": "17.6",
+      "pass": 15,
+      "fail": 0,
+      "skipped": 0,
+      "sessionTimezone": "UTC",
+      "recoveryDumpSha256": "a8f4ffd0f85c93c1abe9e0e4ac5c569fb96ea84676e156285d18f0c7fc5bff02",
+      "ownedSessionsClosedAndServerStopped": true
+    },
+    "affectedRootCaseBrowser": {
+      "hongkong": "PASS",
+      "taiwan": "PASS",
+      "isolation": "Dedicated headless contexts; external requests blocked."
+    },
+    "focusedChangedTestFixtureLint": "PASS: 0 errors, 0 warnings",
+    "diffCheck": "PASS"
+  },
+  "retainedHistoricalFacts": [
+    "Source-assembly and preflight artifacts explicitly label their old versions/paths/hashes historical; they are not rewritten as current source facts.",
+    "The final manifest lists the complete release against ab9d32d, not only this metadata follow-up against 8cf7b4d.",
+    "The final manifest excludes its own hash to avoid a self-reference; this proof excludes document hashes to avoid a mutual reference."
+  ],
+  "metadataChangedPaths": [
+    "docs/pricing-clean-candidate-final-manifest-2026-10-12.json",
+    "docs/pricing-clean-candidate-source-assembly-2026-10-12.json",
+    "docs/pricing-migration-metadata-alignment-2026-10-12.json",
+    "docs/sitewide-debug-2026-10-12-pricing-preflight.json",
+    "supabase/migrations/20261008112629_atomic_price_setter_save.sql",
+    "supabase/migrations/20261009025254_atomic_market_history_changes.sql",
+    "supabase/migrations/20261009032431_coherent_report_publication.sql",
+    "supabase/migrations/20261009043924_recover_damaged_report_publications.sql",
+    "supabase/migrations/20261009044514_protect_price_setter_port_deletion.sql",
+    "supabase/migrations/20261009045645_protect_required_report_port_identity.sql",
+    "supabase/migrations/20261009050520_idempotent_price_setter_port_creation.sql",
+    "supabase/migrations/20261009051842_complete_price_setter_inventory.sql",
+    "supabase/migrations/20261009054830_durable_price_setter_creation_recovery.sql",
+    "supabase/migrations/20261009070459_fence_legacy_price_setter_creation.sql",
+    "supabase/migrations/20261009110700_order_divider_rename_locks.sql",
+    "supabase/migrations/20261012111738_explicit_backup_schema_capabilities.sql",
+    "supabase/migrations/20261012112711_normalize_market_history_root_lookup.sql",
+    "supabase/migrations/20261012114540_explicit_backup_schema_capabilities.sql",
+    "supabase/migrations/20261012114603_atomic_price_setter_save.sql",
+    "supabase/migrations/20261012114634_atomic_market_history_changes.sql",
+    "supabase/migrations/20261012114638_coherent_report_publication.sql",
+    "supabase/migrations/20261012114644_recover_damaged_report_publications.sql",
+    "supabase/migrations/20261012114649_protect_price_setter_port_deletion.sql",
+    "supabase/migrations/20261012114654_protect_required_report_port_identity.sql",
+    "supabase/migrations/20261012114712_idempotent_price_setter_port_creation.sql",
+    "supabase/migrations/20261012114717_complete_price_setter_inventory.sql",
+    "supabase/migrations/20261012114722_durable_price_setter_creation_recovery.sql",
+    "supabase/migrations/20261012114726_order_divider_rename_locks.sql",
+    "supabase/migrations/20261012114731_normalize_market_history_root_lookup.sql",
+    "supabase/migrations/20261012115008_fence_legacy_price_setter_creation.sql",
+    "tests/backup-schema-capabilities-native.test.mjs",
+    "tests/backup-schema-capabilities-sql.test.mjs",
+    "tests/fixtures/market-price-history-app.mjs",
+    "tests/fixtures/native-postgres-pricing.mjs",
+    "tests/fixtures/price-setter-sql.mjs",
+    "tests/fixtures/report-publication-app.mjs",
+    "tests/market-price-history-api-sql.test.mjs",
+    "tests/market-price-history-root-case.browser.test.mjs",
+    "tests/market-price-history-root-case.test.mjs",
+    "tests/market-price-history-sql.test.mjs",
+    "tests/price-setter-settings-sql.test.mjs"
+  ],
+  "excludedPrefixes": [
+    "supabase/.temp/"
+  ]
+}

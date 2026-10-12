@@ -1,0 +1,352 @@
+{
+  "schema": "fcuno.pricing-clean-source-assembly/v1",
+  "scope": "Historical initial pricing-only copy before hosted migration-version alignment; old paths and hashes record the original source, not current paths, final freeze or production certification. Current paths are in the final manifest and metadata-alignment proof.",
+  "baseCommit": "ab9d32de82295baf69fd7336658b4c5c2a59d716",
+  "sourceDirectory": "/Users/ottolai/Documents/Codex/bunker-map",
+  "candidateDirectory": "/private/tmp/fcuno-public-reader-release-FYIfQC/site",
+  "fileCount": 84,
+  "notes": [
+    "Generated apply_patch copied only the explicit runtime/SQL/test manifest.",
+    "Shared proxy received only pricing import and two guard hunks; existing CCINFO/auth/contact safeguards retained.",
+    "Production public readers and package/lock files were not copied from the dirty source.",
+    "Subsequent required-root identity and backup-capability fixes are separately owned and will need final candidate hashes."
+  ],
+  "files": [
+    {
+      "path": "app/admin/pricesetter/page.tsx",
+      "sha256": "2c4754d06e36177534f70a8cf41e637a69456d07c6287f8eeea73c4a258c3188"
+    },
+    {
+      "path": "app/admin/hongkongpricehistory/page.tsx",
+      "sha256": "cf04a7b1caebefa23f23253561a13e2eae8beafe96371b60f7344472d305452b"
+    },
+    {
+      "path": "app/admin/taiwanpricehistory/page.tsx",
+      "sha256": "d387ab62c5da799cc2cdf47500697fdbe45a591d5aba6940f0d96b6915399c40"
+    },
+    {
+      "path": "app/api/admin/prices/route.ts",
+      "sha256": "f7a4989ee20caccca0aed2e15d01b91341af1a823d196218802dc122224439a6"
+    },
+    {
+      "path": "app/api/admin/prices/creation/route.ts",
+      "sha256": "be6686f957a4d92ff7239e813e9eecaefcc9f5e3e524a93e09132a1edc96149d"
+    },
+    {
+      "path": "app/api/admin/price-history/route.ts",
+      "sha256": "e045d8b3b120403de72636cf08120b25a6d1bb118a5b82ddffec054d4b60b952"
+    },
+    {
+      "path": "app/api/admin/report-publication/route.ts",
+      "sha256": "517a8ea64adeaf32bf6452e5fd82219e2b095efc051720ea9e3e8753bb1e6eea"
+    },
+    {
+      "path": "components/ReportPublicationStatus.tsx",
+      "sha256": "9911c3f0da550835cb2fb897e1bae2d88a1b4a4e5fa83f9c44ae93509cacd43f"
+    },
+    {
+      "path": "lib/adminPriceHistory.ts",
+      "sha256": "ae54da5a4d8f53234dc33d8d6b2bedd0891b7c05db3199af2dbe8e09945d6a29"
+    },
+    {
+      "path": "lib/marketPriceHistory.ts",
+      "sha256": "353cd8fa67389aadb110a9ffadf557ee18439a03b8608882895e044a45bc1e72"
+    },
+    {
+      "path": "lib/priceSetterCreationRecovery.ts",
+      "sha256": "d58cd0947fb9c682d1d671d2eac10b4b8edb40bc876328850c72d8451f733541"
+    },
+    {
+      "path": "lib/priceSetterFuelInputs.ts",
+      "sha256": "fc386e6bed439870c7ea0361b8d0ad5a1b4cab35fc0910145579866944bcae40"
+    },
+    {
+      "path": "lib/priceSetterInventory.ts",
+      "sha256": "ec058f81c0da6b6ab0818979630fdea9c1d0a96c2b566d391b4961ad052c90de"
+    },
+    {
+      "path": "lib/priceSetterLegacyWrites.ts",
+      "sha256": "0921d1125b1ef769ce18ac24ac1bb75d17669dbf5c133a367f1bcfc30737ca14"
+    },
+    {
+      "path": "lib/priceSetterMutation.ts",
+      "sha256": "780922a7aae16fd5f30d179cc6260eb14bbcb59e5dcb9b1c672f8efc8f8a15d2"
+    },
+    {
+      "path": "lib/priceSetterOrder.ts",
+      "sha256": "52548b2877e7af42c025562611cd40f38c383e29249a5157654ffc91b63f1c9c"
+    },
+    {
+      "path": "lib/priceSetterRequest.ts",
+      "sha256": "347fdbd879957f484edf89799d96ea6ea0797d53f02ad12fe12494b4e2093392"
+    },
+    {
+      "path": "lib/priceSetterSettings.ts",
+      "sha256": "fab6219bab7407fa314d0273be95795e34018a66a29d5642d73495b3c7f7d6fd"
+    },
+    {
+      "path": "lib/reportPublication.ts",
+      "sha256": "6640d1c5dd01ec567e62bd063e8d2b2b529f02bf2bcde74db9b986afddcdc9fd"
+    },
+    {
+      "path": "lib/reportPublicationClient.ts",
+      "sha256": "f1c6223ae497036d7110a400e701fd0f8d59c15392ba6ca87601841d31e6c4b4"
+    },
+    {
+      "path": "lib/useMarketPriceHistory.ts",
+      "sha256": "d63f2f054257be7312657df79bc0765b661bb107eca25da1604f3a3fef1bce39"
+    },
+    {
+      "path": "lib/useReportPublication.ts",
+      "sha256": "218cf3066fb8d8706929899bb63e60d46e3a56d83f66ffd6f48cd20ce67fb78a"
+    },
+    {
+      "path": "lib/priceHistoryRecords.ts",
+      "sha256": "7d496f469a79a5456fe048e50985a8d89a6f62bb95c13ab423b65dd5735a443c"
+    },
+    {
+      "path": "lib/chinaReport.ts",
+      "sha256": "c65e87a2785c365c77733a4d5508308c145a6f4fef58474f272a89f16769640f"
+    },
+    {
+      "path": "lib/taiwanReport.ts",
+      "sha256": "f1acfe4dc3fa5bf51ba2cd9bb35358116db3542086d9a3eed355d85e5e88463b"
+    },
+    {
+      "path": "lib/reportFallbacks.ts",
+      "sha256": "fe079324228f14c93b2c085768027c9a405c026af7193c1343e2e2b448ea2c90"
+    },
+    {
+      "path": "lib/reportSnapshots.ts",
+      "sha256": "89298e90bbd9eb1bd91fe45e3dea91cf91c5030b89e5b478d7ce33887b914dbf"
+    },
+    {
+      "path": "supabase/migrations/20261008112629_atomic_price_setter_save.sql",
+      "sha256": "c0e54c8737c1867ff8a15b5dbe7f0969650a75f335e617686f7cc5c243c2affc"
+    },
+    {
+      "path": "supabase/migrations/20261009025254_atomic_market_history_changes.sql",
+      "sha256": "dbce5aa16d7895a50439f1ea4399141c3ee41a6673d2b3ed44dfe0e1132fb2c4"
+    },
+    {
+      "path": "supabase/migrations/20261009032431_coherent_report_publication.sql",
+      "sha256": "b70643ca9576f04430f98cf25efba6bb3d6355cbb43c86245d878c68fe88770a"
+    },
+    {
+      "path": "supabase/migrations/20261009043924_recover_damaged_report_publications.sql",
+      "sha256": "537b65222ac8de94f7417e66ba975cdc55786771419e9ffeb71adae4703233aa"
+    },
+    {
+      "path": "supabase/migrations/20261009044514_protect_price_setter_port_deletion.sql",
+      "sha256": "d8826d010865452cfe386c4f5c944361eb13b17c91b4e723fbddb531e959e52f"
+    },
+    {
+      "path": "supabase/migrations/20261009045645_protect_required_report_port_identity.sql",
+      "sha256": "ca51ecac77c903bd13de0c0cc797b642ee0b40cdcffb6d142b9fb71cad02edbe"
+    },
+    {
+      "path": "supabase/migrations/20261009050520_idempotent_price_setter_port_creation.sql",
+      "sha256": "bbc46a352723693651e56a7177b787a757bbd26d81a3267e7f7d0653f610521e"
+    },
+    {
+      "path": "supabase/migrations/20261009051842_complete_price_setter_inventory.sql",
+      "sha256": "21854ed96faee81e568a8a7358261a3624f5d431ce8d5f78fbb6572806f96a15"
+    },
+    {
+      "path": "supabase/migrations/20261009054830_durable_price_setter_creation_recovery.sql",
+      "sha256": "ff43f9054cb0cda7f68b5b16a4dc6a9773a8b21d2500f1a8f71978482a73eca8"
+    },
+    {
+      "path": "supabase/migrations/20261009070459_fence_legacy_price_setter_creation.sql",
+      "sha256": "2566fba0a5e2b7a22a8f9f006174662f0b4aab07e15d33472b3795a81518024f"
+    },
+    {
+      "path": "supabase/migrations/20261009110700_order_divider_rename_locks.sql",
+      "sha256": "4ad07df03f839bea15cd5b7469ccc197e579954f70351a8ca2066bf7d7d06e05"
+    },
+    {
+      "path": "tests/admin-price-history.browser.test.cjs",
+      "sha256": "065c2614e6bac797ac84647662af0748014895edf5d73925ccbea9908da47373"
+    },
+    {
+      "path": "tests/admin-price-history.test.ts",
+      "sha256": "8d10270840c0fdd6895668a7c972794e9d12fc46c0511e87d029efb58677221b"
+    },
+    {
+      "path": "tests/market-price-history-api-sql.test.mjs",
+      "sha256": "61259a92c4058b05970db3ef86ee3e535aa9dfd9fbee642cddee9735bd4a004d"
+    },
+    {
+      "path": "tests/market-price-history-flow.browser.test.mjs",
+      "sha256": "a637918f15caeb61cd4c9250b65e7139b2372de1dbce328997b042593aac0591"
+    },
+    {
+      "path": "tests/market-price-history-read-sql.test.mjs",
+      "sha256": "32a2865835e4e4b92748e4f4b8205cbe3453f2fd645a4615889cf77f37158c5b"
+    },
+    {
+      "path": "tests/market-price-history-sql.test.mjs",
+      "sha256": "f3dedc4765afda310ed692e955e5a8af983ae69007880657c7dd2b5fde459e1e"
+    },
+    {
+      "path": "tests/market-price-history.test.ts",
+      "sha256": "2bc0a7788eae4505d643ed13ecabe2d0061316110edd7f2e0fa3a86df6b7d937"
+    },
+    {
+      "path": "tests/price-history-dates-sql.test.mjs",
+      "sha256": "7878f35e03ef64b83e0082ef1b7ce7eccaca54d416620cb8b502a707cc245052"
+    },
+    {
+      "path": "tests/price-history-records.test.ts",
+      "sha256": "3adafcb60cb73d9d47c668778f5f7f422a3df6bdb8bc52ee9ce7355f620283d1"
+    },
+    {
+      "path": "tests/price-setter-api-sql.test.mjs",
+      "sha256": "98a962346925b787fb3753d910a1c1fea5b2e538e54a971e01df9df4c1f401e1"
+    },
+    {
+      "path": "tests/price-setter-api.test.ts",
+      "sha256": "c4fd53365cbb87005d297e2b1d653c7afd5a40b2a4782d84c1368a0d4bc001bb"
+    },
+    {
+      "path": "tests/price-setter-atomic-sql.test.mjs",
+      "sha256": "52b75dae2e0c28f4046427f6ae33180ce29f9503b6bf6552a922642d36aa6965"
+    },
+    {
+      "path": "tests/price-setter-creation-recovery-api-sql.test.mjs",
+      "sha256": "6fa16e3f1fa580828c7578e9fe1167c9fd420b37803f52c5b8f7b05e472eb122"
+    },
+    {
+      "path": "tests/price-setter-creation-recovery-sql.test.mjs",
+      "sha256": "fef107262261cfcea6d3a49eee046c6066f718dc9147cf136d99def9844d5103"
+    },
+    {
+      "path": "tests/price-setter-creation-recovery.test.ts",
+      "sha256": "4a620fc15b37d237c96e76cfb3a3a05564b2b863fc31c2341df26753e02e8a57"
+    },
+    {
+      "path": "tests/price-setter-creation-sql.test.mjs",
+      "sha256": "3b3714728e523f7502f49c7a71beb4a24f2a0b529ff1f270295e862272d241e8"
+    },
+    {
+      "path": "tests/price-setter-delete-sql.test.mjs",
+      "sha256": "1b15d6cf139d765396fc27f0df3bdd1831d428072704d7e3e2122c1f91ad3af4"
+    },
+    {
+      "path": "tests/price-setter-fuel-inputs.test.ts",
+      "sha256": "05de12fdeb2dd496ccfb08810bb02c71ae72194eb6926fb06709ae5e1df75048"
+    },
+    {
+      "path": "tests/price-setter-inventory-sql.test.mjs",
+      "sha256": "e56c80e1f03a29decacf48580c546ebf80456421331e07724db7322460ba7c3c"
+    },
+    {
+      "path": "tests/price-setter-inventory.test.ts",
+      "sha256": "7288928c0cb9ed05d237d793101633ea656f40eed818798b16356b4c4e293d04"
+    },
+    {
+      "path": "tests/price-setter-legacy-proxy.test.ts",
+      "sha256": "78f4f3451d7a12755a3b84e3af2d039aab5779389d86dd77105cfc005418ba3a"
+    },
+    {
+      "path": "tests/price-setter-legacy-writes.test.ts",
+      "sha256": "bdf052a8f58986553015200e57236929de3500cb1aafa854878b357d5ef37b96"
+    },
+    {
+      "path": "tests/price-setter-mutation.test.ts",
+      "sha256": "d3c70d7a0e30989a84c1405680e608d2045e60b9ea118d8a640bab74fe76eff5"
+    },
+    {
+      "path": "tests/price-setter-order-sql.test.mjs",
+      "sha256": "d8f9189ab73785c1b1b908a43854157d54df33abdf0d53ff2ec7d0f0eb8caa62"
+    },
+    {
+      "path": "tests/price-setter-order.test.ts",
+      "sha256": "522d7372fcd7e9c9c62961b54b1d531504c70b03ea08e0a3395d8e4e93f28b18"
+    },
+    {
+      "path": "tests/price-setter-rename-fallback-sql.test.mjs",
+      "sha256": "f3f48bd9eea13a7ef8c9bd2c7ec4584888c6b590b127b8ecff581ecf2a9f946f"
+    },
+    {
+      "path": "tests/price-setter-required-port-sql.test.mjs",
+      "sha256": "f89bc87a9286e530d2213b7c2d0560ff333ad035276c315383df9452d7003ae9"
+    },
+    {
+      "path": "tests/price-setter-settings-sql.test.mjs",
+      "sha256": "00e2cf7401dd97377717c9bdc5a373c94344824199fbbad2d2f63b1b79690094"
+    },
+    {
+      "path": "tests/price-setter-settings.test.ts",
+      "sha256": "fda1a629d8e8b2b307cf19ecb8ad170383866d5bcb72b48f3300cb0eee6956c6"
+    },
+    {
+      "path": "tests/pricesetter-order.browser.test.mjs",
+      "sha256": "ce5aeae5060512b6d6df29d90ae707af81ce815c6769915775e69a0011e4b84f"
+    },
+    {
+      "path": "tests/pricesetter-port-list.browser.test.cjs",
+      "sha256": "7fbe79662035e45c70958a9ea9f0d45a4b5a2d67648b095d195f1877aabf1b83"
+    },
+    {
+      "path": "tests/pricesetter-publication-flow.browser.test.mjs",
+      "sha256": "73e3674679dadddd502b68b2635593648c6e8bd708f57c908136add59f7c6f2e"
+    },
+    {
+      "path": "tests/pricesetter-publishing.browser.test.cjs",
+      "sha256": "fe88a1ae50a31074d56f0422334d2f3bb9b21bde8203a39d752776fed4a19956"
+    },
+    {
+      "path": "tests/pricesetter-save.browser.test.cjs",
+      "sha256": "9610c960c9c5a93868a2f4662717c0666e15e4eb48dd8964e33b5a9cd46d1f01"
+    },
+    {
+      "path": "tests/pricesetter-settings.browser.test.cjs",
+      "sha256": "0fabf902d1c8dcbd9e3353ab592eb60f53e93e2db3f52b0ca7d7b6d83f26c73d"
+    },
+    {
+      "path": "tests/pricing-native-postgres.test.mjs",
+      "sha256": "182bedf6679842afc86add262622f32e6d137cf24cf9bda2aabb46e5a9409d07"
+    },
+    {
+      "path": "tests/report-publication-api-sql.test.mjs",
+      "sha256": "5c23cfd099dcb9f3bf9de496f01c4be9c90c98c261af6c804902b0b97fce3201"
+    },
+    {
+      "path": "tests/report-publication-client.test.ts",
+      "sha256": "623e80ec8ae3bc344c28215ee34ac2b02981cac74b1ae84d63a59afbe9dd1c85"
+    },
+    {
+      "path": "tests/report-publication-recovery-sql.test.mjs",
+      "sha256": "263ad63ad219dbd2fbeb0e69d0f1da2d1ca1daa6bb25cd3cb5df7f880b66b17b"
+    },
+    {
+      "path": "tests/report-publication.test.ts",
+      "sha256": "f8c0efacf701ead64a8bb2de049f5a0e6b85e53a178924edb1349362696de3eb"
+    },
+    {
+      "path": "tests/reportHistory.test.ts",
+      "sha256": "849da2023c069a77433e4d32646d6d54d1ebd929d9e2ad55c1adcec6ee941120"
+    },
+    {
+      "path": "tests/fixtures/market-price-history-app.mjs",
+      "sha256": "1258a910e5c01353a02fe19677d8803978e7d89adcd90c44c9433c2570903d12"
+    },
+    {
+      "path": "tests/fixtures/native-postgres-pricing.mjs",
+      "sha256": "107115d3b590a8619ad576edb2fb1964758a77cbe62835493d4b35bbbec9eda4"
+    },
+    {
+      "path": "tests/fixtures/price-setter-sql.mjs",
+      "sha256": "b8469a762c30d6725a9f24dfb758e6c1b3bff227f2de2a67c5b2eae55081e834"
+    },
+    {
+      "path": "tests/fixtures/report-publication-app.mjs",
+      "sha256": "6d3ebfbfb795c83475b8c426d012540329977034789593b6f6eb2c35f7e096f9"
+    },
+    {
+      "path": "tests/fixtures/report-publication-baseline.cjs",
+      "sha256": "75ad3f55cf6263f4db0853ef7d7f7b633cead55bae8d45556595ccb821baa36c"
+    }
+  ]
+}

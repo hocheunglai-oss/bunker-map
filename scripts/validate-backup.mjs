@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
+import { pricingBackupSchemaFromArtifact, pricingBackupSchemaVersion } from "../lib/backupPricingSchema.mjs"
 
 const backupPath = process.argv[2]
 if (!backupPath) {
@@ -109,6 +110,7 @@ const TABLE_SECTIONS = [
   { key: "ports", table: "ports", primaryKey: ["id"] },
   { key: "remarks", table: "remarks", primaryKey: ["id"] },
   { key: "priceHistory", table: "price_history", primaryKey: ["id"] },
+  { key: "priceSetterCreationReceipts", table: "price_setter_creation_receipts", primaryKey: ["request_id"] },
   {
     key: "whatsappConversations",
     table: "whatsapp_conversations",
@@ -293,10 +295,10 @@ const EXCLUDED_CREDENTIAL_FIELDS = [
   "spc_users.password_hash",
 ]
 
-function getBackupContract(migrationHead) {
+function getBackupContract(migrationHead, pricingSchemaVersion = "none") {
   const tableSections = TABLE_SECTIONS.filter(
     (section) =>
-      !section.introducedAt || migrationHead >= section.introducedAt
+      section.table === "price_setter_creation_receipts" ? pricingSchemaVersion !== "none" : !section.introducedAt || migrationHead >= section.introducedAt
   )
   const explicitlyEphemeralTables = [
     ...BASE_EXPLICITLY_EPHEMERAL_TABLES,
@@ -1114,7 +1116,7 @@ function exactObjectCounts(actual, expected) {
 }
 
 function validateDatabaseInventory(backup, errors) {
-  const contract = getBackupContract(String(backup.migrationHead || ""))
+  const contract = getBackupContract(String(backup.migrationHead || ""), pricingBackupSchemaVersion(pricingBackupSchemaFromArtifact(backup.databaseInventory)))
   const inventory = backup.databaseInventory
   if (!isPlainObject(inventory)) {
     addError(errors, "databaseInventory: missing or not an object")
@@ -1127,6 +1129,7 @@ function validateDatabaseInventory(backup, errors) {
     "registeredTables",
     "explicitlyEphemeralTables",
     "excludedCredentialFields",
+    ...(Object.hasOwn(inventory, "pricingSchema") ? ["pricingSchema"] : []),
   ]
   if (JSON.stringify(Object.keys(inventory)) !== JSON.stringify(expectedKeys)) {
     addError(errors, "databaseInventory: unexpected fields or field order")
@@ -1468,8 +1471,55 @@ function validateTopLevelAndManifest(backup, rawFile, errors, warnings) {
   }
 }
 
+function validatePriceSetterCreationReceipts(receipts, pricingSchemaVersion = "creation-v1") {
+  const errors = [], requestIds = new Set(), portIds = new Set(), pendingActors = new Set()
+  const uuid = /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i
+  const requiresRecoveryFields = pricingSchemaVersion === "recovery-v2"
+  function timestamp(value) {
+    if (typeof value !== "string") return null
+    const match = /^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.(\d{1,6}))?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.exec(value)
+    const millis = Date.parse(value)
+    if (!match || !Number.isFinite(millis)
+      || new Date(`${match[1]}T00:00:00Z`).toISOString().slice(0, 10) !== match[1]) return null
+    // PostgreSQL keeps microseconds; Date.parse alone would accept an
+    // acknowledgement a few microseconds before creation as an equal time.
+    return BigInt(millis) * 1000n + BigInt((match[2] || "").padEnd(6, "0").slice(3))
+  }
+  for (const [index, row] of receipts.entries()) {
+    const label = `priceSetterCreationReceipts[${index}]`
+    if (!row || typeof row !== "object" || Array.isArray(row)
+      || typeof row.request_id !== "string" || !uuid.test(row.request_id)
+      || typeof row.port_id !== "string" || !uuid.test(row.port_id)
+      || !["port", "divider"].includes(row.kind)
+      || timestamp(row.created_at) === null) {
+      errors.push(`${label}: invalid durable creation receipt`)
+      continue
+    }
+    const requestId = row.request_id.toLowerCase(), portId = row.port_id.toLowerCase()
+    if (requestIds.has(requestId) || portIds.has(portId)) errors.push(`${label}: duplicate creation identity`)
+    requestIds.add(requestId); portIds.add(portId)
+    if (requiresRecoveryFields || Object.hasOwn(row, "actor_id") || Object.hasOwn(row, "acknowledged_at")) {
+      const ack = timestamp(row.acknowledged_at)
+      if (!Object.hasOwn(row, "actor_id") || !Object.hasOwn(row, "acknowledged_at")
+        || row.actor_id !== null && (typeof row.actor_id !== "string" || !uuid.test(row.actor_id))
+        || row.acknowledged_at !== null && (row.actor_id === null || ack === null || ack < timestamp(row.created_at))) {
+        errors.push(`${label}: invalid creation recovery state`)
+        continue
+      }
+      if (row.actor_id !== null && row.acknowledged_at === null) {
+        const actorId = row.actor_id.toLowerCase()
+        if (pendingActors.has(actorId)) errors.push(`${label}: multiple unfinished additions for one administrator`)
+        pendingActors.add(actorId)
+      }
+    }
+  }
+  // Deliberately no ports FK check: tombstones for deleted rows are required.
+  return errors
+}
+
 function validateSections(backup, errors, warnings) {
-  const contract = getBackupContract(String(backup.migrationHead || ""))
+  const pricingSchemaVersion = pricingBackupSchemaVersion(pricingBackupSchemaFromArtifact(backup.databaseInventory))
+  const contract = getBackupContract(String(backup.migrationHead || ""), pricingSchemaVersion)
   const data = isPlainObject(backup?.data) ? backup.data : {}
   const counts = isPlainObject(backup?.counts) ? backup.counts : {}
   const dataKeys = Object.keys(data).sort()
@@ -1573,6 +1623,7 @@ function validateSections(backup, errors, warnings) {
   }
 
   const companyIds = idSet(data, "ccCompanies")
+  for (const message of validatePriceSetterCreationReceipts(rows(data, "priceSetterCreationReceipts"), pricingSchemaVersion)) addError(errors, message)
   const countryIds = idSet(data, "ccCountries")
   const portIds = idSet(data, "ports")
   const sharedContactIds = idSet(data, "sharedAddressbookContacts")
@@ -2561,7 +2612,13 @@ try {
 const errors = []
 const warnings = []
 const safeBackup = isPlainObject(backup) ? backup : {}
-const backupContract = getBackupContract(String(safeBackup.migrationHead || ""))
+let backupContract
+try {
+  backupContract = getBackupContract(String(safeBackup.migrationHead || ""), pricingBackupSchemaVersion(pricingBackupSchemaFromArtifact(safeBackup.databaseInventory)))
+} catch (error) {
+  addError(errors, error instanceof Error ? error.message : "Backup pricing schema is invalid.")
+  backupContract = getBackupContract(String(safeBackup.migrationHead || ""))
+}
 function runValidationStep(label, callback, fallback) {
   try {
     return callback()

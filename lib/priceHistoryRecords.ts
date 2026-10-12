@@ -126,7 +126,11 @@ export async function savePriceHistoryForMarketDate(
     values: PriceHistoryValues
   },
 ) {
-  const dateKey = getMarketDateKey(input.recordedAt)
+  const recordedAt = normaliseHistoryTimestamp(input.recordedAt)
+  if (Object.values(input.values).some((value) => value !== null && !Number.isFinite(value))) {
+    throw new Error("Prices must be finite numbers or empty.")
+  }
+  const dateKey = getMarketDateKey(recordedAt)
   const nextDateKey = getNextMarketDateKey(dateKey)
   const existingResult = await supabase
     .from("price_history")
@@ -137,12 +141,13 @@ export async function savePriceHistoryForMarketDate(
     .order("recorded_at", { ascending: false })
 
   throwIfError(existingResult, "Load price history for market date")
+  if (!Array.isArray(existingResult.data)) throw new Error("Price history could not be loaded.")
 
   const existingRows = (existingResult.data ?? []) as StoredPriceHistoryRecord[]
   const payload = {
     port_id: input.portId,
     ...input.values,
-    recorded_at: input.recordedAt,
+    recorded_at: recordedAt,
   }
 
   if (existingRows.length === 0) {
@@ -153,6 +158,7 @@ export async function savePriceHistoryForMarketDate(
       .single()
 
     throwIfError(insertResult, "Insert price history")
+    if (!insertResult.data) throw new Error("Price history save was not confirmed.")
     return insertResult.data as StoredPriceHistoryRecord
   }
 
@@ -165,6 +171,7 @@ export async function savePriceHistoryForMarketDate(
     .single()
 
   throwIfError(updateResult, "Update price history")
+  if (!updateResult.data) throw new Error("Price history save was not confirmed.")
 
   const duplicateIds = existingRows.slice(1).map((row) => row.id)
   if (duplicateIds.length > 0) {
