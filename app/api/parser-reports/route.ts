@@ -43,6 +43,7 @@ type ParserReportPayload = {
   note?: unknown
   pageUrl?: unknown
   metadata?: unknown
+  expectedUpdatedAt?: unknown
 }
 
 function parserAiSources(value: unknown) {
@@ -67,6 +68,16 @@ function asString(value: unknown, maxLength = MAX_TEXT_LENGTH) {
 
 function sourceFrom(value: unknown): ParserReportSource | null {
   return value === "enquiryworksheet" || value === "spc" ? value : null
+}
+
+function validReportVersion(value: string) {
+  const date = value.match(/^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,6})?(?:Z|[+-](?:0\d|1[0-5]):[0-5]\d)$/)
+  if (!date || Number(date[1]) < 1 || !Number.isFinite(Date.parse(value))) return false
+  const calendarDate = new Date(0)
+  calendarDate.setUTCFullYear(Number(date[1]), Number(date[2]) - 1, Number(date[3]))
+  return calendarDate.getUTCFullYear() === Number(date[1])
+    && calendarDate.getUTCMonth() === Number(date[2]) - 1
+    && calendarDate.getUTCDate() === Number(date[3])
 }
 
 function fingerprintFor(input: {
@@ -220,14 +231,34 @@ export async function POST(request: Request) {
         return NextResponse.json({ message: "Parser report is required." }, { status: 400 })
       }
       const { supabase } = await getSessionAndClient(source, request, "edit", true)
+      // Treat this as an opaque database version. Converting it through Date
+      // would drop PostgreSQL microseconds and let a stale review appear fresh.
+      const expectedUpdatedAt = typeof payload.expectedUpdatedAt === "string"
+        ? payload.expectedUpdatedAt
+        : ""
+      if (payload.expectedUpdatedAt === undefined || payload.expectedUpdatedAt === "") {
+        return NextResponse.json(
+          { code: "PARSER_REPORT_CONFLICT", message: "Reload this report before saving. Your draft has been kept." },
+          { status: 409 },
+        )
+      }
+      if (!validReportVersion(expectedUpdatedAt)) {
+        return NextResponse.json({ message: "A valid report version is required." }, { status: 400 })
+      }
       const { data: existing, error: existingError } = await supabase
         .from("parser_reports")
-        .select("metadata, corrected_output, note, status")
+        .select("metadata, corrected_output, note, status, updated_at")
         .eq("id", id)
         .eq("source", source)
         .maybeSingle()
       if (existingError) throw existingError
       if (!existing) return NextResponse.json({ message: "Parser report not found." }, { status: 404 })
+      if (existing.updated_at !== expectedUpdatedAt) {
+        return NextResponse.json(
+          { code: "PARSER_REPORT_CONFLICT", message: "This report changed in another session. Your draft has been kept; reload the latest report before saving." },
+          { status: 409 },
+        )
+      }
 
       const existingStatus = existing.status === "reviewed" ? "reviewed" : "new"
       const existingMetadata = asParserReportMetadata(existing.metadata)
@@ -278,21 +309,30 @@ export async function POST(request: Request) {
       const note = payload.note === undefined
         ? asString(existing.note, MAX_NOTE_LENGTH)
         : asString(payload.note, MAX_NOTE_LENGTH)
-      const { data, error } = await supabase
-        .from("parser_reports")
-        .update({
-          corrected_output: correctedOutput,
-          note,
-          metadata,
-          status: action === "submit-ai" ? "new" : "reviewed",
-          updated_at: now,
-        })
-        .eq("id", id)
-        .eq("source", source)
-        .select("*")
-        .single()
+      const { data, error } = await supabase.rpc("save_parser_report_review", {
+        p_id: id,
+        p_source: source,
+        p_expected_updated_at: expectedUpdatedAt,
+        p_action: action,
+        p_corrected_output: correctedOutput,
+        p_note: note,
+        p_metadata: metadata,
+      })
+      if (error?.code === "P0002") {
+        return NextResponse.json(
+          { code: "PARSER_REPORT_CONFLICT", message: "This report changed in another session. Your draft has been kept; reload the latest report before saving." },
+          { status: 409 },
+        )
+      }
       if (error) throw error
-      return NextResponse.json({ success: true, report: parserReportFromRow(data as ParserReportRow) })
+      const row = Array.isArray(data) && data.length === 1 ? data[0] as ParserReportRow : undefined
+      if (!row || row.id !== id || row.source !== source
+        || typeof row.updated_at !== "string" || !row.updated_at || row.updated_at === expectedUpdatedAt
+        || row.corrected_output !== correctedOutput || row.note !== note
+        || row.status !== (action === "submit-ai" ? "new" : "reviewed")) {
+        throw new Error("The saved parser review could not be confirmed. Your draft has been kept.")
+      }
+      return NextResponse.json({ success: true, report: parserReportFromRow(row) })
     }
 
     const rawText = asString(payload.rawText)
