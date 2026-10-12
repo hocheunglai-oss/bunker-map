@@ -9,6 +9,7 @@ import { useIsMobile } from "@/lib/useIsMobile"
 import DisclaimerLink from "@/components/DisclaimerLink"
 import { buildFallbackKey, type FallbackMap } from "@/lib/reportFallbackKeys"
 import type { PublicReportPayloadByKey } from "@/lib/publicMarketData"
+import { parsePublicReportPayload, PUBLIC_REPORT_UNAVAILABLE_MESSAGE } from "@/lib/publicReportValidation"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -108,10 +109,16 @@ const sectionCardStyle: React.CSSProperties = {
 
 type ChinaReportPayload = PublicReportPayloadByKey["china"]
 
-async function loadChinaReport(): Promise<ChinaReportPayload | null> {
-  const response = await fetch("/api/reports/china")
-  if (!response.ok) return null
-  return response.json() as Promise<ChinaReportPayload>
+async function loadChinaReport(signal: AbortSignal): Promise<ChinaReportPayload | null> {
+  try {
+    const response = await fetch("/api/reports/china", { cache: "no-store", signal })
+    if (!response.ok) return null
+    return parsePublicReportPayload(await response.json(), "china")
+  } catch {
+    // A background refresh must preserve the last displayed report on network
+    // failure, cancellation or an unreadable response.
+    return null
+  }
 }
 
 export default function ChinaReport({ initialData }: { initialData: ChinaReportPayload }) {
@@ -123,10 +130,14 @@ export default function ChinaReport({ initialData }: { initialData: ChinaReportP
 
   useEffect(() => {
     let cancelled = false
+    let activeRequest: AbortController | null = null
 
     async function refreshReport() {
-      const payload = await loadChinaReport()
-      if (cancelled || !payload?.snapshot) return
+      activeRequest?.abort()
+      const request = new AbortController()
+      activeRequest = request
+      const payload = await loadChinaReport(request.signal)
+      if (cancelled || request.signal.aborted || !payload?.snapshot) return
 
       setReportDate(payload.snapshot.reportDate)
       setSections(payload.snapshot.sections)
@@ -142,6 +153,7 @@ export default function ChinaReport({ initialData }: { initialData: ChinaReportP
 
     return () => {
       cancelled = true
+      activeRequest?.abort()
       window.removeEventListener("focus", refreshVisibleReport)
       document.removeEventListener("visibilitychange", refreshVisibleReport)
     }
@@ -296,8 +308,8 @@ export default function ChinaReport({ initialData }: { initialData: ChinaReportP
         </div>
 
         {totalRows === 0 ? (
-          <div style={{ ...cardStyle, padding: "18px", marginBottom: "24px", textAlign: "center", color: "#d7e9ff" }}>
-            No report data available.
+          <div role="status" style={{ ...cardStyle, padding: "18px", marginBottom: "24px", textAlign: "center", color: "#d7e9ff" }}>
+            {initialData.unavailable ? PUBLIC_REPORT_UNAVAILABLE_MESSAGE : "No report data available."}
           </div>
         ) : (
           <div

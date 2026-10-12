@@ -3,13 +3,13 @@ import { createClient } from "@supabase/supabase-js"
 import { FALLBACK_REMARK_ID, type FallbackMap } from "@/lib/reportFallbackKeys"
 import {
   emptyTaiwanOperationalNotice,
-  parseTaiwanOperationalNotice,
   TAIWAN_OPERATIONAL_NOTICE_REMARK_ID,
   type TaiwanOperationalNotice,
 } from "@/lib/taiwanOperationalNotice"
 import type { HongKongReportRow } from "@/lib/hongKongReport"
 import type { TaiwanReportRow } from "@/lib/taiwanReport"
 import type { ChinaReportSection } from "@/lib/chinaReport"
+import { parsePublicReportJson, readPublicOperationalNotice, validatePublicFallbacks, validatePublicReportSnapshot } from "@/lib/publicReportValidation"
 
 export const PUBLIC_MARKET_DATA_REVALIDATE_SECONDS = 120
 export const PUBLIC_MARKET_DATA_STALE_SECONDS = 600
@@ -66,7 +66,7 @@ export type SectionReportSnapshot = {
   sections: ChinaReportSection[]
 }
 
-export type PublicReportPayload =
+export type PublicReportPayload = (
   | {
       key: "taiwan"
       snapshot: TaiwanReportSnapshot | null
@@ -89,6 +89,7 @@ export type PublicReportPayload =
       snapshot: SectionReportSnapshot | null
       fallbacks: FallbackMap
     }
+  ) & { unavailable?: boolean }
 
 export type PublicReportPayloadByKey = {
   taiwan: Extract<PublicReportPayload, { key: "taiwan" }>
@@ -202,25 +203,32 @@ async function loadReportData(key: ReportSnapshotKey): Promise<PublicReportPaylo
 
   if (error) throw error
 
-  const contentById = new Map(
-    (data || []).map((row) => [Number(row.id), typeof row.content === "string" ? row.content : ""] as const),
-  )
-  const fallbacks = parseFallbackMap(contentById.get(FALLBACK_REMARK_ID))
+  if (!Array.isArray(data)) throw Error("Public report read was incomplete")
+  const contentById = new Map<number, string | null>()
+  for (const row of data) {
+    if (!row || !Number.isInteger(row.id) || !ids.includes(row.id) || contentById.has(row.id)
+      || row.content !== null && typeof row.content !== "string") throw Error("Public report read was incomplete")
+    contentById.set(row.id, row.content)
+  }
+  const fallbackValue = parsePublicReportJson(contentById.get(FALLBACK_REMARK_ID))
+  const fallbacks = fallbackValue === null ? {} : validatePublicFallbacks(fallbackValue)
+  const value = parsePublicReportJson(contentById.get(REPORT_SNAPSHOT_IDS[key]))
+  const snapshot = value === null ? null : validatePublicReportSnapshot(value, key)
 
   if (key === "taiwan") {
     return {
       key,
-      snapshot: parseJson<TaiwanReportSnapshot>(contentById.get(REPORT_SNAPSHOT_IDS[key])),
+      snapshot: snapshot as TaiwanReportSnapshot | null,
       fallbacks,
       specialNotice: contentById.get(2) || "",
-      operationalNotice: parseTaiwanOperationalNotice(contentById.get(TAIWAN_OPERATIONAL_NOTICE_REMARK_ID)),
+      operationalNotice: readPublicOperationalNotice(contentById.get(TAIWAN_OPERATIONAL_NOTICE_REMARK_ID)),
     }
   }
 
   if (key === "hongkong") {
     return {
       key,
-      snapshot: parseJson<HongKongReportSnapshot>(contentById.get(REPORT_SNAPSHOT_IDS[key])),
+      snapshot: snapshot as HongKongReportSnapshot | null,
       fallbacks,
     }
   }
@@ -228,14 +236,14 @@ async function loadReportData(key: ReportSnapshotKey): Promise<PublicReportPaylo
   if (key === "china") {
     return {
       key,
-      snapshot: parseJson<SectionReportSnapshot>(contentById.get(REPORT_SNAPSHOT_IDS[key])),
+      snapshot: snapshot as SectionReportSnapshot | null,
       fallbacks,
     }
   }
 
   return {
     key,
-    snapshot: parseJson<SectionReportSnapshot>(contentById.get(REPORT_SNAPSHOT_IDS[key])),
+    snapshot: snapshot as SectionReportSnapshot | null,
     fallbacks,
   }
 }
@@ -246,22 +254,16 @@ const getCachedHomepageMarketData = unstable_cache(
   { revalidate: PUBLIC_MARKET_DATA_REVALIDATE_SECONDS },
 )
 
-const getCachedReportData = unstable_cache(
-  async (key: ReportSnapshotKey) => loadReportData(key),
-  ["public-report-data-v1"],
-  { revalidate: PUBLIC_MARKET_DATA_REVALIDATE_SECONDS },
-)
-
 export function getHomepageMarketData() {
   return getCachedHomepageMarketData()
 }
 
 export function getPublicReportData<Key extends ReportSnapshotKey>(key: Key) {
-  if (key === "taiwan" || key === "hongkong") {
-    return loadReportData(key) as Promise<PublicReportPayloadByKey[Key]>
-  }
-
-  return getCachedReportData(key) as Promise<PublicReportPayloadByKey[Key]>
+  // Reports are small, already-computed publication records. Read all reports
+  // authoritatively, as HK/Taiwan already did: a second TTL/SWR cache could
+  // return an older publication even after publishing has been confirmed.
+  // Keep the independent, larger homepage dataset cached separately.
+  return loadReportData(key) as Promise<PublicReportPayloadByKey[Key]>
 }
 
 export function getEmptyPublicReportData<Key extends ReportSnapshotKey>(
@@ -274,6 +276,7 @@ export function getEmptyPublicReportData<Key extends ReportSnapshotKey>(
       fallbacks: {},
       specialNotice: "",
       operationalNotice: emptyTaiwanOperationalNotice,
+      unavailable: true,
     } as PublicReportPayloadByKey[Key]
   }
 
@@ -281,6 +284,7 @@ export function getEmptyPublicReportData<Key extends ReportSnapshotKey>(
     key,
     snapshot: null,
     fallbacks: {},
+    unavailable: true,
   } as PublicReportPayloadByKey[Key]
 }
 

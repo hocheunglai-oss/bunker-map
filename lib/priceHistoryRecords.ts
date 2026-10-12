@@ -24,6 +24,35 @@ const marketDateFormatter = new Intl.DateTimeFormat("en-CA", {
   day: "2-digit",
 })
 
+const marketTimestampFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Hong_Kong",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+})
+
+export function normaliseHistoryTimestamp(recordedAt: string) {
+  const value = recordedAt.trim()
+  const match = value.match(/^(\d{4}-\d{2}-\d{2})(?:[T ]([0-2]\d):([0-5]\d)(?::([0-5]\d)(\.\d{1,6})?)?(Z|[+-]\d{2}:?\d{2})?)?$/i)
+  if (!match || Number(match[2] || 0) > 23) throw new Error("A valid price history date is required.")
+  const calendarDate = new Date(`${match[1]}T12:00:00Z`)
+  if (!Number.isFinite(calendarDate.getTime()) || calendarDate.toISOString().slice(0, 10) !== match[1]) {
+    throw new Error("A valid price history date is required.")
+  }
+  // The deployed recorded_at column is timestamp WITHOUT time zone. A UTC
+  // suffix is discarded by Postgres, not converted to Hong Kong time. Convert
+  // explicit instants here; existing timezone-free market timestamps stay local.
+  if (!match[6]) return value.replace(" ", "T")
+  const parsed = new Date(value.replace(" ", "T"))
+  if (!Number.isFinite(parsed.getTime())) throw new Error("A valid price history date is required.")
+  const parts = Object.fromEntries(marketTimestampFormatter.formatToParts(parsed).map(({ type, value }) => [type, value]))
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}.${String(parsed.getUTCMilliseconds()).padStart(3, "0")}`
+}
+
 function getErrorMessage(error: unknown) {
   if (error && typeof error === "object" && "message" in error) {
     const message = (error as { message?: unknown }).message
