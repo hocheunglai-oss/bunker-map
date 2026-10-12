@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js"
-import { NextResponse } from "next/server"
+import { requireAdminPagePermission } from "@/lib/adminAuth"
+import { parserReportAccessPage } from "@/lib/parserReportAccess"
 import {
   parserReportCounts,
   parserReportFromRow,
@@ -7,6 +8,8 @@ import {
   type ParserReportRow,
   type ParserReportSource,
 } from "@/lib/parserReports"
+import { requireSpcPagePermission } from "@/lib/spcAuth"
+import { spcPrivateJson } from "@/lib/spcResponse"
 
 export const dynamic = "force-dynamic"
 
@@ -25,6 +28,13 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const source = sourceFrom(searchParams.get("source"))
     const includeResolved = searchParams.get("includeResolved") === "1"
+
+    // This diagnostic/export response always includes both sources' counts,
+    // even when its report list is source-filtered. Both review permissions
+    // must succeed before constructing the privileged client or reading data.
+    await requireAdminPagePermission(parserReportAccessPage("enquiryworksheet", true), "view")
+    await requireSpcPagePermission(parserReportAccessPage("spc", true), "view")
+
     const supabase = createClient(
       requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
       requireEnv("SUPABASE_SERVICE_ROLE_KEY"),
@@ -52,7 +62,7 @@ export async function GET(request: Request) {
     const enquiryworksheet = reportsWithState.filter((report) => report.source === "enquiryworksheet")
     const spc = reportsWithState.filter((report) => report.source === "spc")
 
-    return NextResponse.json({
+    return spcPrivateJson({
       source,
       reports,
       pendingAiReports,
@@ -66,9 +76,11 @@ export async function GET(request: Request) {
       includeResolved,
     })
   } catch (error) {
-    return NextResponse.json(
-      { message: error instanceof Error ? error.message : "Failed to load parser reports." },
-      { status: 500 },
+    const message = error instanceof Error ? error.message : ""
+    const status = message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500
+    return spcPrivateJson(
+      { message: status === 500 ? "Failed to load parser reports." : message },
+      { status },
     )
   }
 }
