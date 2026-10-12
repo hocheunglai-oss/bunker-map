@@ -213,6 +213,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ key: 
       expectedEventVersions: asRecord(body.expectedEventVersions),
       expectedSettingVersions: asRecord(body.expectedSettingVersions),
       settings: asRecord(body.settings),
+      confirmEmailRecipientsClear: body.confirmEmailRecipientsClear === true,
     })
     return NextResponse.json({
       success: true,

@@ -6,6 +6,7 @@ import {
   officeCalendarSeedEvents,
 } from "@/data/eventCalendar"
 import { EVENT_CALENDAR_PROTOCOL_VERSION } from "@/lib/eventCalendarProtocol"
+import { validateCalendarEmailList } from "@/lib/calendarRecipients"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
 import { addCalendarDays, getHongKongDateKey, isValidCalendarDate, preserveCalendarEndDate } from "@/lib/eventCalendarDates"
@@ -487,6 +488,7 @@ export default function EventCalendarPage() {
   const [emailModalOpen, setEmailModalOpen] = useState(false)
   const [emailRecipientsText, setEmailRecipientsText] = useState("")
   const [draftEmailRecipientsText, setDraftEmailRecipientsText] = useState("")
+  const [draftEmailRecipientsInitialText, setDraftEmailRecipientsInitialText] = useState("")
   const [emailPrompt, setEmailPrompt] = useState<EmailPromptState>(null)
   const [, setSyncStatus] = useState("Sync ready")
   const [googleCalendarEvents, setGoogleCalendarEvents] = useState<GoogleCalendarEvent[]>([])
@@ -839,6 +841,7 @@ export default function EventCalendarPage() {
     settings: Record<string, unknown> = {},
     expectedEventVersions: Record<string, string> = {},
     expectedSettingVersions: Record<string, string> = {},
+    confirmEmailRecipientsClear = false,
   ) {
     if (!canEdit) throw new Error("You have view-only access to this calendar.")
     if (calendarMutationPendingRef.current) {
@@ -861,6 +864,7 @@ export default function EventCalendarPage() {
           settings,
           expectedEventVersions,
           expectedSettingVersions,
+          ...(confirmEmailRecipientsClear ? { confirmEmailRecipientsClear: true } : {}),
         }),
       })
       const payload = await response.json().catch(() => null)
@@ -1289,6 +1293,7 @@ export default function EventCalendarPage() {
   function openEmailModal() {
     if (!canEdit) return
     setDraftEmailRecipientsText(emailRecipientsText)
+    setDraftEmailRecipientsInitialText(emailRecipientsText)
     setDraftEmailRecipientsVersion(settingVersions.emailRecipientsText || "")
     setToolsMenuOpen(false)
     setEmailModalOpen(true)
@@ -1296,7 +1301,13 @@ export default function EventCalendarPage() {
 
   async function saveEmailRecipients() {
     if (calendarMutationPendingRef.current) return
+    if (draftEmailRecipientsText === draftEmailRecipientsInitialText) {
+      setEmailModalOpen(false)
+      return
+    }
     try {
+      const clearingEmailRecipients = validateCalendarEmailList(draftEmailRecipientsText).length === 0
+      if (clearingEmailRecipients && !window.confirm("Clear the email list and disable event-update emails? New and edited events will no longer be emailed to this list. Scheduled daily reminders are not affected.")) return
       await mutateCalendar(
         "settings",
         [],
@@ -1304,6 +1315,7 @@ export default function EventCalendarPage() {
         { emailRecipientsText: draftEmailRecipientsText },
         {},
         { emailRecipientsText: draftEmailRecipientsVersion },
+        clearingEmailRecipients,
       )
       setEmailRecipientsText(draftEmailRecipientsText)
       setEmailModalOpen(false)
@@ -2588,7 +2600,7 @@ export default function EventCalendarPage() {
           <div style={{ ...modalStyle, width: "min(520px, 100%)" }}>
             <h2 style={{ margin: "0 0 10px", fontSize: "24px" }}>Event Update Email Recipients</h2>
             <p style={{ margin: "0 0 12px", color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
-              One email per line. This list is for new and edited events when you choose to send an update. Leave it empty to disable update emails. The scheduled daily reminder has a separate recipient list.
+              One email per line. This list is for new and edited events when you choose to send an update. Saving without changes keeps the current settings. To disable update emails, clear the listed addresses, save and confirm. The scheduled daily reminder has a separate recipient list.
             </p>
             <textarea
               value={draftEmailRecipientsText}
