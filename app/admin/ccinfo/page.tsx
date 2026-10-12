@@ -7,6 +7,7 @@ import { useIsMobile } from "@/lib/useIsMobile"
 import { getAuditChangeSummary, getAuditSubject, isCcinfoAuditLog } from "@/lib/auditDisplay"
 import { buildPostgrestCountryMatchFilter } from "@/lib/queryEscaping"
 import SimpleTable from "@/components/ccinfo/SimpleTable"
+import { CcinfoSaveConflict, createCcinfoSaveQueue, type CcinfoRecordChanges } from "@/lib/ccinfoSave"
 
 type RecordKind = "company" | "country" | "port"
 
@@ -406,6 +407,12 @@ function normalizeBlocks(value: unknown, fallbackText: string, updates: Record<s
   return textToBlocks(fallbackText, updates)
 }
 
+function hasSectionTableLayout(section: Partial<HighlightCard>): boolean {
+  const table = section.table
+  if (Array.isArray(table) && table.length > 0 && table.every((row) => Array.isArray(row) && row.every((cell) => typeof cell === "string")) && table.some((row) => row.length > 0)) return true
+  return Array.isArray(section.sections) && section.sections.some(hasSectionTableLayout)
+}
+
 function parseSummaryMeta(value: string | null): SummaryMeta {
   if (!value?.trim()) return { sections: [], mainLineUpdates: {}, mainBlocks: [], mainSections: [] }
   try {
@@ -436,7 +443,7 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
                 }))
               : [],
           }))
-          .filter((item: HighlightCard) => item.title.trim() || item.info.trim()),
+          .filter((item: HighlightCard) => item.title.trim() || item.info.trim() || hasSectionTableLayout(item)),
         mainLineUpdates,
         mainBlocks: normalizeBlocks(parsed.main_blocks, "", mainLineUpdates),
         mainSections: mainSectionSource
@@ -445,8 +452,11 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
             info: typeof item?.info === "string" ? item.info : "",
             line_updates: item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {},
             blocks: normalizeBlocks(item?.blocks, typeof item?.info === "string" ? item.info : "", item?.line_updates && typeof item.line_updates === "object" ? item.line_updates : {}),
+            table: Array.isArray(item?.table) ? item.table as string[][] : undefined,
+            column_widths: Array.isArray(item?.column_widths) ? item.column_widths as number[] : undefined,
+            table_row_updates: Array.isArray(item?.table_row_updates) ? item.table_row_updates as string[] : undefined,
           }))
-          .filter((item: HighlightCard) => item.title.trim() || item.info.trim()),
+          .filter((item: HighlightCard) => item.title.trim() || item.info.trim() || hasSectionTableLayout(item)),
       }
     }
     if (Array.isArray(parsed)) {
@@ -472,7 +482,7 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
                 }))
               : [],
           }))
-          .filter((item: HighlightCard) => item.title.trim() || item.info.trim()),
+          .filter((item: HighlightCard) => item.title.trim() || item.info.trim() || hasSectionTableLayout(item)),
         mainLineUpdates: {},
         mainBlocks: [],
         mainSections: [],
@@ -519,7 +529,7 @@ function serializeSummaryMeta(items: HighlightCard[], mainLineUpdates: Record<st
             table_row_updates: section.table_row_updates,
           })),
         }))
-        .filter((item) => item.title || item.info),
+        .filter((item) => item.title || item.info || hasSectionTableLayout(item)),
       main_line_updates: mainLineUpdates,
       main_blocks: mainBlocks,
       main_sections: mainSections.map((section) => ({
@@ -1231,8 +1241,8 @@ export default function CountryCompanyInfoPage() {
   const [activeSuggestion, setActiveSuggestion] = useState(0)
   const [selectedKind, setSelectedKind] = useState<RecordKind | "">("")
   const [selectedId, setSelectedId] = useState("")
-  const [message, setMessage] = useState("")
-  const [saving, setSaving] = useState(false)
+  const [message, setPageMessage] = useState("")
+  const [saving, setPageSaving] = useState(false)
   const [recordLoading, setRecordLoading] = useState(false)
   const [searchInPage, setSearchInPage] = useState("")
 
@@ -1296,8 +1306,28 @@ export default function CountryCompanyInfoPage() {
   const sectionEditStartRef = useRef<Record<number, HighlightCard>>({})
   const mainSectionEditStartRef = useRef<Record<number, HighlightCard>>({})
   const nestedSectionEditStartRef = useRef<Record<string, HighlightCard>>({})
-  const sectionSaveTimerRef = useRef<number | null>(null)
-  const recordAutoSaveTimerRef = useRef<number | null>(null)
+  const recordOwnerRef = useRef(0)
+  const [renderOwner, setRenderOwner] = useState(0)
+  const setMessage = (value: string) => { if (recordOwnerRef.current === renderOwner) setPageMessage(value) }
+  const setSaving = (value: boolean) => { if (recordOwnerRef.current === renderOwner) setPageSaving(value) }
+  const saveQueueRef = useRef(createCcinfoSaveQueue(async (target, version, changes) => {
+    const table = target.kind === "company" ? "cc_companies" : target.kind === "country" ? "cc_countries" : "cc_ports"
+    const { data, error } = await supabase.from(table).update(changes).eq("id", target.id).eq("updated_at", version).select("*").single()
+    if (error?.code === "PGRST116" || (!error && !data)) throw new CcinfoSaveConflict()
+    if (error) throw error
+    return data
+  }))
+  const contentDraftRef = useRef({ highlights, mainInfoLineUpdates, mainInfoBlocks, mainSections })
+  const contentRenderRef = useRef({ highlights, mainInfoLineUpdates, mainInfoBlocks, mainSections })
+  const contentState = { highlights, mainInfoLineUpdates, mainInfoBlocks, mainSections }
+  // Do not replace an already queued table draft with the still-displayed saved table.
+  useLayoutEffect(() => {
+    const next = { highlights, mainInfoLineUpdates, mainInfoBlocks, mainSections }
+    for (const field of Object.keys(next) as Array<keyof typeof next>) {
+      if (contentRenderRef.current[field] !== next[field]) Object.assign(contentDraftRef.current, { [field]: next[field] })
+    }
+    contentRenderRef.current = next
+  }, [highlights, mainInfoLineUpdates, mainInfoBlocks, mainSections])
 
   const [currentRecord, setCurrentRecord] = useState<BaseRecord>({
     id: "",
@@ -1326,11 +1356,6 @@ export default function CountryCompanyInfoPage() {
     if (!addPortModalOpen) return
     window.setTimeout(() => addPortNameInputRef.current?.focus(), 30)
   }, [addPortModalOpen])
-
-  useEffect(() => {
-    if (adminLoading || !authenticated) return
-    void loadCountryOptions()
-  }, [adminLoading, authenticated])
 
   useEffect(() => {
     if (adminLoading || !authenticated) return
@@ -1407,26 +1432,8 @@ export default function CountryCompanyInfoPage() {
   }, [activeSuggestion, suggestions.length])
 
   useEffect(() => {
-    if (adminLoading || !authenticated || selectedId || typeof window === "undefined") return
-    const params = new URLSearchParams(window.location.search)
-    const kind = params.get("kind")
-    const id = params.get("id")
-    if ((kind === "company" || kind === "country" || kind === "port") && id) {
-      void loadSelected(kind, id)
-    }
-  }, [adminLoading, authenticated, selectedId])
-
-  useEffect(() => {
     setMatchIndex(0)
   }, [searchInPage, selectedId, selectedKind])
-
-  useEffect(() => {
-    if (!authenticated) {
-      setRecentAuditLogs([])
-      return
-    }
-    void loadRecentAuditLogs()
-  }, [authenticated])
 
   const displayedInfoHtml = useMemo(() => highlightTextHtml(currentRecord.notes || "", searchInPage), [currentRecord.notes, searchInPage])
   const displayedCountryInfoHtml = useMemo(() => highlightTextHtml(currentCountry.notes || "", searchInPage), [currentCountry.notes, searchInPage])
@@ -1594,10 +1601,6 @@ export default function CountryCompanyInfoPage() {
     if (!selectedId || !selectedKind) return
     const before = mainEditStartRef.current
     const nextNotes = blocksToText(mainInfoBlocks)
-    setCurrentRecord((prev) => ({ ...prev, notes: nextNotes }))
-    setMainInfoEditing(false)
-    setCountryInfoEditing(false)
-    setEditingMainBlockId("")
     if (before && (before.notes !== nextNotes || JSON.stringify(before.blocks) !== JSON.stringify(mainInfoBlocks))) {
       addChangeLog({
         label: `${changeLogSubject(selectedKind, currentRecord.name)} ${informationLabel} updated`,
@@ -1608,16 +1611,30 @@ export default function CountryCompanyInfoPage() {
         after: nextNotes,
       })
     }
-    mainEditStartRef.current = null
-    await queueMainInfoAutoSaveNow(nextNotes, mainInfoLineUpdates, mainInfoBlocks)
+    try {
+      await queueMainInfoAutoSaveNow(nextNotes, mainInfoLineUpdates, mainInfoBlocks)
+      if (recordOwnerRef.current !== renderOwner) return
+      setCurrentRecord((previous) => ({ ...previous, notes: nextNotes }))
+      mainEditStartRef.current = { notes: nextNotes, updates: { ...mainInfoLineUpdates }, blocks: mainInfoBlocks.map((block) => ({ ...block })) }
+      if (contentDraftRef.current.mainInfoBlocks !== mainInfoBlocks) {
+        setMessage("Your latest changes are not saved yet. Please press Save again.")
+        return
+      }
+      mainEditStartRef.current = null
+      setMainInfoEditing(false)
+      setCountryInfoEditing(false)
+      setEditingMainBlockId("")
+    } catch { /* Keep the text editor and its cancel snapshot on failed saves. */ }
   }
 
   async function saveMainInfoBlocks(nextBlocks: InfoBlock[]) {
     if (!selectedId || !selectedKind) return
     const nextNotes = blocksToText(nextBlocks)
     setMainInfoBlocks(nextBlocks)
-    setCurrentRecord((prev) => ({ ...prev, notes: nextNotes }))
-    await queueMainInfoAutoSaveNow(nextNotes, mainInfoLineUpdates, nextBlocks)
+    try {
+      await queueMainInfoAutoSaveNow(nextNotes, mainInfoLineUpdates, nextBlocks)
+      if (recordOwnerRef.current === renderOwner) setCurrentRecord((previous) => ({ ...previous, notes: nextNotes }))
+    } catch { /* The draft remains visible. */ }
   }
 
   function startMainBlockEditing(block: InfoBlock) {
@@ -1628,6 +1645,10 @@ export default function CountryCompanyInfoPage() {
   }
 
   function cancelMainBlockEditing() {
+    if (saveQueueRef.current.pending()) {
+      setMessage("Please wait for the current save before cancelling. Your edits are still here.")
+      return
+    }
     if (mainEditStartRef.current) {
       setMainInfoBlocks(mainEditStartRef.current.blocks.map((block) => ({ ...block })))
     }
@@ -1654,7 +1675,6 @@ export default function CountryCompanyInfoPage() {
   async function finishSectionEditing(index: number) {
     if (!selectedKind) return
     const before = sectionEditStartRef.current[index]
-    setSectionEditing((prev) => ({ ...prev, [index]: false }))
     if (before) {
       const current = highlights[index]
       if (current && (before.info !== current.info || JSON.stringify(before.line_updates || {}) !== JSON.stringify(current.line_updates || {}))) {
@@ -1670,9 +1690,18 @@ export default function CountryCompanyInfoPage() {
         })
       }
     }
-    delete sectionEditStartRef.current[index]
-    setEditingSectionBlock(null)
-    await persistHighlights(highlights)
+    try {
+      await persistHighlights(highlights)
+      if (recordOwnerRef.current !== renderOwner) return
+      if (sectionEditStartRef.current[index] && highlights[index]) {
+        const acknowledged = highlights[index]
+        sectionEditStartRef.current[index] = { ...acknowledged, blocks: acknowledged.blocks?.map((block) => ({ ...block })), line_updates: { ...(acknowledged.line_updates || {}) } }
+      }
+      if (contentDraftRef.current.highlights !== highlights) return
+      setSectionEditing((prev) => ({ ...prev, [index]: false }))
+      delete sectionEditStartRef.current[index]
+      setEditingSectionBlock(null)
+    } catch { /* Keep the editor and its cancel snapshot. */ }
   }
 
   function startSectionBlockEditing(index: number, block: InfoBlock) {
@@ -1774,14 +1803,28 @@ export default function CountryCompanyInfoPage() {
 
 
   async function finishNestedSectionEditing() {
-    if (editingNestedSectionBlock) {
-      delete nestedSectionEditStartRef.current[`${editingNestedSectionBlock.tabIndex}:${editingNestedSectionBlock.sectionIndex}`]
-    }
-    setEditingNestedSectionBlock(null)
-    await persistHighlights(highlights)
+    try {
+      await persistHighlights(highlights)
+      if (recordOwnerRef.current !== renderOwner) return
+      if (editingNestedSectionBlock) {
+        const { tabIndex, sectionIndex } = editingNestedSectionBlock
+        const snapshotKey = `${tabIndex}:${sectionIndex}`
+        const acknowledged = highlights[tabIndex]?.sections?.[sectionIndex]
+        if (nestedSectionEditStartRef.current[snapshotKey] && acknowledged) {
+          nestedSectionEditStartRef.current[snapshotKey] = { ...acknowledged, blocks: acknowledged.blocks?.map((block) => ({ ...block })), line_updates: { ...(acknowledged.line_updates || {}) } }
+        }
+      }
+      if (contentDraftRef.current.highlights !== highlights) return
+      if (editingNestedSectionBlock) delete nestedSectionEditStartRef.current[`${editingNestedSectionBlock.tabIndex}:${editingNestedSectionBlock.sectionIndex}`]
+      setEditingNestedSectionBlock(null)
+    } catch { /* Keep the editor and its cancel snapshot. */ }
   }
 
   function cancelNestedSectionEditing() {
+    if (saveQueueRef.current.pending()) {
+      setMessage("Please wait for the current save before cancelling. Your edits are still here.")
+      return
+    }
     if (editingNestedSectionBlock) {
       const { tabIndex, sectionIndex } = editingNestedSectionBlock
       const snapshotKey = `${tabIndex}:${sectionIndex}`
@@ -1867,7 +1910,7 @@ export default function CountryCompanyInfoPage() {
       return { ...item, sections }
     })
     setHighlights(nextHighlights)
-    void persistHighlights(nextHighlights)
+    void persistHighlights(nextHighlights).catch(() => {})
   }
 
   function updateMainSectionBlock(sectionIndex: number, blockId: string, value: string) {
@@ -1904,14 +1947,27 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function finishMainSectionEditing() {
-    if (editingMainSectionBlock) {
-      delete mainSectionEditStartRef.current[editingMainSectionBlock.sectionIndex]
-    }
-    setEditingMainSectionBlock(null)
-    await persistMainSections(mainSections)
+    try {
+      await persistMainSections(mainSections)
+      if (recordOwnerRef.current !== renderOwner) return
+      if (editingMainSectionBlock) {
+        const { sectionIndex } = editingMainSectionBlock
+        const acknowledged = mainSections[sectionIndex]
+        if (mainSectionEditStartRef.current[sectionIndex] && acknowledged) {
+          mainSectionEditStartRef.current[sectionIndex] = { ...acknowledged, blocks: acknowledged.blocks?.map((block) => ({ ...block })), line_updates: { ...(acknowledged.line_updates || {}) } }
+        }
+      }
+      if (contentDraftRef.current.mainSections !== mainSections) return
+      if (editingMainSectionBlock) delete mainSectionEditStartRef.current[editingMainSectionBlock.sectionIndex]
+      setEditingMainSectionBlock(null)
+    } catch { /* Keep the editor and its cancel snapshot. */ }
   }
 
   function cancelMainSectionEditing(sectionIndex: number) {
+    if (saveQueueRef.current.pending()) {
+      setMessage("Please wait for the current save before cancelling. Your edits are still here.")
+      return
+    }
     const before = mainSectionEditStartRef.current[sectionIndex]
     if (before) {
       setMainSections((prev) => prev.map((item, itemIndex) => (itemIndex === sectionIndex ? { ...before, blocks: before.blocks?.map((block) => ({ ...block })) } : item)))
@@ -1923,7 +1979,7 @@ export default function CountryCompanyInfoPage() {
   async function updateMainSectionTable(sectionIndex: number, table: string[][], columnWidths: number[], rowUpdates: string[]) {
     const nextSections = mainSections.map((section, index) => (index === sectionIndex ? { ...section, table, column_widths: columnWidths, table_row_updates: rowUpdates } : section))
     await persistMainSections(nextSections)
-    setMainSections(nextSections)
+    if (recordOwnerRef.current === renderOwner && contentDraftRef.current.mainSections === nextSections) setMainSections(nextSections)
   }
 
   async function updateNestedSectionTable(tabIndex: number, sectionIndex: number, table: string[][], columnWidths: number[], rowUpdates: string[]) {
@@ -1932,7 +1988,7 @@ export default function CountryCompanyInfoPage() {
       return { ...tab, sections: (tab.sections || []).map((section, nestedIndex) => (nestedIndex === sectionIndex ? { ...section, table, column_widths: columnWidths, table_row_updates: rowUpdates } : section)) }
     })
     await persistHighlights(nextHighlights)
-    setHighlights(nextHighlights)
+    if (recordOwnerRef.current === renderOwner && contentDraftRef.current.highlights === nextHighlights) setHighlights(nextHighlights)
   }
 
   async function deleteMainSectionBlock(sectionIndex: number, blockId: string) {
@@ -1960,7 +2016,7 @@ export default function CountryCompanyInfoPage() {
     if (!nextTitle) return
     const nextSections = mainSections.map((item, itemIndex) => (itemIndex === sectionIndex ? { ...item, title: normalizeSectionTitle(nextTitle) } : item))
     setMainSections(nextSections)
-    void persistMainSections(nextSections)
+    void persistMainSections(nextSections).catch(() => {})
   }
 
   async function moveMainSection(sectionIndex: number, direction: -1 | 1) {
@@ -1991,6 +2047,10 @@ export default function CountryCompanyInfoPage() {
   }
 
   function cancelSectionBlockEditing(index: number) {
+    if (saveQueueRef.current.pending()) {
+      setMessage("Please wait for the current save before cancelling. Your edits are still here.")
+      return
+    }
     const before = sectionEditStartRef.current[index]
     if (before) {
       setHighlights((prev) => prev.map((item, itemIndex) => (itemIndex === index ? { ...before, blocks: before.blocks?.map((block) => ({ ...block })) } : item)))
@@ -2018,6 +2078,10 @@ export default function CountryCompanyInfoPage() {
   }
 
   function resetSelection() {
+    recordOwnerRef.current += 1
+    setRenderOwner(recordOwnerRef.current)
+    setPageSaving(false)
+    setSectionSaving(false)
     setSelectedId("")
     setSelectedKind("")
     setCurrentRecord({ id: "", name: "", summary: "", notes: "" })
@@ -2053,7 +2117,7 @@ export default function CountryCompanyInfoPage() {
     setActiveInfoTab("general")
   }
 
-  async function loadCompany(id: string) {
+  async function loadCompany(id: string, owner: number) {
     const [{ data, error }, filesResult, manualFilesResult, deletedLegacyFilesResult, deletedManualFilesResult, foldersResult] = await Promise.all([
       supabase.from("cc_companies").select("id,name,summary,notes,updated_at").eq("id", id).single(),
       fetchCompanyFiles(id),
@@ -2062,7 +2126,9 @@ export default function CountryCompanyInfoPage() {
       fetchDeletedEntryFiles("company", id),
       fetchFolders("company", id),
     ])
+    if (recordOwnerRef.current !== owner) return
     if (error || !data) throw error || new Error("Unable to load company")
+    saveQueueRef.current.loaded({ kind: "company", id }, data.updated_at)
     setCurrentRecord(data as BaseRecord)
     setCurrentCountry({ id: "", name: "", summary: "", notes: "" })
     const mergedFiles = [...filesResult, ...manualFilesResult]
@@ -2094,13 +2160,14 @@ export default function CountryCompanyInfoPage() {
     setActiveInfoTab("general")
   }
 
-  async function loadCountry(id: string) {
+  async function loadCountry(id: string, owner: number) {
     const [{ data, error }, filesResult, deletedFilesResult, foldersResult] = await Promise.all([
       supabase.from("cc_countries").select("id,name,summary,notes,region,updated_at").eq("id", id).single(),
       fetchEntryFiles("country", id),
       fetchDeletedEntryFiles("country", id),
       fetchFolders("country", id),
     ])
+    if (recordOwnerRef.current !== owner) return
     if (error || !data) throw error || new Error("Unable to load country")
     const countryName = (data as CountryRecord).name
     const portsResult = await supabase
@@ -2108,6 +2175,8 @@ export default function CountryCompanyInfoPage() {
       .select("id,name,summary,notes,updated_at")
       .or(buildPostgrestCountryMatchFilter(id, countryName, "ilike"))
       .order("name", { ascending: true })
+    if (recordOwnerRef.current !== owner) return
+    saveQueueRef.current.loaded({ kind: "country", id }, data.updated_at)
     setCurrentRecord(data as BaseRecord)
     setCurrentCountry(data as CountryRecord)
     setFiles(filesResult)
@@ -2138,14 +2207,16 @@ export default function CountryCompanyInfoPage() {
     setActiveInfoTab("general")
   }
 
-  async function loadPort(id: string) {
+  async function loadPort(id: string, owner: number) {
     const [{ data, error }, filesResult, deletedFilesResult, foldersResult] = await Promise.all([
       supabase.from("cc_ports").select("id,name,summary,notes,country_id,country_name,updated_at").eq("id", id).single(),
       fetchEntryFiles("port", id),
       fetchDeletedEntryFiles("port", id),
       fetchFolders("port", id),
     ])
+    if (recordOwnerRef.current !== owner) return
     if (error || !data) throw error || new Error("Unable to load port")
+    saveQueueRef.current.loaded({ kind: "port", id }, data.updated_at)
     const port = data as PortRecord
     setCurrentRecord(port)
     setFiles(filesResult)
@@ -2175,6 +2246,7 @@ export default function CountryCompanyInfoPage() {
 
     if (port.country_id) {
       const { data: countryData } = await supabase.from("cc_countries").select("id,name,summary,notes,region,updated_at").eq("id", port.country_id).single()
+      if (recordOwnerRef.current !== owner) return
       const country = (countryData as CountryRecord) || { id: "", name: port.country_name || "", summary: "", notes: "" }
       const countryMeta = parseSummaryMeta(country.summary)
       setCurrentCountry(country)
@@ -2188,7 +2260,7 @@ export default function CountryCompanyInfoPage() {
         .ilike("name", port.country_name.trim())
         .limit(1)
         .maybeSingle()
-
+      if (recordOwnerRef.current !== owner) return
       const country = (countryData as CountryRecord) || { id: "", name: port.country_name || "", summary: "", notes: "" }
       const countryMeta = parseSummaryMeta(country.summary)
       setCurrentCountry(country)
@@ -2204,19 +2276,31 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function loadSelected(kind: RecordKind, id: string) {
+    if (saveQueueRef.current.pending()) {
+      setPageMessage("Please wait for the current save before opening another entry. Your edits are still here.")
+      return false
+    }
+    const owner = ++recordOwnerRef.current
+    setRenderOwner(owner)
     setRecordLoading(true)
-    setMessage("")
+    setPageMessage("")
+    setPageSaving(false)
+    setSectionSaving(false)
+    setSectionSaveState("saved")
     setMenuOpen(false)
     try {
-      if (kind === "company") await loadCompany(id)
-      if (kind === "country") await loadCountry(id)
-      if (kind === "port") await loadPort(id)
+      if (kind === "company") await loadCompany(id, owner)
+      if (kind === "country") await loadCountry(id, owner)
+      if (kind === "port") await loadPort(id, owner)
+      if (recordOwnerRef.current !== owner) return false
       setSelectedKind(kind)
       setSelectedId(id)
+      return true
     } catch {
-      setMessage("Unable to load entry.")
+      if (recordOwnerRef.current === owner) setPageMessage("Unable to load entry.")
+      return false
     } finally {
-      setRecordLoading(false)
+      if (recordOwnerRef.current === owner) setRecordLoading(false)
     }
   }
 
@@ -2252,21 +2336,27 @@ export default function CountryCompanyInfoPage() {
     const currentName = currentRecord.name.trim()
     const nextName = recordNameDraft.trim().toUpperCase()
     if (!nextName || nextName === currentName) return
-    const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
     setSaving(true)
     try {
-      const { error } = await supabase.from(table).update({ name: nextName }).eq("id", selectedId)
-      if (error) throw error
-      setCurrentRecord((prev) => ({ ...prev, name: nextName }))
-      if (selectedKind === "country") {
-        setCurrentCountry((prev) => ({ ...prev, name: nextName }))
-        await supabase.from("cc_ports").update({ country_name: nextName }).eq("country_id", selectedId)
-        await supabase.from("cc_ports").update({ country_name: nextName }).eq("country_name", currentName)
+      const saved = await saveQueueRef.current.save({ kind: selectedKind, id: selectedId }, { name: nextName })
+      if (recordOwnerRef.current === renderOwner) {
+        setCurrentRecord((prev) => prev.id === selectedId ? { ...prev, name: nextName, updated_at: saved.updated_at } : prev)
+        if (selectedKind === "country") {
+          setCurrentCountry((prev) => ({ ...prev, name: nextName, updated_at: saved.updated_at }))
+          setCountryOptions((previous) => previous.map((country) => country.id === selectedId ? { ...country, name: nextName } : country).sort((left, right) => left.name.localeCompare(right.name)))
+        }
       }
+      if (selectedKind === "country") {
+        const byId = await supabase.from("cc_ports").update({ country_name: nextName }).eq("country_id", selectedId)
+        if (byId.error) throw byId.error
+        const byName = await supabase.from("cc_ports").update({ country_name: nextName }).eq("country_name", currentName)
+        if (byName.error) throw byName.error
+      }
+      if (recordOwnerRef.current !== renderOwner) return
       setMessage("Renamed.")
       setRecordModalOpen(false)
-    } catch {
-      setMessage("Unable to rename.")
+    } catch (error) {
+      setMessage(error instanceof CcinfoSaveConflict ? error.message : "Unable to complete the rename. Reopen this entry to check its name and linked ports.")
     } finally {
       setSaving(false)
     }
@@ -2317,7 +2407,7 @@ export default function CountryCompanyInfoPage() {
     if (normalizedTitle === current.title) return
     const nextHighlights = highlights.map((item, itemIndex) => (itemIndex === index ? { ...item, title: normalizedTitle } : item))
     setHighlights(nextHighlights)
-    void persistHighlights(nextHighlights)
+    void persistHighlights(nextHighlights).catch(() => {})
   }
 
   async function saveRecord() {
@@ -2325,41 +2415,20 @@ export default function CountryCompanyInfoPage() {
     setSaving(true)
     setMessage("")
     try {
-      if (selectedKind === "company") {
-        const { error } = await supabase.from("cc_companies").update({ name: currentRecord.name.trim().toUpperCase(), summary: serializeSummaryMeta(highlights, mainInfoLineUpdates, mainInfoBlocks, mainSections), notes: currentRecord.notes || null }).eq("id", selectedId)
-        if (error) throw error
-      }
-      if (selectedKind === "country") {
-        const { error } = await supabase.from("cc_countries").update({ name: currentRecord.name.trim().toUpperCase(), summary: serializeSummaryMeta(highlights, mainInfoLineUpdates, mainInfoBlocks, mainSections), notes: currentRecord.notes || null }).eq("id", selectedId)
-        if (error) throw error
-      }
+      const changes: CcinfoRecordChanges = { name: currentRecord.name.trim().toUpperCase(), notes: blocksToText(contentDraftRef.current.mainInfoBlocks) || null }
       if (selectedKind === "port") {
         const matchedCountry = countryOptions.find((country) => country.name.toUpperCase() === currentCountry.name.trim().toUpperCase())
         if (!matchedCountry && currentCountry.name.trim()) {
           setMessage("Please select an existing country.")
           return
         }
-        const { error } = await supabase.from("cc_ports").update({
-          name: currentRecord.name.trim().toUpperCase(),
-          summary: serializeSummaryMeta(highlights, mainInfoLineUpdates, mainInfoBlocks, mainSections),
-          notes: currentRecord.notes || null,
-          country_id: matchedCountry?.id || null,
-          country_name: matchedCountry?.name || null,
-        }).eq("id", selectedId)
-        if (error) throw error
-
-        if (matchedCountry?.id) {
-          const { error: countryError } = await supabase.from("cc_countries").update({
-            name: matchedCountry.name,
-            summary: currentCountry.summary || null,
-            notes: currentCountry.notes || null,
-          }).eq("id", matchedCountry.id)
-          if (countryError) throw countryError
-        }
+        changes.country_id = matchedCountry?.id || null
+        changes.country_name = matchedCountry?.name || null
       }
+      await persistContent({}, changes)
       setMessage("Saved.")
-    } catch {
-      setMessage("Unable to save.")
+    } catch (error) {
+      setMessage(error instanceof CcinfoSaveConflict ? error.message : "Unable to save.")
     } finally {
       setSaving(false)
     }
@@ -2433,20 +2502,43 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function persistHighlights(nextHighlights: HighlightCard[]) {
-    if (!selectedId || !selectedKind) return
-    const payload = { summary: serializeSummaryMeta(nextHighlights, mainInfoLineUpdates, mainInfoBlocks, mainSections) }
-    const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
-    const { error } = await supabase.from(table).update(payload).eq("id", selectedId)
-    if (error) throw error
-    await loadRecentAuditLogs()
+    await persistContent({ highlights: nextHighlights })
   }
 
   async function persistMainSections(nextSections: HighlightCard[]) {
-    if (!selectedId || !selectedKind) return
-    const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
-    const { error } = await supabase.from(table).update({ summary: serializeSummaryMeta(highlights, mainInfoLineUpdates, mainInfoBlocks, nextSections) }).eq("id", selectedId)
-    if (error) throw error
-    await loadRecentAuditLogs()
+    await persistContent({ mainSections: nextSections })
+  }
+
+  async function persistContent(parts: Partial<typeof contentState>, changes: CcinfoRecordChanges = {}) {
+    if (!selectedId || !selectedKind || recordLoading || currentRecord.id !== selectedId || recordOwnerRef.current !== renderOwner) throw new Error("Wait for this entry to finish loading before saving.")
+    const owner = recordOwnerRef.current
+    Object.assign(contentDraftRef.current, parts)
+    const draft = contentDraftRef.current
+    const payload = { ...changes, summary: serializeSummaryMeta(draft.highlights, draft.mainInfoLineUpdates, draft.mainInfoBlocks, draft.mainSections) }
+    setSectionSaving(true)
+    setSectionSaveState("saving")
+    try {
+      const saved = await saveQueueRef.current.save({ kind: selectedKind, id: selectedId }, payload)
+      if (recordOwnerRef.current === owner) {
+        setCurrentRecord((previous) => previous.id === selectedId ? { ...previous, updated_at: saved.updated_at } : previous)
+        void loadRecentAuditLogs()
+      }
+    } catch (error) {
+      if (recordOwnerRef.current === owner) {
+        // Table dialogs retain their own failed cells. Do not leave those hidden
+        // cells in a whole-record payload after the user cancels the dialog.
+        for (const field of Object.keys(parts) as Array<keyof typeof parts>) {
+          if (contentDraftRef.current[field] === parts[field] && contentRenderRef.current[field] !== parts[field]) Object.assign(contentDraftRef.current, { [field]: contentRenderRef.current[field] })
+        }
+        setPageMessage(error instanceof CcinfoSaveConflict ? error.message : "Unable to save. Your edits are still here. Please try Save again.")
+      }
+      throw error
+    } finally {
+      if (recordOwnerRef.current === owner) {
+        setSectionSaving(saveQueueRef.current.pending())
+        setSectionSaveState("saved")
+      }
+    }
   }
 
   async function saveHighlightCard() {
@@ -2525,66 +2617,8 @@ export default function CountryCompanyInfoPage() {
     }
   }
 
-  function queueSectionSave(nextHighlights: HighlightCard[]) {
-    if (sectionSaveTimerRef.current) {
-      window.clearTimeout(sectionSaveTimerRef.current)
-    }
-    setSectionSaving(true)
-    setSectionSaveState("saving")
-    sectionSaveTimerRef.current = window.setTimeout(async () => {
-      try {
-        await persistHighlights(nextHighlights)
-        setSectionSaveState("saved")
-      } catch {
-        setMessage("Unable to auto-save section.")
-        setSectionSaveState("saved")
-      } finally {
-        setSectionSaving(false)
-        if (sectionSaveTimerRef.current) window.clearTimeout(sectionSaveTimerRef.current)
-        sectionSaveTimerRef.current = window.setTimeout(() => setSectionSaveState("saved"), 1200)
-      }
-    }, 450)
-  }
-
-  function queueMainInfoAutoSave(nextNotes: string, nextLineUpdates: Record<string, string>, nextBlocks = mainInfoBlocks) {
-    if (!selectedId || !selectedKind) return
-    if (recordAutoSaveTimerRef.current) {
-      window.clearTimeout(recordAutoSaveTimerRef.current)
-    }
-    setSectionSaveState("saving")
-    setSectionSaving(true)
-    recordAutoSaveTimerRef.current = window.setTimeout(async () => {
-      try {
-        const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
-        const { error } = await supabase.from(table).update({ notes: nextNotes, summary: serializeSummaryMeta(highlights, nextLineUpdates, nextBlocks, mainSections) }).eq("id", selectedId)
-        if (error) throw error
-        setSectionSaveState("saved")
-      } catch {
-        setMessage("Unable to auto-save information.")
-        setSectionSaveState("saved")
-      } finally {
-        setSectionSaving(false)
-        if (recordAutoSaveTimerRef.current) window.clearTimeout(recordAutoSaveTimerRef.current)
-        recordAutoSaveTimerRef.current = window.setTimeout(() => setSectionSaveState("saved"), 1200)
-      }
-    }, 450)
-  }
-
   async function queueMainInfoAutoSaveNow(nextNotes: string, nextLineUpdates: Record<string, string>, nextBlocks = mainInfoBlocks) {
-    if (!selectedId || !selectedKind) return
-    setSectionSaveState("saving")
-    setSectionSaving(true)
-    try {
-      const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
-      const { error } = await supabase.from(table).update({ notes: nextNotes, summary: serializeSummaryMeta(highlights, nextLineUpdates, nextBlocks, mainSections) }).eq("id", selectedId)
-      if (error) throw error
-      setSectionSaveState("saved")
-    } catch {
-      setMessage("Unable to save information.")
-      setSectionSaveState("saved")
-    } finally {
-      setSectionSaving(false)
-    }
+    await persistContent({ mainInfoLineUpdates: nextLineUpdates, mainInfoBlocks: nextBlocks }, { notes: nextNotes })
   }
 
   async function deleteHighlightCard(index: number) {
@@ -3122,7 +3156,7 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function pickSuggestion(item: SearchRecord) {
-    await loadSelected(item.kind, item.id)
+    if (!await loadSelected(item.kind, item.id)) return
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href)
       url.searchParams.set("kind", item.kind)
@@ -3137,7 +3171,7 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function openPortInline(id: string) {
-    await loadSelected("port", id)
+    if (!await loadSelected("port", id)) return
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href)
       url.searchParams.set("kind", "port")
@@ -3148,7 +3182,7 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function openCountryInline(id: string) {
-    await loadSelected("country", id)
+    if (!await loadSelected("country", id)) return
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href)
       url.searchParams.set("kind", "country")
@@ -3157,6 +3191,24 @@ export default function CountryCompanyInfoPage() {
     }
     setSearchInPage("")
   }
+
+  useEffect(() => {
+    if (adminLoading || !authenticated) return
+    void loadCountryOptions()
+  }, [adminLoading, authenticated])
+
+  useEffect(() => {
+    if (adminLoading || !authenticated || selectedId || typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    const kind = params.get("kind")
+    const id = params.get("id")
+    if ((kind === "company" || kind === "country" || kind === "port") && id) void loadSelected(kind, id)
+  }, [adminLoading, authenticated, selectedId])
+
+  useEffect(() => {
+    if (!authenticated) { setRecentAuditLogs([]); return }
+    void loadRecentAuditLogs()
+  }, [authenticated])
 
   if (!adminLoading && !authenticated) return <p style={{ padding: "40px" }}>Access Denied</p>
   if (adminLoading) return <p style={{ padding: "40px" }}>Loading...</p>
@@ -3778,6 +3830,12 @@ export default function CountryCompanyInfoPage() {
                   {newEntityMenuOpen && newEntityMenu}
                 </div>
               </div>
+              {message && (
+                <div role="status" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginTop: "10px", color: "var(--fc-admin-panel-text)", fontSize: "12px", lineHeight: 1.5 }}>
+                  <span>{message}</span>
+                  <button type="button" aria-label="Dismiss message" onClick={() => setMessage("")} style={{ ...buttonStyle, padding: "2px 7px", flexShrink: 0 }}>×</button>
+                </div>
+              )}
               {suggestions.length > 0 && query.trim() && (
                 <div
                   style={{
@@ -3865,8 +3923,8 @@ export default function CountryCompanyInfoPage() {
                       ) : null}
                     </div>
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: isMobile ? "flex-start" : "flex-end" }}>
-                      <button onClick={saveRecord} disabled={saving || sectionSaving || !selectedId} style={{ ...buttonStyle, minWidth: "96px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)", border: "1px solid var(--fc-admin-success-border)" }}>
-                        {saving || sectionSaveState === "saving" ? "Saving" : "Saved"}
+                      <button onClick={saveRecord} disabled={saving || sectionSaving || recordLoading || !selectedId} style={{ ...buttonStyle, minWidth: "96px", background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)", border: "1px solid var(--fc-admin-success-border)" }}>
+                        {saving || sectionSaveState === "saving" ? "Saving" : "Save"}
                       </button>
                     </div>
                   </div>
