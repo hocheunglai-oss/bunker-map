@@ -1,0 +1,322 @@
+{
+  "scope": "Deterministic self-hosted Roboto only; no application behavior or metadata changes",
+  "status": "local_candidate_verified_not_deployed",
+  "baseReleaseHead": "2325abb6f0e25cf74b91b2b06f5f901712df359d",
+  "diagnosis": {
+    "installedNextVersion": "16.3.8",
+    "loader": "next/dist/compiled/@next/font/dist/google/loader.js:122",
+    "proximateFailure": "The Google loader assumes every font URL ends in a known extension and dereferences the match without checking. A valid extensionless/query font URL reproduces the exact null-reading-1 error at line122.",
+    "hostedFailedResponseUrlObserved": false,
+    "uncertainty": "The failed Vercel response CSS/URL was not retained in available build evidence. The exact current Google request returns extension-bearing URLs and the same bytes as the last successful local build; this is not proof of the failed edge's actual URL.",
+    "syntheticReproduction": "Actual installed loader, CSS response substituted in-memory, real existing WOFF2 bytes: .woff2 URL succeeds; extensionless /l/font?kit=... URL throws Cannot read properties of null (reading '1') at122."
+  },
+  "provenance": {
+    "cssUrl": "https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36",
+    "cssSha256": "8e669fb5e4b5f9ffa09f93041826ed0a21d843e8e438bc6fefed7114f3fab1eb",
+    "previousCompiledCssSha256": "e9e890730f938a874a1788fb8eadafd721d44d89203939160f0e273c61ac43e7",
+    "fontFamily": "Roboto",
+    "fontVersion": "Version 3.015; 2026",
+    "copyright": "Copyright 2011 The Roboto Project Authors (https://github.com/googlefonts/roboto-classic)",
+    "license": "SIL Open Font License 1.1",
+    "licenseSource": "https://raw.githubusercontent.com/google/fonts/main/ofl/roboto/OFL.txt",
+    "licenseTarget": "public/fonts/roboto/OFL.txt",
+    "verification": "All nine source URLs were fetched read-only into memory; every public source SHA-256 exactly matched the existing successful .next binary. Those exact local bytes were copied with COPYFILE_EXCL and rehashed; no existing file was overwritten.",
+    "publishedCssFixture": "tests/fixtures/roboto-google-v51.css",
+    "publishedCssFixtureSha256": "8e669fb5e4b5f9ffa09f93041826ed0a21d843e8e438bc6fefed7114f3fab1eb",
+    "previousCompiledCssRetained": false,
+    "previousCompiledCssLimitation": "The original full generated stylesheet was replaced by the owned Next build. Its SHA-256, extracted 36 face/subset mappings and exact Arial fallback metrics were captured before changes; the independently pinned published Google CSS and exact font bytes are retained.",
+    "reactPreloadReference": "https://react.dev/reference/react-dom/preload"
+  },
+  "preserved": {
+    "subsets": [
+      "cyrillic-ext",
+      "cyrillic",
+      "greek-ext",
+      "greek",
+      "math",
+      "symbols",
+      "vietnamese",
+      "latin-ext",
+      "latin"
+    ],
+    "weights": [
+      400,
+      500,
+      700,
+      900
+    ],
+    "style": "normal",
+    "stretch": "100%",
+    "display": "swap",
+    "faceDeclarations": 36,
+    "preloadedSubsets": [
+      "latin"
+    ],
+    "fontVariable": "--font-roboto: \"Roboto\", \"Roboto Fallback\"",
+    "fallback": {
+      "font": "Arial",
+      "ascentOverride": "92.98%",
+      "descentOverride": "24.47%",
+      "lineGapOverride": "0.00%",
+      "sizeAdjust": "99.78%"
+    },
+    "totalAssetBytes": 192232,
+    "cacheControl": "public, max-age=31536000, immutable",
+    "cacheIdentity": "SHA-256 prefix (16 hex digits) in each local asset filename",
+    "preloadImplementation": "ReactDOM.preload during actual root render; exactly one Latin font hint in emitted Next HTML (literal JSX link produced duplicate hoisting and was removed before freeze).",
+    "existingSecurityHeadersByteEquivalent": true,
+    "sharedDomainRouting": "Only the explicit nine SHA-tagged asset paths and OFL.txt bypass SPC rewriting and CN page redirects; unknown paths and page routing retain the baseline behavior."
+  },
+  "assets": [
+    {
+      "subset": "cyrillic-ext",
+      "source": ".next/static/media/001f750b538f7a9e-s.woff2",
+      "target": "public/fonts/roboto/roboto-v51-cyrillic-ext.e44224eb71a96cb3.woff2",
+      "url": "/fonts/roboto/roboto-v51-cyrillic-ext.e44224eb71a96cb3.woff2",
+      "unicodeRange": "u+0460-052f,u+1c80-1c8a,u+20b4,u+2de0-2dff,u+a640-a69f,u+fe2e-fe2f",
+      "bytes": 31472,
+      "sha256": "e44224eb71a96cb33bd046ded16a4e22bb441b170bdfbcba0268a754141b97c8",
+      "sourceUrl": "https://fonts.gstatic.com/s/roboto/v51/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3GUBHMdazTgWw.woff2"
+    },
+    {
+      "subset": "cyrillic",
+      "source": ".next/static/media/80841ae24d03ed90-s.woff2",
+      "target": "public/fonts/roboto/roboto-v51-cyrillic.32886c5ec61a0d06.woff2",
+      "url": "/fonts/roboto/roboto-v51-cyrillic.32886c5ec61a0d06.woff2",
+      "unicodeRange": "u+0301,u+0400-045f,u+0490-0491,u+04b0-04b1,u+2116",
+      "bytes": 19624,
+      "sha256": "32886c5ec61a0d06e5677a98c5ed78a5f1c788c18c5e8d7dcd931c4b6dc19830",
+      "sourceUrl": "https://fonts.gstatic.com/s/roboto/v51/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3iUBHMdazTgWw.woff2"
+    },
+    {
+      "subset": "greek-ext",
+      "source": ".next/static/media/5eae37b69937655e-s.woff2",
+      "target": "public/fonts/roboto/roboto-v51-greek-ext.5fdfeaf926cac990.woff2",
+      "url": "/fonts/roboto/roboto-v51-greek-ext.5fdfeaf926cac990.woff2",
+      "unicodeRange": "u+1f??",
+      "bytes": 1632,
+      "sha256": "5fdfeaf926cac990770dfa66011bdb87d6b69f43c42aa759dcdcf0a7a197c19a",
+      "sourceUrl": "https://fonts.gstatic.com/s/roboto/v51/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3CUBHMdazTgWw.woff2"
+    },
+    {
+      "subset": "greek",
+      "source": ".next/static/media/4f48fe9100901594-s.woff2",
+      "target": "public/fonts/roboto/roboto-v51-greek.4813e3dfbbb23708.woff2",
+      "url": "/fonts/roboto/roboto-v51-greek.4813e3dfbbb23708.woff2",
+      "unicodeRange": "u+0370-0377,u+037a-037f,u+0384-038a,u+038c,u+038e-03a1,u+03a3-03ff",
+      "bytes": 13984,
+      "sha256": "4813e3dfbbb23708c817ef7fd3fd9c82cd0d33c778def0897f0447f1c364ce64",
+      "sourceUrl": "https://fonts.gstatic.com/s/roboto/v51/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3-UBHMdazTgWw.woff2"
+    },
+    {
+      "subset": "math",
+      "source": ".next/static/media/970d71e7dcbc144d-s.woff2",
+      "target": "public/fonts/roboto/roboto-v51-math.297193369eea6001.woff2",
+      "url": "/fonts/roboto/roboto-v51-math.297193369eea6001.woff2",
+      "unicodeRange": "u+0302-0303,u+0305,u+0307-0308,u+0310,u+0312,u+0315,u+031a,u+0326-0327,u+032c,u+032f-0330,u+0332-0333,u+0338,u+033a,u+0346,u+034d,u+0391-03a1,u+03a3-03a9,u+03b1-03c9,u+03d1,u+03d5-03d6,u+03f0-03f1,u+03f4-03f5,u+2016-2017,u+2034-2038,u+203c,u+2040,u+2043,u+2047,u+2050,u+2057,u+205f,u+2070-2071,u+2074-209f,u+20d0-20dc,u+20e1,u+20e5-20ef,u+2100-2112,u+2114-2115,u+2117-2121,u+2123-214f,u+2190,u+2192,u+2194-21ae,u+21b0-21e5,u+21f1-21f2,u+21f4-2211,u+2213-2214,u+2216-22ff,u+2308-230b,u+2310,u+2319,u+231c-2321,u+2336-237a,u+237c,u+2395,u+239b-23b7,u+23d0,u+23dc-23e1,u+2474-2475,u+25af,u+25b3,u+25b7,u+25bd,u+25c1,u+25ca,u+25cc,u+25fb,u+266d-266f,u+27c0-27ff,u+2900-2aff,u+2b0e-2b11,u+2b30-2b4c,u+2bfe,u+3030,u+ff5b,u+ff5d,u+1d400-1d7ff,u+1ee??",
+      "bytes": 36292,
+      "sha256": "297193369eea600161f4b5219bd7b08850180fcfe0752f1a2eaa436575cd03b7",
+      "sourceUrl": "https://fonts.gstatic.com/s/roboto/v51/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMawCUBHMdazTgWw.woff2"
+    },
+    {
+      "subset": "symbols",
+      "source": ".next/static/media/b3f718d64f9a6dea-s.woff2",
+      "target": "public/fonts/roboto/roboto-v51-symbols.fab8a0056d92fdd8.woff2",
+      "url": "/fonts/roboto/roboto-v51-symbols.fab8a0056d92fdd8.woff2",
+      "unicodeRange": "u+0001-000c,u+000e-001f,u+007f-009f,u+20dd-20e0,u+20e2-20e4,u+2150-218f,u+2190,u+2192,u+2194-2199,u+21af,u+21e6-21f0,u+21f3,u+2218-2219,u+2299,u+22c4-22c6,u+2300-243f,u+2440-244a,u+2460-24ff,u+25a0-27bf,u+28??,u+2921-2922,u+2981,u+29bf,u+29eb,u+2b??,u+4dc0-4dff,u+fff9-fffb,u+10140-1018e,u+10190-1019c,u+101a0,u+101d0-101fd,u+102e0-102fb,u+10e60-10e7e,u+1d2c0-1d2d3,u+1d2e0-1d37f,u+1f0??,u+1f100-1f1ae,u+1f1e6-1f1ff,u+1f30d-1f30f,u+1f315,u+1f31c,u+1f31e,u+1f320-1f32c,u+1f336,u+1f378,u+1f37d,u+1f382,u+1f393-1f39f,u+1f3a7-1f3a8,u+1f3ac-1f3af,u+1f3c2,u+1f3c4-1f3c6,u+1f3ca-1f3ce,u+1f3d4-1f3e0,u+1f3ed,u+1f3f1-1f3f3,u+1f3f5-1f3f7,u+1f408,u+1f415,u+1f41f,u+1f426,u+1f43f,u+1f441-1f442,u+1f444,u+1f446-1f449,u+1f44c-1f44e,u+1f453,u+1f46a,u+1f47d,u+1f4a3,u+1f4b0,u+1f4b3,u+1f4b9,u+1f4bb,u+1f4bf,u+1f4c8-1f4cb,u+1f4d6,u+1f4da,u+1f4df,u+1f4e3-1f4e6,u+1f4ea-1f4ed,u+1f4f7,u+1f4f9-1f4fb,u+1f4fd-1f4fe,u+1f503,u+1f507-1f50b,u+1f50d,u+1f512-1f513,u+1f53e-1f54a,u+1f54f-1f5fa,u+1f610,u+1f650-1f67f,u+1f687,u+1f68d,u+1f691,u+1f694,u+1f698,u+1f6ad,u+1f6b2,u+1f6b9-1f6ba,u+1f6bc,u+1f6c6-1f6cf,u+1f6d3-1f6d7,u+1f6e0-1f6ea,u+1f6f0-1f6f3,u+1f6f7-1f6fc,u+1f700-1f80b,u+1f810-1f847,u+1f850-1f859,u+1f860-1f887,u+1f890-1f8ad,u+1f8b0-1f8bb,u+1f8c0-1f8c1,u+1f8d0-1f8d8,u+1f900-1f90b,u+1f93b,u+1f946,u+1f984,u+1f996,u+1f9e9,u+1fa00-1fa6f,u+1fa70-1fa7c,u+1fa80-1fac6,u+1fac8,u+1facc-1fadd,u+1fadf-1faeb,u+1faef-1fafa,u+1fb??",
+      "bytes": 16692,
+      "sha256": "fab8a0056d92fdd8d64fed4b049744144e1d24d08762c513bff78265299ed7a3",
+      "sourceUrl": "https://fonts.gstatic.com/s/roboto/v51/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMaxKUBHMdazTgWw.woff2"
+    },
+    {
+      "subset": "vietnamese",
+      "source": ".next/static/media/4120b0a488381b31-s.woff2",
+      "target": "public/fonts/roboto/roboto-v51-vietnamese.2071148c26bd0430.woff2",
+      "url": "/fonts/roboto/roboto-v51-vietnamese.2071148c26bd0430.woff2",
+      "unicodeRange": "u+0102-0103,u+0110-0111,u+0128-0129,u+0168-0169,u+01a0-01a1,u+01af-01b0,u+0300-0301,u+0303-0304,u+0308-0309,u+0323,u+0329,u+1ea0-1ef9,u+20ab",
+      "bytes": 10572,
+      "sha256": "2071148c26bd0430cad316373c26db399e0cf8f6275b9e1a2c1b831f05ee7dc3",
+      "sourceUrl": "https://fonts.gstatic.com/s/roboto/v51/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3OUBHMdazTgWw.woff2"
+    },
+    {
+      "subset": "latin-ext",
+      "source": ".next/static/media/1a634e73dfeff02c-s.woff2",
+      "target": "public/fonts/roboto/roboto-v51-latin-ext.cdd53dc5576a79f3.woff2",
+      "url": "/fonts/roboto/roboto-v51-latin-ext.cdd53dc5576a79f3.woff2",
+      "unicodeRange": "u+0100-02ba,u+02bd-02c5,u+02c7-02cc,u+02ce-02d7,u+02dd-02ff,u+0304,u+0308,u+0329,u+1d00-1dbf,u+1e00-1e9f,u+1ef2-1eff,u+2020,u+20a0-20ab,u+20ad-20c4,u+2113,u+2c60-2c7f,u+a720-a7ff",
+      "bytes": 24444,
+      "sha256": "cdd53dc5576a79f35cf280dfbd9c1cb2a5dd2f0ede30afba9b9ccdc7fe12e7d0",
+      "sourceUrl": "https://fonts.gstatic.com/s/roboto/v51/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3KUBHMdazTgWw.woff2"
+    },
+    {
+      "subset": "latin",
+      "source": ".next/static/media/1e41be92c43b3255-s.p.woff2",
+      "target": "public/fonts/roboto/roboto-v51-latin.0a44e0bb6ba5c853.woff2",
+      "url": "/fonts/roboto/roboto-v51-latin.0a44e0bb6ba5c853.woff2",
+      "unicodeRange": "u+00??,u+0131,u+0152-0153,u+02bb-02bc,u+02c6,u+02da,u+02dc,u+0304,u+0308,u+0329,u+2000-206f,u+20ac,u+2122,u+2191,u+2193,u+2212,u+2215,u+feff,u+fffd",
+      "bytes": 37520,
+      "sha256": "0a44e0bb6ba5c8537e8814c148ef7755f1bce12112361231f595ecc584a18d7a",
+      "sourceUrl": "https://fonts.gstatic.com/s/roboto/v51/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3yUBHMdazQ.woff2"
+    }
+  ],
+  "verification": [
+    {
+      "command": "node --import tsx --test tests/roboto-self-hosting.test.ts tests/web-security-baseline.test.ts",
+      "result": "PASS",
+      "newFontTests": 8,
+      "existingSecurityTests": 2,
+      "total": 10
+    },
+    {
+      "command": "node tests/roboto-self-hosting.browser.test.cjs",
+      "result": "PASS",
+      "groups": 3,
+      "browser": "Owned isolated headless Chrome contexts; all requests restricted to the owned loopback origin; closed in finally.",
+      "coverage": "Actual root component rendered with only analytics/style imports replaced; independent original published CSS reference. 48 multilingual samples across computed weights400/500/600/700/800/900 have identical dimensions and screenshot pixels. Nine subsets loaded once each."
+    },
+    {
+      "command": "NEXT_TELEMETRY_DISABLED=1 NEXT_FONT_GOOGLE_MOCKED_RESPONSES=/private/tmp/fcuno-font-network-forbidden-sentinel.cjs node node_modules/next/dist/bin/next build --webpack",
+      "result": "PASS",
+      "nextVersion": "16.3.8",
+      "staticPages": 108,
+      "fontMockSentinelExists": false,
+      "warnings": [
+        "Credential-free checkout has no NEXT_PUBLIC_SUPABASE_URL, so homepage-data generation used its existing safe fallback. This is not live homepage-data certification."
+      ]
+    },
+    {
+      "command": "node tests/roboto-self-hosting.production.test.cjs",
+      "result": "PASS",
+      "groups": 3,
+      "coverage": "Owned credential-free loopback Next production server. Nine font bytes/cache/security headers on both fcuno.com and spc.fcuno.com Host values for HK/CN visitors; license200, unhashed404/nonimmutable, FCUNO admin/SPC home emitted HTML and36faces, exactly one Latin preload, unchanged CN page and unknown-font redirects. Manual redirects prevent external requests. Server always terminated."
+    },
+    {
+      "command": "node node_modules/typescript/bin/tsc --noEmit",
+      "result": "PASS"
+    },
+    {
+      "command": "node node_modules/eslint/bin/eslint.js app/layout.tsx next.config.js proxy.ts tests/roboto-self-hosting.test.ts",
+      "result": "PASS",
+      "errors": 0,
+      "warnings": 0
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    },
+    {
+      "check": "Existing next.config security/API headers against current released HEAD with only added font rule excluded",
+      "result": "PASS",
+      "identical": true
+    }
+  ],
+  "externalMutations": [],
+  "limitations": [
+    "The actual failed hosted URL remains unobserved.",
+    "No real contacts, email, Azure job, database row or external configuration were changed.",
+    "Only test-owned isolated headless contexts may be used; personal Chrome is not controlled.",
+    "This candidate has not been deployed by this subagent. Hosted staging/live verification remains the release owner's responsibility.",
+    "Browser parity uses the exact bundled asset bytes and independent published face rules, not a personal live browsing session."
+  ],
+  "failedPreview": {
+    "deploymentId": "dpl_4bvtM9qFh8V1d4NjQwCWtFVPFgKZ",
+    "pullRequest": 53,
+    "headPrefixReportedByParent": "5e546bad",
+    "fullHeadRetainedByParent": true
+  },
+  "checkedAt": "2026-10-13T03:10:25.159Z",
+  "sourceManifest": [
+    {
+      "path": "app/layout.tsx",
+      "bytes": 1238,
+      "sha256": "a285e9e5b7ca3b8e9b55cace68663b331b5b473d4839bb6c28d8bf1c1ac6cc01"
+    },
+    {
+      "path": "app/fonts/roboto.css",
+      "bytes": 20605,
+      "sha256": "c51fc564bde099966c4102a04d109ef135a96912ea9117634a9b690c54d0aa7f"
+    },
+    {
+      "path": "next.config.js",
+      "bytes": 3194,
+      "sha256": "40da8c003dd698413665f7114cc4eb7ca9a3582ae2ccecc328cee45864568081"
+    },
+    {
+      "path": "proxy.ts",
+      "bytes": 2415,
+      "sha256": "85d381803c8429c4cbd6e5c1637bb87622ee67f6b37f29971112b0638f486adc"
+    },
+    {
+      "path": "public/fonts/roboto/OFL.txt",
+      "bytes": 4394,
+      "sha256": "061402327a96aadb0bfb694a960ed289ecd38d383e396243831ab81feb109c41"
+    },
+    {
+      "path": "tests/fixtures/roboto-google-v51.css",
+      "bytes": 22476,
+      "sha256": "8e669fb5e4b5f9ffa09f93041826ed0a21d843e8e438bc6fefed7114f3fab1eb"
+    },
+    {
+      "path": "tests/roboto-self-hosting.test.ts",
+      "bytes": 9775,
+      "sha256": "c9d3447f1e50f5456361551fa1713a6eb9484fedf6942fe699a1f614091a83b0"
+    },
+    {
+      "path": "tests/roboto-self-hosting.browser.test.cjs",
+      "bytes": 7402,
+      "sha256": "77c78ca93773ce10961dd9b38f0a2013077ee93f1c19131e62988497472a98b1"
+    },
+    {
+      "path": "tests/roboto-self-hosting.production.test.cjs",
+      "bytes": 6054,
+      "sha256": "eb58bb883c99b0c76f81513c807788613b3bb29e65d1bab4e7cd529fbc158ba7"
+    },
+    {
+      "path": "public/fonts/roboto/roboto-v51-cyrillic-ext.e44224eb71a96cb3.woff2",
+      "bytes": 31472,
+      "sha256": "e44224eb71a96cb33bd046ded16a4e22bb441b170bdfbcba0268a754141b97c8"
+    },
+    {
+      "path": "public/fonts/roboto/roboto-v51-cyrillic.32886c5ec61a0d06.woff2",
+      "bytes": 19624,
+      "sha256": "32886c5ec61a0d06e5677a98c5ed78a5f1c788c18c5e8d7dcd931c4b6dc19830"
+    },
+    {
+      "path": "public/fonts/roboto/roboto-v51-greek-ext.5fdfeaf926cac990.woff2",
+      "bytes": 1632,
+      "sha256": "5fdfeaf926cac990770dfa66011bdb87d6b69f43c42aa759dcdcf0a7a197c19a"
+    },
+    {
+      "path": "public/fonts/roboto/roboto-v51-greek.4813e3dfbbb23708.woff2",
+      "bytes": 13984,
+      "sha256": "4813e3dfbbb23708c817ef7fd3fd9c82cd0d33c778def0897f0447f1c364ce64"
+    },
+    {
+      "path": "public/fonts/roboto/roboto-v51-math.297193369eea6001.woff2",
+      "bytes": 36292,
+      "sha256": "297193369eea600161f4b5219bd7b08850180fcfe0752f1a2eaa436575cd03b7"
+    },
+    {
+      "path": "public/fonts/roboto/roboto-v51-symbols.fab8a0056d92fdd8.woff2",
+      "bytes": 16692,
+      "sha256": "fab8a0056d92fdd8d64fed4b049744144e1d24d08762c513bff78265299ed7a3"
+    },
+    {
+      "path": "public/fonts/roboto/roboto-v51-vietnamese.2071148c26bd0430.woff2",
+      "bytes": 10572,
+      "sha256": "2071148c26bd0430cad316373c26db399e0cf8f6275b9e1a2c1b831f05ee7dc3"
+    },
+    {
+      "path": "public/fonts/roboto/roboto-v51-latin-ext.cdd53dc5576a79f3.woff2",
+      "bytes": 24444,
+      "sha256": "cdd53dc5576a79f35cf280dfbd9c1cb2a5dd2f0ede30afba9b9ccdc7fe12e7d0"
+    },
+    {
+      "path": "public/fonts/roboto/roboto-v51-latin.0a44e0bb6ba5c853.woff2",
+      "bytes": 37520,
+      "sha256": "0a44e0bb6ba5c8537e8814c148ef7755f1bce12112361231f595ecc584a18d7a"
+    }
+  ]
+}
+

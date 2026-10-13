@@ -117,7 +117,8 @@ function useSimpleAdminAuthState(): AuthState {
             username: nextUsername,
             displayName: nextDisplayName || nextUsername,
             role: nextRole,
-            resetRequired: requiresPasswordReset,
+            // Persist only a literal display flag, never credential material.
+            resetRequired: requiresPasswordReset ? true : false,
             permissions: nextPermissions,
             pages: nextPages,
           })

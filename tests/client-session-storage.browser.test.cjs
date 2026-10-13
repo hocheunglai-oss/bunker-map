@@ -49,7 +49,7 @@ async function main() {
   const failures = []
   try {
     browser = await require("playwright").chromium.launch({ headless: true, ...(process.env.CHROME_EXECUTABLE_PATH ? { executablePath: process.env.CHROME_EXECUTABLE_PATH } : {}) })
-    async function reset({ mode = "admin", fault = "write", nav = false, authenticated = true, failedLogout = false, failedLogin = "", returnTo = "", viewOnly = false } = {}) {
+    async function reset({ mode = "admin", fault = "write", nav = false, authenticated = true, failedLogout = false, failedLogin = "", returnTo = "", viewOnly = false, metadataProbe = false, resetFlag = false } = {}) {
       if (context) await context.close()
       context = await browser.newContext()
       requests = []; pageErrors = []; dialogs = []
@@ -79,7 +79,7 @@ async function main() {
             sessionAuthenticated = true
             body = { user: { username: "synthetic-user", role: "ADMIN", permissions: {}, pages: [] } }
           }
-          else if (url.pathname.endsWith("/session")) body = { authenticated: sessionAuthenticated, username: sessionAuthenticated ? "synthetic-user" : null, role: viewOnly ? "AC" : "ADMIN", permissions: viewOnly ? { pricesetter: "view" } : {}, pages: [] }
+          else if (url.pathname.endsWith("/session")) body = { authenticated: sessionAuthenticated, username: sessionAuthenticated ? "synthetic-user" : null, role: viewOnly ? "AC" : "ADMIN", permissions: viewOnly ? { pricesetter: "view" } : {}, pages: [], ...(metadataProbe ? { resetRequired: resetFlag, password: "synthetic-never-cache", accessToken: "synthetic-never-cache", refreshToken: "synthetic-never-cache" } : {}) }
           else if (url.pathname.endsWith("/logout")) { status = logoutStatus; if (status === 200) sessionAuthenticated = false }
           else if (url.pathname === "/api/admin/supabase") body = [{ id: "synthetic-port" }]
           else if (url.pathname === "/api/admin/pages") body = { pages: [] }
@@ -109,6 +109,18 @@ async function main() {
       assert.equal(read?.headers["x-bunker-admin-user"], "synthetic-user", "authenticated reads retain proxy/audit context without disk storage")
       assert.equal(requests.some((item) => item.path.startsWith("EXTERNAL:")), false)
       assert.deepEqual(pageErrors, [])
+    })
+    await run("FCUNO cache stores only literal reset status and selected display metadata", async () => {
+      for (const resetFlag of [true, false, "false", "synthetic-never-cache"]) {
+        await reset({ fault: "none", metadataProbe: true, resetFlag })
+        const raw = await page.evaluate(() => window.localStorage.getItem("bunker_admin_actor"))
+        const cached = JSON.parse(raw)
+        assert.equal(cached.resetRequired, resetFlag === true)
+        assert.equal(typeof cached.resetRequired, "boolean")
+        assert.deepEqual(Object.keys(cached).sort(), ["displayName", "pages", "permissions", "resetRequired", "role", "username"])
+        assert.equal(raw.includes("synthetic-never-cache"), false)
+        assert.deepEqual(pageErrors, [])
+      }
     })
     await run("FCUNO sidebar opens and toggles when storage is disabled", async () => {
       await reset({ fault: "getter", nav: true })

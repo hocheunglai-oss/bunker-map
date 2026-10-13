@@ -45,6 +45,12 @@ jobs:
       - name: Build the production application
         run: npm run build
 
+      - name: Verify pinned font assets and routing boundaries
+        run: npx --no-install tsx --test tests/roboto-self-hosting.test.ts
+
+      - name: Verify font delivery in the built production server
+        run: node tests/roboto-self-hosting.production.test.cjs
+
   static-security-evidence:
     name: Focused tests and dependency audit
     runs-on: ubuntu-latest
