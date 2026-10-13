@@ -203,7 +203,7 @@
     },
     {
       "command": "git diff --check",
-      "result": "PASS"
+      "result": "PASS for unstaged changes at original freeze; subsequent staged review removed two new EOF blank lines and intentionally retained the exact official OFL license's line21 trailing space. No font bytes or declarations changed."
     },
     {
       "check": "Existing next.config security/API headers against current released HEAD with only added font rule excluded",
@@ -234,8 +234,8 @@
     },
     {
       "path": "app/fonts/roboto.css",
-      "bytes": 20605,
-      "sha256": "c51fc564bde099966c4102a04d109ef135a96912ea9117634a9b690c54d0aa7f"
+      "bytes": 20604,
+      "sha256": "7602802d2ff90653f2db97a56090629f729c2fa681744c055b51d737c3afb324"
     },
     {
       "path": "next.config.js",
@@ -319,4 +319,3 @@
     }
   ]
 }
-

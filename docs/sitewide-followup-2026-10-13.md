@@ -43,7 +43,7 @@ Nineteen runtime/configuration files and nine pinned font binaries plus their li
 | Scoped lint | 0 errors; 19 existing warnings |
 | Immutable FCUNO–FCOS contract | unchanged; verification passed |
 | Independent changed-runtime reviews | passed |
-| Whitespace and evidence source hashes | passed |
+| Whitespace review and evidence source hashes | passed; exact upstream license whitespace intentionally retained |
 | Actual built-server font/cache/routing checks | 3 groups passed on both hosts, including China visitor routing |
 
 Browser/database mutations were synthetic and loopback-only. Owned headless contexts and servers were closed; personal Chrome was not attached or controlled. No live sync, external job, outbound email or test business-data edit was performed.

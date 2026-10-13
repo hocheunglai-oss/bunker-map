@@ -107,8 +107,8 @@
     },
     {
       "path": "app/fonts/roboto.css",
-      "bytes": 20605,
-      "sha256": "c51fc564bde099966c4102a04d109ef135a96912ea9117634a9b690c54d0aa7f",
+      "bytes": 20604,
+      "sha256": "7602802d2ff90653f2db97a56090629f729c2fa681744c055b51d737c3afb324",
       "mode": "100644",
       "kind": "runtime"
     },
@@ -177,8 +177,8 @@
     },
     {
       "path": "docs/sitewide-followup-2026-10-13.md",
-      "bytes": 9921,
-      "sha256": "6af0c1ed07bcd452ffa702b735f22068c1c6d4dd5c3800f11e61a063c2356bf5",
+      "bytes": 9986,
+      "sha256": "2ea0487962bd427fd015e6b53d9d01e52cf3f232071dadc3a8b0a3677fba82e2",
       "mode": "100644",
       "kind": "evidence"
     },
@@ -191,8 +191,8 @@
     },
     {
       "path": "docs/sitewide-font-self-hosting-2026-10-13.json",
-      "bytes": 17928,
-      "sha256": "ecf6042387f983a475cf84e4978c7c0630deb2f9c510545e3510ea838b0fb6c6",
+      "bytes": 18147,
+      "sha256": "9a58b397f1d32bce6690ca31c295a7cd129c447092e0cb0ce45fde6a77562961",
       "mode": "100644",
       "kind": "evidence"
     },
@@ -507,7 +507,8 @@
     "independentRuntimeReview": "All bounded changed-runtime scopes passed; final session 13 browser groups/helper 4 and final font 8 unit/3 browser/3 real built-server groups independently rerun on frozen source hashes",
     "liveBaseline": "docs/sitewide-followup-live-baseline-2026-10-13.json",
     "builtServerFontRoutingGroups": 3,
-    "fontEvidence": "docs/sitewide-font-self-hosting-2026-10-13.json"
+    "fontEvidence": "docs/sitewide-font-self-hosting-2026-10-13.json",
+    "whitespaceReview": "Staged source checked; two harmless new EOF blank lines removed. Exact official OFL.txt line21 upstream trailing space intentionally retained."
   },
   "releaseGates": {
     "currentCi": "Must pass on exact updated PR head except the explicitly approved single advisory",
