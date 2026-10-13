@@ -514,6 +514,8 @@ export default function EventCalendarPage() {
   const calendarMutationPendingRef = useRef(false)
   const eventSubmissionPendingRef = useRef(false)
   const eventSubmissionTokenRef = useRef(0)
+  const leaveSubmissionPendingRef = useRef(false)
+  const leaveSubmissionTokenRef = useRef(0)
   const draftEventIdRef = useRef("")
   const draftEventVersionRef = useRef("")
   const calendarStateSequenceRef = useRef(0)
@@ -932,7 +934,7 @@ export default function EventCalendarPage() {
   }
 
   function openRecurrentModal() {
-    if (!canEdit) return
+    if (!canEdit || calendarMutationPendingRef.current) return
     setDraftRecurrentEvent(buildBlankRecurrentEvent(todayKey))
     setAddMenuOpen(false)
     setToolsMenuOpen(false)
@@ -940,11 +942,18 @@ export default function EventCalendarPage() {
   }
 
   function openLeaveModal() {
-    if (!canEdit) return
+    if (!canEdit || leaveSubmissionPendingRef.current) return
+    leaveSubmissionTokenRef.current += 1
     setLeaveRequestDraft(buildBlankLeaveRequest(todayKey, people))
     setAddMenuOpen(false)
     setToolsMenuOpen(false)
     setLeaveModalOpen(true)
+  }
+
+  function closeLeaveModal() {
+    if (leaveSubmissionPendingRef.current) return
+    leaveSubmissionTokenRef.current += 1
+    setLeaveModalOpen(false)
   }
 
   function openEditModal(event: ManagedEvent) {
@@ -1161,7 +1170,9 @@ export default function EventCalendarPage() {
   }
 
   async function sendLeaveRequest() {
-    if (!canEdit || !leaveRequestDraft.person || leaveRequestDraft.status === "sending") return
+    if (!canEdit || !leaveRequestDraft.person || leaveSubmissionPendingRef.current || leaveRequestDraft.status === "sent") return
+    const submissionToken = ++leaveSubmissionTokenRef.current
+    leaveSubmissionPendingRef.current = true
     setLeaveRequestDraft((current) => ({ ...current, status: "sending", error: "" }))
 
     try {
@@ -1172,16 +1183,22 @@ export default function EventCalendarPage() {
       })
 
       const payload = await response.json().catch(() => null)
+      if (submissionToken !== leaveSubmissionTokenRef.current) return
       if (!response.ok) throw new Error(payload?.message || "Leave request failed.")
       if (payload?.status === "in_progress") throw new Error("This leave request is already being sent. Please wait a moment before checking again.")
       setLeaveRequestDraft((current) => ({ ...current, status: "sent", error: "" }))
-      window.setTimeout(() => setLeaveModalOpen(false), 900)
+      window.setTimeout(() => {
+        if (submissionToken === leaveSubmissionTokenRef.current) setLeaveModalOpen(false)
+      }, 900)
     } catch (error) {
+      if (submissionToken !== leaveSubmissionTokenRef.current) return
       setLeaveRequestDraft((current) => ({
         ...current,
         status: "failed",
         error: error instanceof Error ? error.message : "Leave request failed.",
       }))
+    } finally {
+      if (submissionToken === leaveSubmissionTokenRef.current) leaveSubmissionPendingRef.current = false
     }
   }
 
@@ -1234,7 +1251,7 @@ export default function EventCalendarPage() {
   }
 
   function openPeopleModal() {
-    if (!canEdit) return
+    if (!canEdit || calendarMutationPendingRef.current) return
     setDraftPeopleText(people.join("\n"))
     setDraftPeopleVersion(settingVersions.people || "")
     setToolsMenuOpen(false)
@@ -1291,7 +1308,7 @@ export default function EventCalendarPage() {
   }
 
   function openEmailModal() {
-    if (!canEdit) return
+    if (!canEdit || calendarMutationPendingRef.current) return
     setDraftEmailRecipientsText(emailRecipientsText)
     setDraftEmailRecipientsInitialText(emailRecipientsText)
     setDraftEmailRecipientsVersion(settingVersions.emailRecipientsText || "")
@@ -2174,6 +2191,7 @@ export default function EventCalendarPage() {
         <div style={modalBackdropStyle}>
           <div style={modalStyle}>
             <h2 style={{ margin: "0 0 14px", fontSize: "24px" }}>Recurrent Event</h2>
+            <fieldset disabled={calendarMutationPending} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
               <label style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                 From
@@ -2312,7 +2330,7 @@ export default function EventCalendarPage() {
               })}
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "9px" }}>
-              <button type="button" onClick={() => setRecurrentModalOpen(false)} style={buttonStyle}>
+              <button type="button" onClick={() => { if (!calendarMutationPendingRef.current) setRecurrentModalOpen(false) }} style={buttonStyle}>
                 Cancel
               </button>
               <button
@@ -2324,6 +2342,7 @@ export default function EventCalendarPage() {
                 {calendarMutationPending ? "Saving" : "Save"}
               </button>
             </div>
+            </fieldset>
           </div>
         </div>
       )}
@@ -2332,6 +2351,7 @@ export default function EventCalendarPage() {
         <div style={modalBackdropStyle}>
           <div style={{ ...modalStyle, width: "min(560px, 100%)" }}>
             <h2 style={{ margin: "0 0 14px", fontSize: "24px" }}>Leave Request</h2>
+            <fieldset disabled={leaveRequestDraft.status === "sending" || leaveRequestDraft.status === "sent"} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
               <label style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                 Leave Period From
@@ -2409,6 +2429,7 @@ export default function EventCalendarPage() {
                 )
               })}
             </div>
+            </fieldset>
             {leaveRequestDraft.status !== "idle" && (
               <div
                 style={{
@@ -2438,7 +2459,7 @@ export default function EventCalendarPage() {
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "9px" }}>
               <button
                 type="button"
-                onClick={() => setLeaveModalOpen(false)}
+                onClick={closeLeaveModal}
                 disabled={leaveRequestDraft.status === "sending"}
                 style={{ ...buttonStyle, opacity: leaveRequestDraft.status === "sending" ? 0.58 : 1 }}
               >
@@ -2570,7 +2591,10 @@ export default function EventCalendarPage() {
             </p>
             <textarea
               value={draftPeopleText}
-              onChange={(event) => setDraftPeopleText(event.target.value.toUpperCase())}
+              disabled={calendarMutationPending}
+              onChange={(event) => {
+                if (!calendarMutationPendingRef.current) setDraftPeopleText(event.target.value.toUpperCase())
+              }}
               style={{
                 ...inputStyle,
                 minHeight: "220px",
@@ -2579,7 +2603,12 @@ export default function EventCalendarPage() {
               }}
             />
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "9px", marginTop: "14px" }}>
-              <button type="button" onClick={() => setPeopleModalOpen(false)} style={buttonStyle}>
+              <button
+                type="button"
+                disabled={calendarMutationPending}
+                onClick={() => { if (!calendarMutationPendingRef.current) setPeopleModalOpen(false) }}
+                style={buttonStyle}
+              >
                 Cancel
               </button>
               <button
@@ -2604,7 +2633,10 @@ export default function EventCalendarPage() {
             </p>
             <textarea
               value={draftEmailRecipientsText}
-              onChange={(event) => setDraftEmailRecipientsText(event.target.value)}
+              disabled={calendarMutationPending}
+              onChange={(event) => {
+                if (!calendarMutationPendingRef.current) setDraftEmailRecipientsText(event.target.value)
+              }}
               placeholder="name@company.com"
               style={{
                 ...inputStyle,
@@ -2614,7 +2646,12 @@ export default function EventCalendarPage() {
               }}
             />
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "9px", marginTop: "14px" }}>
-              <button type="button" onClick={() => setEmailModalOpen(false)} style={buttonStyle}>
+              <button
+                type="button"
+                disabled={calendarMutationPending}
+                onClick={() => { if (!calendarMutationPendingRef.current) setEmailModalOpen(false) }}
+                style={buttonStyle}
+              >
                 Cancel
               </button>
               <button

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 import {
+  approvedCountryLabelNormalizationUndoMessage,
   canUndoAuditLogRecord,
   getAuditLogRecord,
   isUserAuditRecord,
@@ -272,7 +273,7 @@ export async function POST(request: Request) {
     }
     if (!canUndoAuditLogRecord(target)) {
       return NextResponse.json(
-        { message: "This audit record cannot be undone." },
+        { message: approvedCountryLabelNormalizationUndoMessage(target) || "This audit record cannot be undone." },
         { status: 400 }
       )
     }

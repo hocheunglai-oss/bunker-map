@@ -3,6 +3,7 @@
 import { createContext, createElement, useContext, useEffect, useState } from "react"
 import type { ReactNode } from "react"
 import type { SpcPageDefinition, SpcPagePermissionMap, SpcRoleId } from "@/lib/spcPages"
+import { readClientStorage, removeClientStorage, writeClientStorage } from "@/lib/clientStorage"
 
 type SpcAuthState = {
   loading: boolean
@@ -47,7 +48,7 @@ function writeCachedSpcActor(data: SpcSessionPayload) {
   if (typeof window === "undefined") return
 
   if (data.authenticated && data.username) {
-    window.localStorage.setItem(
+    writeClientStorage(
       SPC_ACTOR_STORAGE_KEY,
       JSON.stringify({
         username: data.username,
@@ -62,7 +63,7 @@ function writeCachedSpcActor(data: SpcSessionPayload) {
     return
   }
 
-  window.localStorage.removeItem(SPC_ACTOR_STORAGE_KEY)
+  removeClientStorage(SPC_ACTOR_STORAGE_KEY)
 }
 
 export function clearSpcClientSessionCache() {
@@ -70,7 +71,7 @@ export function clearSpcClientSessionCache() {
   sharedSessionPromise = null
   sharedSessionResult = null
   if (typeof window !== "undefined") {
-    window.localStorage.removeItem(SPC_ACTOR_STORAGE_KEY)
+    removeClientStorage(SPC_ACTOR_STORAGE_KEY)
     emitSpcSessionChanged()
   }
 }
@@ -113,7 +114,7 @@ function readCachedSpcActor(): SpcSessionPayload | null {
   if (typeof window === "undefined") return null
 
   try {
-    const raw = window.localStorage.getItem(SPC_ACTOR_STORAGE_KEY)
+    const raw = readClientStorage(SPC_ACTOR_STORAGE_KEY)
     if (!raw) return null
     const actor = JSON.parse(raw) as SpcSessionPayload
     if (!actor.username) return null

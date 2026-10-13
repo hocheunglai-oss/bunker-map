@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-10-13T02:29:04Z",
+  "status": "local-tested-not-deployed",
+  "baseCommit": "2325abb6f0e25cf74b91b2b06f5f901712df359d",
+  "scope": "Application Undo safeguard for a separately approved, one-port canonical country-label correction; no schema changes",
+  "approvedAction": "approved_country_label_normalization",
+  "maintenanceOperationId": "bd906c1b-4a93-4cc2-bc11-4b852333a036",
+  "readOnlyHostedPreflight": {
+    "source": "Parent agent exact-project read-only connector result; this reviewing agent made no hosted reads or writes",
+    "checkedAtUtc": "2026-10-13T02:17:55.669997Z",
+    "port": {
+      "id": "7c1d5d83-d99c-451d-92f9-372f6947c721",
+      "name": "PAGO PAGO",
+      "countryId": "f67e01dc-e68c-4b76-95a3-261779a62ce6",
+      "oldCountryLabel": "SAMOA, AMERICAN",
+      "rawVersion": "2026-05-14 03:43:28.163838+00"
+    },
+    "linkedCountry": {
+      "id": "f67e01dc-e68c-4b76-95a3-261779a62ce6",
+      "name": "AMERICAN SAMOA",
+      "rawVersion": "2026-05-14 03:37:54.60614+00"
+    },
+    "interpretation": "The mismatch predates the October 12 canonicalization migration. That migration intentionally retained historical aliases on unchanged relations. Current stable-ID inserts, reparenting and explicit label changes use the canonical linked country name. The precise historical origin of this alias is not proven."
+  },
+  "confirmedFailure": "The existing database canonicalization trigger replaces the old inconsistent label during generic audit Undo. A synthetic actual-SQL reproduction returned a null Undo log ID and marked the correction undone even though the canonical label remained unchanged.",
+  "implementation": [
+    "A narrow audit helper recognizes only persisted public.cc_ports records with the exact approved_country_label_normalization action.",
+    "Audit presentation retains the truthful maintenance history and original/canonical labels but disables Undo for that action.",
+    "The existing authenticated admin Undo route returns HTTP 400 with a plain explanation before invoking the privileged database RPC.",
+    "Client-supplied table, action, before/after rows and changed-field metadata do not override the saved audit record.",
+    "Ordinary CCINFO, calendar and SPC audit behavior and existing sign-in/permission checks remain unchanged. The generic database proxy already denies audit tables and privileged RPC targets."
+  ],
+  "verification": {
+    "red": {
+      "runtime": "Audit helper and admin route still equal the released base before the patch; new tests added first",
+      "tests": 12,
+      "passed": 10,
+      "failed": 2,
+      "failures": [
+        "Normalization presentation allowed Undo instead of disabling it.",
+        "Actual admin Undo handler returned HTTP 200 and invoked Undo rather than HTTP 400 without the RPC."
+      ]
+    },
+    "green": {
+      "focusedAuditAndProxyTests": 13,
+      "adjacentAuditTestsIncludingFocused": 33,
+      "failures": 0,
+      "typescript": "pass",
+      "focusedLintErrors": 0,
+      "focusedLintWarnings": 0,
+      "diffCheck": "pass",
+      "independentReview": "Another agent independently read the helper, actual admin/SPC Undo boundaries and protected proxy; reran 13 focused tests; reported no blocking issue."
+    },
+    "maintenanceSql": {
+      "path": "docs/approved-pago-pago-label-repair-2026-10-13.sql",
+      "sha256": "bf48040c5c1a53ee062da67e444f8ce4a82daad23ced1035699397dbe8bce4b6",
+      "engine": "Native PostgreSQL 17.6, isolated owned Unix socket, TCP disabled, no inherited PG credentials",
+      "source": "Existing actual country-rename/version/audit/backup SQL fixture; synthetic target seeded before canonicalization trigger installation with the approved IDs, names and raw versions",
+      "exactBytes": true,
+      "proofs": [
+        "Injected deferred constraint failure at COMMIT rolled back every country, port, audit and backup marker row.",
+        "Successful execution changed only target country_name and monotonic updated_at; all countries, other ports and file/folder references remained identical.",
+        "Exactly one codex-maintenance audit row recorded changed_fields [country_name], exact before/after rows and the truthful approved action; exactly one transaction backup marker was added.",
+        "Retrying the exact original SQL after success failed the port preflight and added no business, audit or backup writes."
+      ],
+      "syntheticCommitReceipt": {
+        "checkedAt": "2026-10-13T02:28:25.187794+00:00",
+        "version": "2026-10-13 02:28:25.185755+00",
+        "auditId": "985dfd86-8f3a-4c94-9adf-f15c2cdc9d17",
+        "countryName": "AMERICAN SAMOA",
+        "otherFieldsUnchanged": true
+      },
+      "safetyReview": "The proposed operation acquires the existing shared backup fence first, then country and port SHARE ROW EXCLUSIVE table locks in the existing rename order before row locks. It checks both exact versions, stable IDs, old label and names; verifies the saved row, truthful audit action and backup marker before commit. Any failure aborts the complete transaction. No country rename or temporary alias is used."
+    }
+  },
+  "commands": {
+    "runtime": "/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "auditTests": "NODE_PATH=/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules node --conditions=react-server --import tsx --test tests/ccinfo-country-rename-audit.test.ts tests/ccinfo-proxy-conflicts.test.ts tests/calendar-audit-undo.test.ts tests/spc-audit-context.test.ts tests/spc-audit-presentation.test.ts tests/spc-audit-route-enforcement.test.ts",
+    "typescript": "node node_modules/typescript/bin/tsc --noEmit --incremental false",
+    "lint": "node node_modules/eslint/bin/eslint.js lib/auditLog.ts app/api/admin/audit-logs/route.ts tests/ccinfo-country-rename-audit.test.ts tests/ccinfo-proxy-conflicts.test.ts",
+    "maintenanceRehearsal": "NATIVE_PG_BIN=/private/tmp/fcuno-pg17-native-vpUhfA/install/bin direct bundled Node --input-type=module; read exact SQL file and assert SHA-256; setupNativeCcinfo(fixtureSql() seeded with target metadata); force a deferred constraint failure and compare complete fixture state; execute exact SQL and compare all rows/audit/epochs; retry exact SQL and compare unchanged state; close all sessions and owned cluster"
+  },
+  "sourceSha256": {
+    "lib/auditLog.ts": "91bd99a47d9ffecec5cbed928b02519953caa09ca36b977820f4e06c48ebba61",
+    "app/api/admin/audit-logs/route.ts": "145c9e8269181e2b19750c9080ae22c24dd7037553b95ab7ca0396490fdacc71",
+    "tests/ccinfo-country-rename-audit.test.ts": "d678745f514f54b72cdb72f958be59d5511103d8b043fe2c3ae1b4e9838a4545",
+    "tests/ccinfo-proxy-conflicts.test.ts": "d9fd7d33e545bbecbaf38fa1146ab4ca64c0bb5862e1e8e9433d265c05506da4"
+  },
+  "limits": [
+    "The guard is an application boundary, not a new database prohibition. A trusted operator directly invoking service-role undo_audit_log can still bypass it and reproduce the canonicalization issue; this is explicitly not certified safe.",
+    "Transaction rollback before commit is proven. Restoring the intentionally inconsistent alias after commit is not a supported normal Undo operation and must not be promised.",
+    "Deploy the application guard before committing the separately approved maintenance correction. Root owns production release, fresh preflight and post-commit verification.",
+    "The local exact-SQL rehearsal is not a live business-data mutation, hosted RLS certification or complete production restore test.",
+    "Existing port UI loads its linked country by stable ID; a failed related-country read can fall back to the stored alias without a warning. This display fallback does not create the persisted mismatch and is not changed here."
+  ],
+  "safety": {
+    "hostedMutationByReviewer": false,
+    "personalBrowserUsed": false,
+    "ownedNativeSessionsAndClusterClosed": true,
+    "databaseSchemaChanged": false,
+    "packageOrLockChanged": false,
+    "runtimeScope": "One small audit helper and its existing admin-route refusal message only; unrelated frozen patches preserved"
+  }
+}

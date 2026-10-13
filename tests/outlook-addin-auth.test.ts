@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "../lib/passwordPolicy"
 
 const files = {
   adminAuth: new URL("../lib/adminAuth.ts", import.meta.url),
@@ -258,7 +259,7 @@ test("Outlook insertion attempts are visible and non-undoable in Audit Log", asy
 
   assert.match(
     auditLog,
-    /table_schema\.eq\.public,and\(table_schema\.eq\.app,table_name\.in\.\(outlook_template_insertion_attempts,spc_user_management_events\)\)/,
+    /table_schema\.eq\.public,and\(table_schema\.eq\.app,table_name\.in\.\(outlook_template_insertion_attempts,spc_user_management_events,spc_mfa_test_events\)\)/,
   )
   assert.match(
     auditLog,
@@ -281,7 +282,8 @@ test("generated auth-dialog inline JavaScript is syntactically valid", async () 
     /\$\{JSON\.stringify\([^)]+\)\}/g,
     '"https://fcuno.test/api"',
   )
-  const html = Function(`return \`${templateBody}\`;`)() as string
+  const html = Function("PASSWORD_MIN_LENGTH", "PASSWORD_MAX_LENGTH", `return \`${templateBody}\`;`)(PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH) as string
+  assert.match(html, new RegExp(`minlength="${PASSWORD_MIN_LENGTH}" maxlength="${PASSWORD_MAX_LENGTH}"`))
   const inlineScript = html.match(/<script>\s*([\s\S]*?)\s*<\/script>/)
   assert.ok(inlineScript, "inline auth-dialog script should be extractable")
   assert.doesNotThrow(() => Function(inlineScript[1]))

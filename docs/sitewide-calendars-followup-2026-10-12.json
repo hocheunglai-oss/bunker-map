@@ -1,0 +1,148 @@
+{
+  "scope": "Event and Task Calendar local reliability follow-up",
+  "status": "local_candidate_verified_not_deployed",
+  "startedDateHongKong": "2026-10-12",
+  "recordedAtUtc": "2026-10-13T02:07:09Z",
+  "candidateDirectory": "/private/tmp/fcuno-sitewide-followup-49kM2f/site",
+  "baseCommit": "2325abb6f0e25cf74b91b2b06f5f901712df359d",
+  "baseTree": "8c384e8faaacf191968bbb8dd866ea966187c4aa",
+  "productionChanges": [
+    {
+      "path": "app/admin/eventcalendar/page.tsx",
+      "baseSha256": "1e86285053c58d466d567968cf39d94644f5d15111c2359de9892809c8b3b90c",
+      "candidateSha256": "daf15cea9dff3b9eb91135c9a264a8fbd7fbd34f4b4d58ed59e05dddc4d68f5a",
+      "changes": [
+        "Email-recipient and people settings disable typing and Cancel while a save owns the dialog. Ref guards prevent reopening/replacing the draft during that save.",
+        "Recurring-event controls and Cancel are disabled while their shared-calendar save is pending; opening a new recurrent draft is guarded.",
+        "Leave-request inputs cannot change while sending or briefly showing Sent. A synchronous pending ref prevents duplicate submission and closing while pending; a dialog ownership token prevents an old delayed completion from closing a newly opened draft."
+      ]
+    }
+  ],
+  "testChanges": [
+    "tests/event-calendar-settings.browser.test.cjs"
+  ],
+  "noChangesTo": [
+    "Task Calendar production page",
+    "Calendar APIs, permissions, schemas, migrations, email recipients or provider configuration",
+    "Holiday reference dates, reconciliation rules or calendar audit-undo restrictions",
+    "Personal browser windows or tabs",
+    "ROOT or earlier frozen release candidates"
+  ],
+  "confirmedRedBoundaries": [
+    {
+      "id": "email_settings_pending_draft_loss",
+      "flow": "Actual Event Calendar in React.StrictMode -> real HTTP office-calendar-store route -> real mutateEventCalendarStore CAS helper -> in-memory database transport -> actual UI",
+      "reproduction": "Hold Save A for sent-a@example.test; type newer-b@example.test while the request is pending; release A.",
+      "observed": {
+        "persisted": "sent-a@example.test",
+        "newerAcceptedTyping": "newer-b@example.test",
+        "editorStillOpen": false,
+        "exitCode": 1
+      },
+      "cause": "The textarea and Cancel remained active. The earlier save completion unconditionally closed the owner editor, discarding accepted newer typing."
+    },
+    {
+      "id": "recurrent_pending_draft_loss",
+      "flow": "Actual recurrent editor -> real HTTP office-calendar-store route -> real CAS helper -> in-memory database transport -> actual UI",
+      "reproduction": "Hold recurrent Save A; type RECURRENT NEWER B; release A.",
+      "observed": {
+        "persisted": "RECURRENT SENT A",
+        "newerAcceptedTyping": "RECURRENT NEWER B",
+        "editorStillOpen": false,
+        "exitCode": 1
+      }
+    },
+    {
+      "id": "leave_pending_false_confirmation",
+      "flow": "Actual leave editor -> real HTTP leave-request route and validation -> synthetic-only delivery adapter -> actual UI",
+      "reproduction": "Hold leave request A; change reason to LEAVE NEWER B; release A.",
+      "observed": {
+        "submittedReason": "LEAVE SENT A",
+        "visibleUnsentReason": "LEAVE NEWER B",
+        "displayedStatus": "Sent",
+        "exitCode": 1
+      }
+    }
+  ],
+  "newBrowserGroups": [
+    "Pending email-list save locks typing and Cancel; canonical reload preserves unrelated data.",
+    "Pending people save owns its draft; deduplicated CY columns roundtrip without changing recipients.",
+    "Unchanged filled, explicitly disabled and absent email settings issue no mutation.",
+    "Clear requires confirmation and remains explicitly disabled after reload.",
+    "Email and people write failures retain their exact drafts and committed state; explicit retry succeeds.",
+    "Two tabs cannot undo a newer clear; stale draft stays visible, does not rebase, and reopening captures the current version.",
+    "Concurrent tabs saving different settings merge both changes through real setting versions and CAS.",
+    "Ordinary event edit locks its pending draft, prompts only after a real commit, sends nothing on No, and retains failed edits without an email prompt.",
+    "Failed initial shared-store reads block editing and never write defaults or empty settings.",
+    "Recurring saves cannot accept then discard a newer draft or close a pending editor.",
+    "Leave confirmation matches the submitted draft; pending controls lock; an old completion timer cannot close a new draft; delivery is synthetic only.",
+    "Real holiday preview/apply commits once per reviewed group across all four countries; settings survive, IDs remain unique, repeated previews are exact no-ops.",
+    "A settings change after holiday preview rejects the entire stale apply without partial changes.",
+    "Missing Event Calendar storage and unchanged blank recipients cannot bootstrap or clear shared settings.",
+    "Actual Task Calendar -> route -> CAS: row selection is read-only and survives an edit; pending controls lock and a failed draft explicitly retries.",
+    "Two real task tabs retain the conflict loser draft; repeated stale Save cannot overwrite; explicit reopen permits a fresh edit.",
+    "Stale task tabs editing different task IDs preserve both changes through real per-task versions and CAS retries.",
+    "Actual task empty/missing-store responses never revive bundled tasks; read errors disable editing without writes."
+  ],
+  "verification": {
+    "unitAndApiTests": { "pass": 119, "fail": 0, "exitCode": 0 },
+    "existingEventBrowserGroups": { "pass": 5, "fail": 0, "exitCode": 0 },
+    "existingTaskBrowserGroups": { "pass": 8, "fail": 0, "exitCode": 0 },
+    "newActualRoundtripBrowserGroups": { "pass": 18, "fail": 0, "exitCode": 0, "testedHarnessSha256": "7935e9c16da21f4c16d5cbd9f485d772fb073bcb4b9439c78af1dddbd527e648" },
+    "finalBaselineRedProof": { "exitCode": 1, "expectedFailure": true, "boundary": "The baseline accepted newer recipient typing, then silently closed the editor after persisting the older sent draft.", "testedHarnessSha256": "7935e9c16da21f4c16d5cbd9f485d772fb073bcb4b9439c78af1dddbd527e648" },
+    "fullTypecheck": { "exitCode": 0, "scope": "Shared candidate at check time, not an isolated calendar-only release build" },
+    "focusedPageLint": { "exitCode": 0 },
+    "nodeSyntaxCheck": { "exitCode": 0 },
+    "whitespaceCheck": { "exitCode": 0 },
+    "dependencyInterruption": "Resolved before final red/green reruns. Parent restored exactly 25 moved original dependency directories without overwriting existing files and checked their versions against the immutable candidate lockfile. Final baseline red proof and all 18 actual-roundtrip browser groups reran successfully with direct Node. No source/package/lock changes were made by this task."
+  },
+  "commands": {
+    "unitAndApi": "NODE_OPTIONS=--conditions=react-server NODE_PATH=/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules /Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --import tsx --test tests/calendar-*.test.ts tests/public-holidays*.test.ts tests/event-calendar*.test.ts tests/task-calendar*.test.ts",
+    "eventBrowser": "NODE_PATH=/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules CHROME_EXECUTABLE_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' /Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node tests/event-calendar.browser.test.cjs",
+    "taskBrowser": "NODE_PATH=/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules CHROME_EXECUTABLE_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' /Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node tests/task-calendar.browser.test.cjs",
+    "actualRoundtripBrowser": "NODE_PATH=/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules CHROME_EXECUTABLE_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' /Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node tests/event-calendar-settings.browser.test.cjs",
+    "baselineRedProof": "CALENDAR_TEST_BASELINE=1 NODE_PATH=/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules CHROME_EXECUTABLE_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' /Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node tests/event-calendar-settings.browser.test.cjs",
+    "types": "/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node node_modules/typescript/bin/tsc --noEmit --incremental false",
+    "focusedLint": "/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node node_modules/eslint/bin/eslint.js app/admin/eventcalendar/page.tsx",
+    "syntax": "/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --check tests/event-calendar-settings.browser.test.cjs",
+    "whitespace": "git diff --check -- app/admin/eventcalendar/page.tsx"
+  },
+  "sourceSha256": {
+    "app/admin/eventcalendar/page.tsx": "daf15cea9dff3b9eb91135c9a264a8fbd7fbd34f4b4d58ed59e05dddc4d68f5a",
+    "app/admin/taskcalendar/page.tsx": "927c2f6f2406c578495072c60b6f26719b639d908bee8c2199233ca3ed71d303",
+    "app/api/office-calendar-store/[key]/route.ts": "50da25c6bcba7c857368fc008aed95b1c6103965bda04cc54ad8d75445bbc949",
+    "app/api/event-calendar/public-holidays/route.ts": "06230ac6c2f43707192bdd972307577c0cee6f98c75f5be9a2bfc44d11330b5b",
+    "app/api/event-calendar/leave-request/route.ts": "97d97c7631b445e586010abeb9cf5631abfb19c69d07e6081b61a318eb0c3bcd",
+    "app/api/event-calendar/email-notify/route.ts": "18ea3f64bec89328d1a2ec23e88b8c08e079e7265d83ce7dcaae05e6e0248051",
+    "lib/eventCalendarStore.ts": "d9252abc10472654e046ddeffdd8e40a71380e8fff83e517bfb40d42e49d018a",
+    "lib/taskCalendarStore.ts": "ec52f74c9d2299adeb058d25620b746ab79eb7d056c4742f45e483ad02530c54",
+    "lib/calendarStaff.ts": "13c52cadc8a72860ca9a8d706abc081830b4167d99ba361f915673bde7d534ce",
+    "lib/eventCalendarImport.ts": "ce36a7aa5439c02b2019af4e650d359826930a876f90f74925b59a56c33509a9",
+    "lib/holidayCalendar.ts": "26dbfdfe1000997fa89182452edb3d84ae51221bacda688ea842d71e163085c2",
+    "data/publicHolidays.ts": "301f444c3eebf4e15fc60d26cb9021f09826fa889952d6db314005c1010a9673",
+    "tests/event-calendar.browser.test.cjs": "b607a942643dd79b5ebe0896cf8ca964ef07e106e402e65fbfde9bd215b5e67d",
+    "tests/task-calendar.browser.test.cjs": "68e18967027d4c577367d8dc5b41e56d6866533c01e44f44ca2b3999b45e57d1",
+    "tests/event-calendar-settings.browser.test.cjs": "7935e9c16da21f4c16d5cbd9f485d772fb073bcb4b9439c78af1dddbd527e648"
+  },
+  "runtime": {
+    "node": "24.19.0",
+    "esbuild": "0.28.1",
+    "playwright": "1.62.1",
+    "react": "19.2.8",
+    "typescript": "5.9.3",
+    "browser": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome, dedicated headless instance with a new context, never personal Chrome",
+    "browserTimezoneNewHarness": "Asia/Hong_Kong",
+    "browserTimezoneExistingEventHarness": "America/Los_Angeles"
+  },
+  "boundaryLimitations": [
+    "No hosted reads/writes, deployment, live business-data mutation, jobs or real emails were performed by this task.",
+    "Auth/permissions, Supabase network transport and email delivery are synthetic in the new browser harness. Production route handlers, validation, versioning, CAS/retry helpers and rendered pages are actual code; real hosted RLS/triggers and SMTP/provider availability are not certified by it.",
+    "Google room/list/sync integrations remain blocked/mocked during browser runs. Existing helper/API tests cover interval, pagination and delivery failure rules, not current provider credentials or operational health.",
+    "Local versioned holiday references for 2026-2027 were last reviewed against official sources on 2026-10-07. Their local reconciliation/idempotence and explicit US Federal Reserve bank / Taiwan government-office scope pass. This follow-up did not refetch every official source or change holiday dates.",
+    "A missing Event Calendar row still displays inherited bundled fallback/recovery seeds after a successful GET. This task verified no settings bootstrap/clear on load or unchanged Save, but did not certify editing/deleting fallback-only event seeds. Task Calendar missing/empty rows are authoritative empty and verified.",
+    "Calendar local-cache quota/security exceptions were not expanded into this settings-ownership patch; shared browser-storage hardening is parent-owned separately.",
+    "Recovery/history permissions and pagination are covered by focused actual helper/API tests, not a hosted recovery run. Calendar snapshot audit undo remains intentionally blocked.",
+    "No drag-and-drop code was changed. Existing insertion indicators and destination behavior are preserved.",
+    "This is a bounded local calendar follow-up, not sitewide completion or a deployment receipt. Parent release build and independent release review remain required."
+  ]
+}

@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { readClientStorage } from "@/lib/clientStorage"
 import {
   canAccessAdminPage,
   isAdminRole,
@@ -23,7 +24,7 @@ function getStoredAuditActor(): StoredAuditActor | null {
   if (typeof window === "undefined") return null
 
   try {
-    const rawActor = window.localStorage.getItem("bunker_admin_actor")
+    const rawActor = readClientStorage("bunker_admin_actor")
     if (!rawActor) return null
 
     const actor = JSON.parse(rawActor) as Partial<StoredAuditActor>

@@ -16,6 +16,7 @@ import {
   type SpcPagePermission,
 } from "@/lib/spcPages"
 import { getSpcSessionPresentationLabel } from "@/lib/spcSessionPresentation"
+import { readClientStorage, removeClientStorage, writeClientStorage } from "@/lib/clientStorage"
 
 type SpcPageGroup = SpcPageDefinition["group"]
 type VisiblePermission = Exclude<SpcPagePermission, "none">
@@ -37,7 +38,7 @@ function defaultExpandedGroups() {
 function readStoredGroups() {
   if (typeof window === "undefined") return defaultExpandedGroups()
   try {
-    const value = window.localStorage.getItem(SIDEBAR_GROUPS_KEY)
+    const value = readClientStorage(SIDEBAR_GROUPS_KEY)
     if (!value) return defaultExpandedGroups()
     return { ...defaultExpandedGroups(), ...JSON.parse(value) }
   } catch {
@@ -70,7 +71,7 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
   })
 
   useEffect(() => {
-    setCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true")
+    setCollapsed(readClientStorage(SIDEBAR_COLLAPSED_KEY) === "true")
     setExpandedGroups(readStoredGroups())
   }, [])
 
@@ -157,7 +158,7 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
   function toggleCollapsed() {
     setCollapsed((current) => {
       const next = !current
-      window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next))
+      writeClientStorage(SIDEBAR_COLLAPSED_KEY, String(next))
       return next
     })
   }
@@ -165,7 +166,7 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
   function toggleGroup(group: SpcPageGroup) {
     setExpandedGroups((current) => {
       const next = { ...current, [group]: !current[group] }
-      window.localStorage.setItem(SIDEBAR_GROUPS_KEY, JSON.stringify(next))
+      writeClientStorage(SIDEBAR_GROUPS_KEY, JSON.stringify(next))
       return next
     })
   }
@@ -173,8 +174,14 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
   async function handleLogout() {
     setCollapsed(false)
     setMobileOpen(false)
-    window.localStorage.removeItem(SIDEBAR_COLLAPSED_KEY)
-    await fetch("/api/spc/logout", { method: "POST" }).catch(() => undefined)
+    removeClientStorage(SIDEBAR_COLLAPSED_KEY)
+    const loggedOut = await fetch("/api/spc/logout", { method: "POST" })
+      .then((response) => response.ok)
+      .catch(() => false)
+    if (!loggedOut) {
+      window.alert("Unable to log out. Please try again.")
+      return
+    }
     clearSpcClientSessionCache()
     window.location.assign("/spc")
   }

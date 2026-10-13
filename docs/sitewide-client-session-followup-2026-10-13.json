@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-10-13T02:08:55Z",
+  "status": "local-tested-not-deployed",
+  "baseCommit": "2325abb6f0e25cf74b91b2b06f5f901712df359d",
+  "scope": "Optional browser storage, FCUNO/SPC session presentation, navigation and login/logout acknowledgement",
+  "confirmedFailures": [
+    "Valid server sessions became signed out after quota/security errors writing optional actor metadata.",
+    "Unavailable storage could crash sidebar mount/toggles and prevent FCUNO logout from reaching the server.",
+    "SPC local login publication/clear stopped before emitting the state-change event when persistence threw.",
+    "SPC redirected and cleared local session after a failed server logout.",
+    "FCUNO login request/JSON failures left Signing in permanently disabled; acknowledged login could not continue if browser cache persistence failed."
+  ],
+  "implementation": [
+    "Best-effort local storage for existing metadata/preferences, retaining latest failed-write value or failed-remove tombstone only in the current browser document.",
+    "All helper functions guard window before fallback access; server request data cannot enter or read the fallback.",
+    "Supabase client reads the same optional actor metadata so authenticated transport and audit routing still work when disk storage is unavailable. Server authentication, permissions and trusted audit actor remain unchanged.",
+    "FCUNO login catches failed requests/invalid replies, reenables retry, and preserves validated federation continuation rules.",
+    "SPC logout clears local state/redirects only after server acknowledgement; failed logout retains sign-in and offers retry."
+  ],
+  "verification": {
+    "baseline": {
+      "commit": "2325abb6f0e25cf74b91b2b06f5f901712df359d",
+      "actualBrowserGroups": 12,
+      "reproducedFailures": 11,
+      "unchangedPasswordRejectionControl": 1,
+      "exitCode": 1
+    },
+    "candidate": {
+      "browserGroups": 12,
+      "browserFailures": 0,
+      "helperTests": 4,
+      "helperFailures": 0,
+      "adjacentAuthSecurityFederationTests": 56,
+      "typescript": "pass",
+      "focusedLint": {
+        "errors": 0,
+        "preExistingWarnings": 9
+      },
+      "independentReview": "Passed; another agent read all seven changed runtime files and the actual server proxy boundary. Final expanded browser 12 and helper 4 checks were independently rerun after freeze, with unchanged hashes."
+    }
+  },
+  "sourceSha256": {
+    "lib/clientStorage.ts": "fd010767e026ff466909ececd8209d6bf08ee90bb4f46831849f3972b6bcec20",
+    "lib/useSimpleAdminAuth.ts": "57092886a934c055475e2abb8db393c3219906cc6ba175da22661838599ea7a0",
+    "lib/useSpcAuth.ts": "cec2678ce451bef34185472fc13fb21f0c429a7608c188d163ae6e1bc05082be",
+    "lib/supabase.ts": "961b846e3c0b1a1a42e99534b3a8075aeeaedf24d38af8ee77319d0c96c8cc5d",
+    "components/AdminNavigationShell.tsx": "d78ed0f5f0a52547fc2c758b8cd8691a561928f3e3bca96ca880b712a5d616bc",
+    "components/SpcNavigationShell.tsx": "9603ffe4c626b06ecff2a3969b41ac2784abbc2cb4c6284050b2af67bed8dd2e",
+    "app/admin/page.tsx": "83d3275d08ae163f9e45bf9b38a7af27242728213f4d5c4550c524f1c24c2c6b",
+    "tests/client-storage.test.ts": "568714225b01119b4cf23762132c5d5504d9b59811610d421fece0f362d5b957",
+    "tests/client-session-storage.browser.test.cjs": "422566bdd0e2d441f511f161db6f979486e150ce531bd0e1622e7a3239b039f0",
+    "tests/fixtures/client-session-page.tsx": "f2ebd3e18c4160266e836369c0ecd63075afabfda4e5359ea8ede9c283fc6c98",
+    ".github/workflows/spc-security-baseline.yml": "2d3eae15a42a307032d76b60d3b361b41747a815745bd249f2fe3c7392b32023"
+  },
+  "safety": {
+    "browser": "Dedicated headless browser and fresh isolated contexts only; closed after tests.",
+    "network": "Synthetic session/login/logout/proxy HTTP only. No real credentials, emails, cloud jobs or business-record mutations.",
+    "source": "Seven runtime files, three tests/fixture and narrow regression CI steps for shared storage/Exchange acknowledgement plus country/pricing; no package, lock, database schema, permission, federation protocol or provider configuration change.",
+    "testRunnerRecovery": "An attempted bundled pnpm script command unexpectedly moved 25 local dependency folders before failing. Every original folder was moved back without overwriting anything; all 25 declared package versions match the immutable lockfile. No dependency install completed and no package/lock edits resulted. Subsequent checks use direct Node only."
+  },
+  "limits": [
+    "Cached metadata remains a pre-existing optimistic UI hint, never authorization. Fresh server APIs decide access.",
+    "Browser storage failure in other feature-specific caches is not automatically covered by this shared metadata/preferences patch.",
+    "Synthetic client tests do not certify current hosted sessions, RLS, identity-provider availability or real Outlook execution.",
+    "Full development dependency audit has an unchanged braces advisory with no patched version; it is not hidden or disabled."
+  ]
+}

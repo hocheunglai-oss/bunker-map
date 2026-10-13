@@ -565,7 +565,21 @@ function mapAuditPreviewRow(row: Record<string, unknown>): AuditLogRecord {
   }
 }
 
+export function approvedCountryLabelNormalizationUndoMessage(record: AuditLogRecord) {
+  if (
+    record.tableSchema === "public" &&
+    record.tableName === "cc_ports" &&
+    record.requestContext.action === "approved_country_label_normalization"
+  ) {
+    return "This country label correction cannot be undone because the old label does not match its country."
+  }
+  return null
+}
+
 export function canUndoAuditLogRecord(record: AuditLogRecord) {
+  // Approved label normalization must not offer an undo that canonicalizes
+  // straight back to the corrected label but marks the repair as reversed.
+  if (approvedCountryLabelNormalizationUndoMessage(record)) return false
   // Country renames update the country and its linked ports atomically. A
   // single-row audit undo would restore only part of that operation.
   if (

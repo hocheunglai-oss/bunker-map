@@ -20,6 +20,7 @@ import {
   type AdminPagePermission,
 } from "@/lib/adminPages"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
+import { readClientStorage, removeClientStorage, writeClientStorage } from "@/lib/clientStorage"
 
 type AdminPageGroup = AdminPageDefinition["group"]
 type VisiblePermission = Exclude<AdminPagePermission, "none">
@@ -48,7 +49,7 @@ function readStoredGroups() {
   if (typeof window === "undefined") return defaultExpandedGroups()
 
   try {
-    const value = window.localStorage.getItem(SIDEBAR_GROUPS_KEY)
+    const value = readClientStorage(SIDEBAR_GROUPS_KEY)
     if (!value) return defaultExpandedGroups()
     return { ...defaultExpandedGroups(), ...JSON.parse(value) }
   } catch {
@@ -219,7 +220,7 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    setCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true")
+    setCollapsed(readClientStorage(SIDEBAR_COLLAPSED_KEY) === "true")
     setExpandedGroups(readStoredGroups())
   }, [])
 
@@ -317,7 +318,7 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
   function toggleCollapsed() {
     setCollapsed((current) => {
       const next = !current
-      window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next))
+      writeClientStorage(SIDEBAR_COLLAPSED_KEY, String(next))
       return next
     })
   }
@@ -325,7 +326,7 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
   function toggleGroup(group: AdminPageGroup) {
     setExpandedGroups((current) => {
       const next = { ...current, [group]: !current[group] }
-      window.localStorage.setItem(SIDEBAR_GROUPS_KEY, JSON.stringify(next))
+      writeClientStorage(SIDEBAR_GROUPS_KEY, JSON.stringify(next))
       return next
     })
   }
@@ -333,7 +334,7 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
   async function handleLogout() {
     setCollapsed(false)
     setMobileOpen(false)
-    window.localStorage.removeItem(SIDEBAR_COLLAPSED_KEY)
+    removeClientStorage(SIDEBAR_COLLAPSED_KEY)
     const loggedOut = await fetch("/api/admin/logout", { method: "POST" })
       .then((response) => response.ok)
       .catch(() => false)
@@ -342,7 +343,7 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
       return
     }
     clearAdminClientCache()
-    window.localStorage.removeItem("bunker_admin_actor")
+    removeClientStorage("bunker_admin_actor")
     window.location.assign("/admin")
   }
 

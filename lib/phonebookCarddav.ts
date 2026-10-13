@@ -264,11 +264,23 @@ export function cardHref(contactId: string) {
 }
 
 export function countAddressBookCards(xml: string, addressBookUrl: string) {
+  if (Buffer.byteLength(xml) > 15_000_000 || /<!DOCTYPE|<!ENTITY/i.test(xml)
+    || !/^\s*(?:<\?xml[^>]*>\s*)?<(?:[\w-]+:)?multistatus\b/i.test(xml)
+    || !/<\/(?:[\w-]+:)?multistatus\s*>\s*$/i.test(xml)) {
+    throw new SyncError("Incomplete CardDAV inventory response.", "verification")
+  }
   const book = new URL(addressBookUrl)
   const ids = new Set<string>()
   const cards = new Set<string>()
   const otherPaths = new Set<string>()
-  for (const response of xml.matchAll(/<(?:[\w-]+:)?response\b[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?response>/gi)) {
+  const responses = [...xml.matchAll(/<(?:[\w-]+:)?response\b[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?response>/gi)]
+  if ((xml.match(/<(?:[\w-]+:)?response\b/gi) || []).length !== responses.length
+    || (xml.match(/<\/(?:[\w-]+:)?response\s*>/gi) || []).length !== responses.length) {
+    throw new SyncError("Incomplete CardDAV inventory response.", "verification")
+  }
+  for (const response of responses) {
+    const hrefs = [...response[1].matchAll(/<(?:[\w-]+:)?href\b[^>]*>([^<]*)<\/(?:[\w-]+:)?href>/gi)]
+    if (hrefs.length !== 1) throw new SyncError("Incomplete CardDAV inventory response.", "verification")
     const statuses = [...response[1].matchAll(/<(?:[\w-]+:)?status\b[^>]*>HTTP\/[^\s]+\s+(\d{3})\b/gi)].map((match) => Number(match[1]))
     if (statuses.length && !statuses.some((status) => status >= 200 && status < 300)) {
       // A disappeared resource is not a card; permission/upstream errors mean
@@ -277,10 +289,8 @@ export function countAddressBookCards(xml: string, addressBookUrl: string) {
       throw new SyncError("Incomplete CardDAV inventory response.", "verification")
     }
     if (/<(?:[\w-]+:)?collection\b/i.test(response[1])) continue
-    const match = /<(?:[\w-]+:)?href\b[^>]*>([^<]*)<\/(?:[\w-]+:)?href>/i.exec(response[1])
-    if (!match) continue
     try {
-      const href = match[1].replace(/&amp;/gi, "&")
+      const href = hrefs[0][1].replace(/&amp;/gi, "&")
       const url = new URL(href, book)
       if (url.origin !== book.origin || !url.pathname.startsWith(book.pathname)) continue
       const filename = decodeURIComponent(url.pathname.slice(book.pathname.length))
@@ -288,11 +298,13 @@ export function countAddressBookCards(xml: string, addressBookUrl: string) {
       // CardDAV resource names need not end in .vcf. Include every direct
       // non-collection member, including cards created by phone clients.
       cards.add(url.pathname)
-      const id = /^bunker-map-([0-9a-f-]{36})\.vcf$/i.exec(filename)?.[1]
-      if (id && UUID_PATTERN.test(id)) ids.add(id.toLowerCase())
+      // Match the writer/reconciler's exact resource, not a case/encoding alias
+      // that can otherwise conceal a missing canonical card or a duplicate.
+      const id = /^bunker-map-([0-9a-f-]{36})\.vcf$/.exec(filename)?.[1]
+      if (id && UUID_PATTERN.test(id) && url.pathname === new URL(cardHref(id), book).pathname) ids.add(id)
       else otherPaths.add(url.pathname)
     } catch {
-      // Ignore malformed remote hrefs rather than counting them as contacts.
+      throw new SyncError("Incomplete CardDAV inventory response.", "verification")
     }
   }
   return { managedIds: ids, otherPaths: [...otherPaths], managed: ids.size, total: cards.size, other: cards.size - ids.size }

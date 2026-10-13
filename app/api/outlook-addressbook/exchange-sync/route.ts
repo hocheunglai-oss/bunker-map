@@ -23,6 +23,19 @@ type ExchangeSyncLock = {
   expires_at: string
 }
 
+function privateJson(body: unknown, init: { status?: number } = {}) {
+  return NextResponse.json(body, { ...init, headers: { "Cache-Control": "private, no-store" } })
+}
+
+function unconfirmedDispatch(status: ExchangeSyncStatus) {
+  // Azure may already own this exact run. Never revoke its lease merely
+  // because the trigger's response was lost or an upstream server timed out.
+  return privateJson({
+    ...status,
+    message: "The sync request was sent, but confirmation has not arrived. Please wait while its status is checked; saved changes remain queued safely.",
+  }, { status: 202 })
+}
+
 function requireEnv(name: string) {
   const value = process.env[name]
   if (!value) throw new Error(`Missing environment variable: ${name}`)
@@ -110,7 +123,7 @@ export async function GET() {
     const webhookConfigured = Boolean(process.env.EXCHANGE_SYNC_WEBHOOK_URL)
     const [status, activeLock] = await Promise.all([loadStatus(), loadActiveSyncLock()])
 
-    return NextResponse.json({
+    return privateJson({
       webhookConfigured,
       status: activeLock ? getLockedSyncStatus(status, activeLock) : status || {
         status: webhookConfigured ? "queued" : "not_configured",
@@ -120,23 +133,25 @@ export async function GET() {
     })
   } catch (error) {
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
-      return NextResponse.json(
+      return privateJson(
         { message: error.message },
         { status: error.message === "Unauthorized" ? 401 : 403 }
       )
     }
-    return NextResponse.json({ message: error instanceof Error ? error.message : "Could not load Exchange sync status." }, { status: 500 })
+    return privateJson({ message: error instanceof Error ? error.message : "Could not load Exchange sync status." }, { status: 500 })
   }
 }
 
 export async function POST() {
   let reservationId: string | null = null
   let reservationHeld = false
+  let dispatchedStatus: ExchangeSyncStatus | null = null
+  let dispatchStarted = false
   try {
     const session = await requireAdminPagePermission("outlook-addressbook", "edit")
     const webhookUrl = process.env.EXCHANGE_SYNC_WEBHOOK_URL
     if (!webhookUrl) {
-      return NextResponse.json({ message: "EXCHANGE_SYNC_WEBHOOK_URL is not configured." }, { status: 400 })
+      return privateJson({ message: "EXCHANGE_SYNC_WEBHOOK_URL is not configured." }, { status: 400 })
     }
 
     const currentStatus = await loadStatus()
@@ -145,9 +160,9 @@ export async function POST() {
     if (!reservationHeld) {
       const activeLock = await loadActiveSyncLock()
       if (activeLock) {
-        return NextResponse.json(getLockedSyncStatus(currentStatus, activeLock), { status: 202 })
+        return privateJson(getLockedSyncStatus(currentStatus, activeLock), { status: 202 })
       }
-      return NextResponse.json({
+      return privateJson({
         status: "running",
         message: "Exchange sync is already acquiring or holding the mutation lease. New FCUNO changes remain queued for the next incremental run.",
         requestedAt: currentStatus?.requestedAt || null,
@@ -172,8 +187,11 @@ export async function POST() {
     }
     await saveStatus(queuedStatus)
 
+    dispatchedStatus = queuedStatus
+    dispatchStarted = true
     const response = await fetch(webhookUrl, {
       method: "POST",
+      signal: AbortSignal.timeout(15000),
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         source: "fcuno-outlook-addressbook",
@@ -193,6 +211,12 @@ export async function POST() {
     }
 
     if (!response.ok) {
+      if (![400, 401, 403, 404, 405, 410].includes(response.status)) {
+        // A timeout, throttled request or 5xx does not prove that no Azure job
+        // was created. Keep the reservation until its worker/lease resolves.
+        reservationHeld = false
+        return unconfirmedDispatch(queuedStatus)
+      }
       const helpText =
         response.status === 405
           ? "Azure Automation webhook returned HTTP 405 Method Not Allowed. EXCHANGE_SYNC_WEBHOOK_URL is not pointing to a valid Azure Automation webhook URL that accepts POST requests. Create a new Azure Automation webhook for the Exchange sync runbook, copy the webhook URL exactly, update EXCHANGE_SYNC_WEBHOOK_URL in Vercel, then redeploy."
@@ -210,12 +234,16 @@ export async function POST() {
       await releaseSyncReservation(reservationId)
       reservationHeld = false
       await saveStatus(failedStatus)
-      return NextResponse.json(failedStatus, { status: 502 })
+      return privateJson(failedStatus, { status: 502 })
     }
 
     reservationHeld = false
-    return NextResponse.json({ ...queuedStatus, response: responseBody })
+    return privateJson({ ...queuedStatus, response: responseBody })
   } catch (error) {
+    if (dispatchStarted && reservationHeld && dispatchedStatus) {
+      reservationHeld = false
+      return unconfirmedDispatch(dispatchedStatus)
+    }
     if (reservationHeld && reservationId) {
       try {
         await releaseSyncReservation(reservationId)
@@ -224,11 +252,11 @@ export async function POST() {
       }
     }
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
-      return NextResponse.json(
+      return privateJson(
         { message: error.message },
         { status: error.message === "Unauthorized" ? 401 : 403 }
       )
     }
-    return NextResponse.json({ message: error instanceof Error ? error.message : "Could not trigger Exchange sync." }, { status: 500 })
+    return privateJson({ message: error instanceof Error ? error.message : "Could not trigger Exchange sync." }, { status: 500 })
   }
 }

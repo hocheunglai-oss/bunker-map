@@ -86,3 +86,14 @@ test("actual proxy prevents old tabs from directly renaming countries or cascadi
     assert.deepEqual(app.permissions, [["ccinfo", "edit"]])
   }
 })
+
+test("actual generic proxy cannot bypass the audit undo route through its tables or privileged RPC", async () => {
+  for (const table of ["audit_logs", "rpc/undo_audit_log", "rpc/undo_audit_log_noncredential"]) {
+    for (const method of ["POST", "PATCH", "DELETE"]) {
+      const app = fixture()
+      const response = await app.request({ table, method, cas: true, body: { p_log_id: "11111111-1111-4111-8111-111111111111" } })
+      assert.equal(response.status, 403)
+      assert.equal(app.requests.length, 0)
+    }
+  }
+})

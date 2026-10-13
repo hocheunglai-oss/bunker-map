@@ -551,6 +551,8 @@ export default function PhonebookPage() {
   const [draft, setDraft] = useState<Contact | null>(null)
   const [message, setMessage] = useState("")
   const [saving, setSaving] = useState(false)
+  const contactSaveTokenRef = useRef<string | null>(null)
+  const contactMessageEpochRef = useRef(0)
   const [editing, setEditing] = useState(false)
   const [creatingContact, setCreatingContact] = useState(false)
   const [contactModalOpen, setContactModalOpen] = useState(false)
@@ -1082,6 +1084,7 @@ export default function PhonebookPage() {
   }, [])
 
   useEffect(() => {
+    if (contactSaveTokenRef.current) return
     if (!selectedId) {
       setCurrent(null)
       setDraft(null)
@@ -1248,7 +1251,8 @@ export default function PhonebookPage() {
   const visibleContacts = filteredContacts
 
   async function saveCurrent() {
-    if (!draft) return
+    if (!draft || saving || contactSaveTokenRef.current) return
+    contactMessageEpochRef.current += 1
     const selectedContactCompany = companies.find(
       (company) => normalizeCompanyKey(company.name) === normalizeCompanyKey(draft.company),
     )
@@ -1258,6 +1262,13 @@ export default function PhonebookPage() {
       return
     }
 
+    const saveToken = crypto.randomUUID()
+    contactSaveTokenRef.current = saveToken
+    const releaseSave = () => {
+      if (contactSaveTokenRef.current !== saveToken) return
+      contactSaveTokenRef.current = null
+      setSaving(false)
+    }
     setSaving(true)
     setMessage("")
     const payload = {
@@ -1287,75 +1298,101 @@ export default function PhonebookPage() {
       email_1: draft.personal_email?.trim() || null,
       email_2: draft.general_email?.trim() || null,
       notes: draft.notes?.trim().toUpperCase() || null,
-      favorite: false,
       search_text: buildContactSearchText(draft),
     }
 
-    if (creatingContact) {
-      const insertPayload = {
-        ...payload,
-        source_key: `manual-${crypto.randomUUID()}`,
-      }
-      const { data, error } = await supabase.from("phonebook_contacts").insert(insertPayload).select("*").single()
-      if (error || !data) {
-        setMessage("Unable to save contact.")
-        setSaving(false)
+    try {
+      if (creatingContact) {
+        const insertPayload = {
+          ...payload,
+          id: draft.id,
+          favorite: false,
+          source_key: `manual-${draft.id}`,
+        }
+        let { data, error } = await supabase.from("phonebook_contacts").insert(insertPayload).select("*").single()
+        if (error?.code === "23505") {
+          // A committed insert can lose its reply. Replay the same draft identity
+          // and acknowledge only identical saved details; never upsert over a
+          // contact that another user has subsequently changed.
+          const existing = await supabase.from("phonebook_contacts").select("*").eq("id", draft.id).maybeSingle()
+          const matches = !existing.error && existing.data?.id === draft.id
+            && Object.entries(insertPayload).every(([field, value]) => field === "search_text"
+              || (existing.data[field] ?? null) === (value ?? null))
+          if (!matches) {
+            setMessage("A contact from this Save may already exist with different details. Your draft is still here; refresh the directory and check it before making further changes.")
+            return
+          }
+          data = existing.data
+          error = null
+        }
+        if (error || !data || data.id !== draft.id) {
+          setMessage("Unable to save contact.")
+          return
+        }
+
+        const nextContact = data as Contact
+        refreshContactCachesInBackground()
+        recordChange({
+          entityType: "contact",
+          action: "create",
+          label: nextContact.full_name || "NEW CONTACT",
+          before: null,
+          after: nextContact,
+        })
+        setContacts((prev) => [nextContact, ...prev])
+        setSelectedId(nextContact.id)
+        setCurrent(nextContact)
+        setDraft(nextContact)
+        setEditing(false)
+        setCreatingContact(false)
+        setContactModalOpen(false)
+        releaseSave()
+        await syncPhoneContacts(false, [nextContact.id], {
+          successMessage: "Saved and verified on CardDAV.",
+          failureMessage: "Saved locally, but CardDAV sync failed.",
+        })
         return
       }
 
-      const nextContact = data as Contact
+      const beforeContact = current ? { ...current } : { ...draft }
+      const { data, error } = await supabase.from("phonebook_contacts").update(payload).eq("id", draft.id).select("*").single()
+      if (!data || data.id !== draft.id) {
+        setMessage(error?.message && error.code !== "PGRST116"
+          ? "Unable to save contact. Your changes are still here; try Save again."
+          : "This contact no longer exists. Your changes have not been saved; refresh the directory before trying again.")
+        return
+      }
+      if (error) {
+        setMessage("Unable to save contact. Your changes are still here; try Save again.")
+        return
+      }
+
+      const updatedContact = data as Contact
       refreshContactCachesInBackground()
       recordChange({
         entityType: "contact",
-        action: "create",
-        label: nextContact.full_name || "NEW CONTACT",
-        before: null,
-        after: nextContact,
+        action: "update",
+        label: updatedContact.full_name || "CONTACT",
+        before: beforeContact as Contact,
+        after: updatedContact,
       })
-      setContacts((prev) => [nextContact, ...prev])
-      setSelectedId(nextContact.id)
-      setCurrent(nextContact)
-      setDraft(nextContact)
+      setContacts((prev) => prev.map((item) => (item.id === draft.id ? updatedContact : item)))
+      setCurrent((prev) => (prev ? updatedContact : prev))
       setEditing(false)
-      setCreatingContact(false)
-      setContactModalOpen(false)
-      await syncPhoneContacts(false, [nextContact.id], {
+      releaseSave()
+      await syncPhoneContacts(false, [draft.id], {
         successMessage: "Saved and verified on CardDAV.",
         failureMessage: "Saved locally, but CardDAV sync failed.",
       })
-      setSaving(false)
-      return
+    } catch {
+      if (contactSaveTokenRef.current === saveToken) setMessage("Contact save was not confirmed. Your changes are still here; check the directory before trying Save again.")
+    } finally {
+      releaseSave()
     }
-
-    const beforeContact = current ? { ...current } : { ...draft }
-    const { error } = await supabase.from("phonebook_contacts").update(payload).eq("id", draft.id)
-    if (error) {
-      setMessage("Unable to save contact.")
-      setSaving(false)
-      return
-    }
-
-    const updatedContact = { ...beforeContact, ...payload } as Contact
-    refreshContactCachesInBackground()
-    recordChange({
-      entityType: "contact",
-      action: "update",
-      label: updatedContact.full_name || "CONTACT",
-      before: beforeContact as Contact,
-      after: updatedContact,
-    })
-    setContacts((prev) => prev.map((item) => (item.id === draft.id ? updatedContact : item)))
-    setCurrent((prev) => (prev ? updatedContact : prev))
-    setEditing(false)
-    await syncPhoneContacts(false, [draft.id], {
-      successMessage: "Saved and verified on CardDAV.",
-      failureMessage: "Saved locally, but CardDAV sync failed.",
-    })
-    setSaving(false)
   }
 
   async function deleteCurrent() {
-    if (!current) return
+    if (!current || saving || contactSaveTokenRef.current) return
     if (!confirm(`Delete ${current.full_name}?`)) return
     const companyName = current.company || ""
     const companyContacts = companyName ? await loadCompanyContactsFromSupabase(companyName) : []
@@ -1431,6 +1468,7 @@ export default function PhonebookPage() {
   }
 
   function addCompany() {
+    if (saving || contactSaveTokenRef.current) return
     setCreatingCompany(true)
     setCompanyDraft({
       id: `new-company-${Date.now()}`,
@@ -1475,6 +1513,7 @@ export default function PhonebookPage() {
   }
 
   async function openCompanyModal(company: Company) {
+    if (saving || contactSaveTokenRef.current) return
     setCompanyDraft({
       ...company,
       country: normalizeCountryName(company.country) || null,
@@ -1514,6 +1553,7 @@ export default function PhonebookPage() {
   }
 
   function closeContactModal() {
+    if (saving || contactSaveTokenRef.current) return
     setContactModalOpen(false)
     setCompanySuggestOpen(false)
     setCreatingContact(false)
@@ -1748,8 +1788,10 @@ export default function PhonebookPage() {
   }
 
   async function addContact() {
+    if (saving || contactSaveTokenRef.current) return
+    contactMessageEpochRef.current += 1
     const payload = {
-      id: `new-contact-${Date.now()}`,
+      id: crypto.randomUUID(),
       full_name: "",
       company: selectedCompany.toUpperCase(),
       company_source_id: "",
@@ -1961,12 +2003,14 @@ export default function PhonebookPage() {
   }
 
   function updateField<K extends keyof Contact>(field: K, value: Contact[K]) {
-    if (!draft) return
+    if (!draft || saving || contactSaveTokenRef.current) return
+    contactMessageEpochRef.current += 1
     setDraft({ ...draft, [field]: value })
   }
 
   function updateCapsField<K extends keyof Contact>(field: K, value: string) {
-    if (!draft) return
+    if (!draft || saving || contactSaveTokenRef.current) return
+    contactMessageEpochRef.current += 1
     setDraft({ ...draft, [field]: toCaps(value) as Contact[K] })
   }
 
@@ -1976,6 +2020,7 @@ export default function PhonebookPage() {
   }
 
   function clearSearchAndSelection() {
+    if (saving || contactSaveTokenRef.current) return
     setQuery("")
     setCompanyRenderLimit(INITIAL_RENDERED_COMPANIES)
     setSelectedCompany("")
@@ -2013,13 +2058,19 @@ export default function PhonebookPage() {
       retryEntries?: PendingPhonebookSync[]
     },
   ) {
+    const messageEpoch = contactMessageEpochRef.current
+    const setSyncMessage = (nextMessage: string) => {
+      // An older job still finishes/records retries, but cannot acknowledge or
+      // erase feedback for a newer editor or database save.
+      if (contactMessageEpochRef.current === messageEpoch && !contactSaveTokenRef.current) setMessage(nextMessage)
+    }
     const companyToSync = selectedCompany
     let entries: PendingPhonebookSync[] | undefined = options?.retryEntries
     // Persist explicitly saved/deleted IDs immediately, even if another sync is
     // running. Each token prevents that older request clearing this newer edit.
     try {
       if (!fullRebuild && !contactIds?.length && !options?.deleteContactIds?.length && !entries && !companyToSync) {
-        setMessage("Select a company first, or use Resync all contacts from the menu.")
+        setSyncMessage("Select a company first, or use Resync all contacts from the menu.")
         return false
       }
       if (!entries && (contactIds?.length || options?.deleteContactIds?.length)) {
@@ -2029,7 +2080,7 @@ export default function PhonebookPage() {
         ])
       }
     } catch (error) {
-      setMessage([options?.failureMessage, error instanceof Error ? error.message : "Unable to save CardDAV retry information."].filter(Boolean).join(" "))
+      setSyncMessage([options?.failureMessage, error instanceof Error ? error.message : "Unable to save CardDAV retry information."].filter(Boolean).join(" "))
       return false
     }
 
@@ -2037,7 +2088,7 @@ export default function PhonebookPage() {
     setContactSyncing(true)
     setContactSyncLabel(queuedContactSyncsRef.current > 1 ? "Sync queued" : "Preparing sync...")
     return enqueuePhonebookSync(contactSyncQueueRef, async () => {
-      if (!options?.silentFailure) setMessage("")
+      if (!options?.silentFailure) setSyncMessage("")
       try {
         if (!entries) {
           // These endpoints load every matching row from the server; the visible
@@ -2046,7 +2097,7 @@ export default function PhonebookPage() {
           entries = stagePhonebookSync(localStorage, operations)
         }
         if (entries.length === 0) {
-          setMessage("No contacts to sync.")
+          setSyncMessage("No contacts to sync.")
           return false
         }
         const result = await runPhonebookSync({
@@ -2057,16 +2108,16 @@ export default function PhonebookPage() {
         })
         if (result.failed.length > 0) {
           const detail = result.failed[0].error || result.failed[0].label
-          setMessage(`${options?.failureMessage || "CardDAV sync was not fully verified."} ${result.failed.length} contact(s) remain queued for Retry Failed. ${detail}`)
+          setSyncMessage(`${options?.failureMessage || "CardDAV sync was not fully verified."} ${result.failed.length} contact(s) remain queued for Retry Failed. ${detail}`)
           return false
         }
         const remaining = readPhonebookSyncRetries(localStorage).length
-        setMessage(`${options?.successMessage || `Verified ${result.verifiedCount} contact(s) on CardDAV.`}${remaining ? ` ${remaining} other saved operation(s) still need Retry Failed.` : ""}`)
+        setSyncMessage(`${options?.successMessage || `Verified ${result.verifiedCount} contact(s) on CardDAV.`}${remaining ? ` ${remaining} other saved operation(s) still need Retry Failed.` : ""}`)
         void refreshCarddavCounts()
         return true
       } catch (error) {
         const detail = error instanceof Error ? error.message : "Unverified contacts remain queued for retry."
-        setMessage(`${options?.failureMessage || "CardDAV sync was not confirmed."} ${detail}`)
+        setSyncMessage(`${options?.failureMessage || "CardDAV sync was not confirmed."} ${detail}`)
         return false
       } finally {
         queuedContactSyncsRef.current -= 1
@@ -2092,6 +2143,7 @@ export default function PhonebookPage() {
   }
 
   function onSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (saving || contactSaveTokenRef.current) return
     if (event.key === "Tab" && !event.shiftKey) {
       event.preventDefault()
       const firstCompany = visibleCompanies[0]
@@ -2100,6 +2152,7 @@ export default function PhonebookPage() {
   }
 
   function onCompanyKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, companyId: string) {
+    if (saving || contactSaveTokenRef.current) return
     const index = visibleCompanies.findIndex((company) => company.id === companyId)
     if (event.key === "ArrowDown") {
       event.preventDefault()
@@ -2120,6 +2173,7 @@ export default function PhonebookPage() {
   }
 
   function onContactKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, contactId: string) {
+    if (saving || contactSaveTokenRef.current) return
     const index = visibleContacts.findIndex((contact) => contact.id === contactId)
     if (event.key === "ArrowDown") {
       event.preventDefault()
@@ -2131,6 +2185,8 @@ export default function PhonebookPage() {
       if (previous) contactRefs.current[previous.id]?.focus()
     } else if (event.key === "Enter") {
       event.preventDefault()
+      contactMessageEpochRef.current += 1
+      setMessage("")
       setSelectedId(visibleContacts[index].id)
     } else if (event.key === "Tab" && !event.shiftKey) {
       event.preventDefault()
@@ -2258,6 +2314,7 @@ export default function PhonebookPage() {
               }}
               onKeyDown={onSearchKeyDown}
               placeholder="Search name, company, phone, or email..."
+              disabled={saving}
               style={inputStyle}
             />
             <button type="button" onClick={() => setQuery((value) => value.trim())} style={buttonStyle}>
@@ -2308,6 +2365,7 @@ export default function PhonebookPage() {
                 <button
                   type="button"
                   onClick={clearSearchAndSelection}
+                  disabled={saving}
                   data-admin-button-style="preserve"
                   style={{
                     ...buttonStyle,
@@ -2321,6 +2379,7 @@ export default function PhonebookPage() {
                 </button>
                 <button
                   onClick={() => void addCompany()}
+                  disabled={saving}
                   data-admin-button-style="preserve"
                   style={{
                     ...buttonStyle,
@@ -2360,6 +2419,7 @@ export default function PhonebookPage() {
                   type="button"
                   data-admin-button-style="preserve"
                   onClick={() => setSelectedCompany(company.name)}
+                  disabled={saving}
                   onDoubleClick={() => void openCompanyModal(company)}
                   onKeyDown={(event) => onCompanyKeyDown(event, company.id)}
                   style={{
@@ -2403,6 +2463,7 @@ export default function PhonebookPage() {
             >
               <button
                 onClick={() => void addContact()}
+                disabled={saving}
                 style={{
                   ...buttonStyle,
                   width: "100%",
@@ -2439,7 +2500,13 @@ export default function PhonebookPage() {
                     contactRefs.current[contact.id] = node
                   }}
                   draggable={Boolean(selectedCompany)}
-                  onClick={() => setSelectedId(contact.id)}
+                  onClick={() => {
+                    if (contactSaveTokenRef.current) return
+                    contactMessageEpochRef.current += 1
+                    setMessage("")
+                    setSelectedId(contact.id)
+                  }}
+                  disabled={saving}
                   onKeyDown={(event) => onContactKeyDown(event, contact.id)}
                   onDragStart={() => {
                     setDraggingContactId(contact.id)
@@ -2508,7 +2575,7 @@ export default function PhonebookPage() {
 
           <section style={{ ...lightBluePanelStyle, padding: "16px", display: "grid", gap: "12px" }}>
             {displayed ? (
-              <>
+              <fieldset disabled={saving} aria-busy={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, display: "grid", gap: "12px" }}>
                 <div style={{ display: "grid", gap: "10px" }}>
                   {editing ? (
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
@@ -2554,6 +2621,8 @@ export default function PhonebookPage() {
                       <button
                         ref={editButtonRef}
                         onClick={() => {
+                          contactMessageEpochRef.current += 1
+                          setMessage("")
                           setDraft(current ? { ...current } : null)
                           setEditing(true)
                         }}
@@ -2767,14 +2836,14 @@ export default function PhonebookPage() {
                   </div>
 
                 </div>
-              </>
+              </fieldset>
             ) : (
               <div style={{ color: "var(--fc-admin-muted)", fontSize: "14px", lineHeight: 1.6 }}>Select a contact to view details.</div>
             )}
           </section>
         </div>
 
-        {message && (
+        {message && !contactModalOpen && (
           <div style={{ color: message.startsWith("Unable") ? "var(--fc-admin-danger-text)" : "var(--fc-admin-success-text)", fontWeight: 700 }}>
             {message}
           </div>
@@ -2918,13 +2987,14 @@ export default function PhonebookPage() {
                 >
                   {saving ? "Saving..." : "Save"}
                 </button>
-                <button onClick={closeContactModal} style={{ ...buttonStyle, minWidth: "84px" }}>
+                <button onClick={closeContactModal} disabled={saving} style={{ ...buttonStyle, minWidth: "84px" }}>
                   Close
                 </button>
               </div>
             </div>
 
-              <div style={modalSectionStyle}>
+            {message ? <div role="alert" style={{ color: "var(--fc-admin-danger-text)", marginBottom: "12px" }}>{message}</div> : null}
+              <fieldset disabled={saving} aria-busy={saving} style={{ ...modalSectionStyle, border: 0, minWidth: 0 }}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "12px" }}>
                 <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "12px" }}>
                   <div>
@@ -3041,7 +3111,7 @@ export default function PhonebookPage() {
                   )
                 })}
               </div>
-            </div>
+            </fieldset>
           </div>
         </div>
       ) : null}

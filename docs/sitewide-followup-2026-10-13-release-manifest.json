@@ -1,0 +1,375 @@
+{
+  "schemaVersion": 1,
+  "status": "Frozen locally verified candidate; no production release or live data correction yet",
+  "createdAt": "2026-10-13T02:40:00Z",
+  "connectionsPolicySource": "config/fcunoConnections.ts",
+  "connections": {
+    "schemaVersion": 1,
+    "policyVersion": 2,
+    "connectionOrder": [
+      "api",
+      "cli",
+      "chrome"
+    ],
+    "github": {
+      "repository": "hocheunglai-oss/bunker-map",
+      "mutationAccount": "hocheunglai-oss"
+    },
+    "vercel": {
+      "team": "hocheunglai-6535s-projects",
+      "teamId": "team_MbKDazzCrou3eKTuausPv4X2",
+      "project": "bunker-map-c2ks",
+      "projectId": "prj_8OifIFDF7Gcpd2i4VSRJOHjL3A9Q",
+      "productionOrigins": [
+        "https://fcuno.com",
+        "https://spc.fcuno.com"
+      ]
+    },
+    "supabase": {
+      "projectRef": "gglyugbrnyvyfktgwert"
+    },
+    "browser": {
+      "fallbackProfile": "Otto"
+    },
+    "ecosystem": {
+      "productionOrigin": "https://eco.fcuno.com",
+      "knowledgeExtractionPath": "/api/ecosystem/knowledge-extract"
+    },
+    "federation": {
+      "issuer": "https://fcuno.com",
+      "protocolVersion": "1.0",
+      "syncAudience": "fcos-identity-sync",
+      "syncJwksUrl": "https://fcuno.com/api/fcos-identity-sync/jwks",
+      "oidcClientId": "fcos-production",
+      "oidcRedirectUris": [
+        "https://pjforfvchygdyqfcgpmw.supabase.co/auth/v1/callback"
+      ],
+      "fcos": {
+        "repository": "hocheunglai-oss/fcos",
+        "vercelTeam": "hocheunglai-6535s-projects",
+        "vercelProject": "fcos",
+        "vercelProjectId": "prj_0pUORPGfFPyKtYhKr6ecwJ9ydvEs",
+        "supabaseProjectRef": "pjforfvchygdyqfcgpmw",
+        "productionOrigin": "https://fcos.fcuno.com",
+        "syncEndpoint": "https://fcos.fcuno.com/api/fcuno/identity-sync"
+      }
+    }
+  },
+  "files": [
+    {
+      "path": ".github/workflows/spc-security-baseline.yml",
+      "bytes": 7799,
+      "sha256": "2d3eae15a42a307032d76b60d3b361b41747a815745bd249f2fe3c7392b32023",
+      "mode": "100644",
+      "kind": "workflow"
+    },
+    {
+      "path": "app/admin/attendancerecord/AttendanceRecordClient.tsx",
+      "bytes": 92646,
+      "sha256": "98b86f25249da0e48a52a289ef086c623b2bea8d39cb5cf2620ad6b206a96bc4",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "app/admin/eventcalendar/page.tsx",
+      "bytes": 112296,
+      "sha256": "daf15cea9dff3b9eb91135c9a264a8fbd7fbd34f4b4d58ed59e05dddc4d68f5a",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "app/admin/page.tsx",
+      "bytes": 28072,
+      "sha256": "83d3275d08ae163f9e45bf9b38a7af27242728213f4d5c4550c524f1c24c2c6b",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "app/admin/phonebook/page.tsx",
+      "bytes": 131041,
+      "sha256": "ec6423b472fc29b0ff92dbc5f50d3f1c98559c2d5dcb3d5b70928cd13581193f",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "app/api/admin/audit-logs/route.ts",
+      "bytes": 9464,
+      "sha256": "145c9e8269181e2b19750c9080ae22c24dd7037553b95ab7ca0396490fdacc71",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "app/api/outlook-addressbook/exchange-sync/route.ts",
+      "bytes": 9863,
+      "sha256": "dee2524ffb379dd1b57f6e3d40a2802c59caad48f00462e0c2cec512329cf28d",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "components/AdminNavigationShell.tsx",
+      "bytes": 18355,
+      "sha256": "d78ed0f5f0a52547fc2c758b8cd8691a561928f3e3bca96ca880b712a5d616bc",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "components/SpcNavigationShell.tsx",
+      "bytes": 12674,
+      "sha256": "9603ffe4c626b06ecff2a3969b41ac2784abbc2cb4c6284050b2af67bed8dd2e",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "docs/approved-pago-pago-label-repair-2026-10-13.sql",
+      "bytes": 4640,
+      "sha256": "bf48040c5c1a53ee062da67e444f8ce4a82daad23ced1035699397dbe8bce4b6",
+      "mode": "100644",
+      "kind": "evidence"
+    },
+    {
+      "path": "docs/sitewide-approved-country-label-normalization-2026-10-13.json",
+      "bytes": 8191,
+      "sha256": "40bdf027b4c6af648541c877c422a228245905bc3db30a44d57f844a362b2c3e",
+      "mode": "100644",
+      "kind": "evidence"
+    },
+    {
+      "path": "docs/sitewide-attendance-followup-2026-10-12.json",
+      "bytes": 9447,
+      "sha256": "9238ab7633aa8d36e44ecd3cf90911618a10da4f123005b72a752cbecb9899df",
+      "mode": "100644",
+      "kind": "evidence"
+    },
+    {
+      "path": "docs/sitewide-calendars-followup-2026-10-12.json",
+      "bytes": 13282,
+      "sha256": "dcb925e5c475f4fe7077d98608ca55d5fbb711585ec4dee9f838603f46aab8fe",
+      "mode": "100644",
+      "kind": "evidence"
+    },
+    {
+      "path": "docs/sitewide-client-session-followup-2026-10-13.json",
+      "bytes": 5046,
+      "sha256": "b1cb4814256f99ec9f03d8a96db92c224f6c59f1714c919515cd1e1c975d9f64",
+      "mode": "100644",
+      "kind": "evidence"
+    },
+    {
+      "path": "docs/sitewide-contacts-followup-2026-10-12.json",
+      "bytes": 15717,
+      "sha256": "8c096d5019fc4ddde31fb0228bce3df5d712d445c7f6e682224896b233664eb8",
+      "mode": "100644",
+      "kind": "evidence"
+    },
+    {
+      "path": "docs/sitewide-followup-2026-10-13.md",
+      "bytes": 7833,
+      "sha256": "888445c4e0605db0977763312894f3bb6e0b181f78d552ee8cf46ddcf9e52b5b",
+      "mode": "100644",
+      "kind": "evidence"
+    },
+    {
+      "path": "docs/sitewide-followup-live-baseline-2026-10-13.json",
+      "bytes": 20532,
+      "sha256": "c31a6aefd998b139f8408ee6c2eb657a2ed147588bb2e31051a2837422390712",
+      "mode": "100644",
+      "kind": "evidence"
+    },
+    {
+      "path": "lib/attendanceData.ts",
+      "bytes": 105536,
+      "sha256": "8e2d0d05e5902de60b816b0c267d130729c65980fc788c1076c8785c1400b4c7",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "lib/auditLog.ts",
+      "bytes": 59138,
+      "sha256": "91bd99a47d9ffecec5cbed928b02519953caa09ca36b977820f4e06c48ebba61",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "lib/clientStorage.ts",
+      "bytes": 1209,
+      "sha256": "fd010767e026ff466909ececd8209d6bf08ee90bb4f46831849f3972b6bcec20",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "lib/phonebookCarddav.ts",
+      "bytes": 27410,
+      "sha256": "17ddbf155e6aa759c28142669b494555837a28d3ba75cb433ba255f976f1f1da",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "lib/supabase.ts",
+      "bytes": 4450,
+      "sha256": "961b846e3c0b1a1a42e99534b3a8075aeeaedf24d38af8ee77319d0c96c8cc5d",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "lib/useSimpleAdminAuth.ts",
+      "bytes": 5580,
+      "sha256": "57092886a934c055475e2abb8db393c3219906cc6ba175da22661838599ea7a0",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "lib/useSpcAuth.ts",
+      "bytes": 8311,
+      "sha256": "cec2678ce451bef34185472fc13fb21f0c429a7608c188d163ae6e1bc05082be",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "tests/attendance-auto-confirm-cutoff.test.ts",
+      "bytes": 4578,
+      "sha256": "2408f842dcedd99ade8c93bc28e005112f7a5ebd08bd704cd793515b2d23ce55",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/attendance-confirmation-api.test.ts",
+      "bytes": 10972,
+      "sha256": "32c85b5b72501833325e0d08f8f9683610424d65cf482c69ef5aa2e8c853ea61",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/attendance-confirmation-persistence.browser.test.cjs",
+      "bytes": 21513,
+      "sha256": "8387a76f02cba9d7e93712fdf3bd27caca301d3aa37d8ffa467ec4bc8a78cef5",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/attendance-confirmation.browser.test.cjs",
+      "bytes": 14899,
+      "sha256": "a91c6f285486f2692283084229de8cb0711a8eab8fc275fe20c17b20fecd9c9b",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/ccinfo-country-rename-audit.test.ts",
+      "bytes": 9691,
+      "sha256": "d678745f514f54b72cdb72f958be59d5511103d8b043fe2c3ae1b4e9838a4545",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/ccinfo-proxy-conflicts.test.ts",
+      "bytes": 6158,
+      "sha256": "d9fd7d33e545bbecbaf38fa1146ab4ca64c0bb5862e1e8e9433d265c05506da4",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/client-session-storage.browser.test.cjs",
+      "bytes": 14397,
+      "sha256": "422566bdd0e2d441f511f161db6f979486e150ce531bd0e1622e7a3239b039f0",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/client-storage.test.ts",
+      "bytes": 3300,
+      "sha256": "568714225b01119b4cf23762132c5d5504d9b59811610d421fece0f362d5b957",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/event-calendar-settings.browser.test.cjs",
+      "bytes": 36969,
+      "sha256": "7935e9c16da21f4c16d5cbd9f485d772fb073bcb4b9439c78af1dddbd527e648",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/fixtures/client-session-page.tsx",
+      "bytes": 2615,
+      "sha256": "f2ebd3e18c4160266e836369c0ecd63075afabfda4e5359ea8ede9c283fc6c98",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/fixtures/phonebook-sync-mocks.ts",
+      "bytes": 10660,
+      "sha256": "ceec9518e8fcc2c08e1bcdea5a4a03212ce8d7ef79a50c9ea8fcd20d92f9270d",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/outlook-addin-auth.test.ts",
+      "bytes": 11870,
+      "sha256": "8130f12af71bb6f1c504d15689c74b561317956a44ac998d7d7ca3f3f935bcd0",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/outlook-exchange-sync-trigger.test.ts",
+      "bytes": 8050,
+      "sha256": "633dae75f9e68f11a34ed8b55d0def3830f21bd5ef75618b9f50bb653f786834",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/outlook-recipient-map-continuity.test.ts",
+      "bytes": 6233,
+      "sha256": "ce2bb2d2f84168ef7bb75a144bbee11f857572a04d263a2d986f3c677bab3c79",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/phonebook-carddav-sync.test.ts",
+      "bytes": 30354,
+      "sha256": "9c829db4c7594d1afbc5a10795a317b08bd42a8c96068914d2eca42fa6d63ed1",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/phonebook-save-proxy.test.ts",
+      "bytes": 6740,
+      "sha256": "45aea4ead3cb7e2ad44bbd63b4f81851e47e6137edd7ceb421d885a3ff6a9b9e",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/phonebook-sync.browser.test.cjs",
+      "bytes": 29745,
+      "sha256": "10d26a4b9a7664383d449b11015ed58e6e06657bad3e07d012cd462bd0fd8636",
+      "mode": "100644",
+      "kind": "test"
+    }
+  ],
+  "baseCommit": "2325abb6f0e25cf74b91b2b06f5f901712df359d",
+  "baseTree": "8c384e8faaacf191968bbb8dd866ea966187c4aa",
+  "packageSha256": "d5dcbbd10664b8b70fb6a1e6e8fb7310178299ad796605e82da46a37ee51d74e",
+  "lockSha256": "374276b46de16cb277852559ccbfc4f9c9be2e58cd3d674caa3db425d79f9af9",
+  "selfExclusion": "This manifest does not hash itself. All changed files except this manifest must appear exactly once in files. No .env, secrets, node_modules, build outputs, user dirty checkout files or database migrations included.",
+  "verification": {
+    "distinctTypeScriptTests": 706,
+    "browserBehaviouralGroups": 150,
+    "countryPricingPgliteTests": 94,
+    "countryPricingNativePostgres17_6Tests": 28,
+    "productionBuild": {
+      "passed": true,
+      "generatedPages": 108
+    },
+    "typecheck": "passed",
+    "scopedLint": {
+      "errors": 0,
+      "existingWarnings": 19
+    },
+    "contractDigest": "7fc54e7c3bd79fb014ad81dc6d9190d021549d9428486ef85ed78fdff95d7cc2",
+    "independentRuntimeReview": "passed",
+    "liveBaseline": "docs/sitewide-followup-live-baseline-2026-10-13.json"
+  },
+  "releaseGates": {
+    "currentCi": "Must run on exact PR head",
+    "developmentDependencyAudit": "Existing high-severity braces GHSA-vfj7-8cjw-p6xm has no published fixed version at review; unchanged audit gate must not be silently bypassed.",
+    "approvedCountryCorrection": "docs/approved-pago-pago-label-repair-2026-10-13.sql may be applied only after guard is released, canonical project is verified and exact fresh preconditions still match."
+  }
+}
