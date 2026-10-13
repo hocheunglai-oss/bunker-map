@@ -9,6 +9,7 @@ import {
   type AdminPagePermissionMap,
 } from "@/lib/adminPages"
 import { normaliseAdminPageDefinitions } from "@/lib/adminPageRegistry"
+import { readClientStorage, removeClientStorage, writeClientStorage } from "@/lib/clientStorage"
 
 type AuthState = {
   loading: boolean
@@ -60,7 +61,7 @@ function readCachedAdminActor(): AdminSessionPayload | null {
   if (typeof window === "undefined") return null
 
   try {
-    const raw = window.localStorage.getItem("bunker_admin_actor")
+    const raw = readClientStorage("bunker_admin_actor")
     if (!raw) return null
     const actor = JSON.parse(raw) as AdminSessionPayload
     if (!actor.username) return null
@@ -110,19 +111,20 @@ function useSimpleAdminAuthState(): AuthState {
       setLoading(false)
 
       if (isAuthenticated && nextUsername) {
-        window.localStorage.setItem(
+        writeClientStorage(
           "bunker_admin_actor",
           JSON.stringify({
             username: nextUsername,
             displayName: nextDisplayName || nextUsername,
             role: nextRole,
-            resetRequired: requiresPasswordReset,
+            // Persist only a literal display flag, never credential material.
+            resetRequired: requiresPasswordReset ? true : false,
             permissions: nextPermissions,
             pages: nextPages,
           })
         )
       } else {
-        window.localStorage.removeItem("bunker_admin_actor")
+        removeClientStorage("bunker_admin_actor")
       }
     }
 
@@ -139,7 +141,7 @@ function useSimpleAdminAuthState(): AuthState {
         setPermissions(normaliseAdminPagePermissions(null))
         setPages(ADMIN_PAGE_DEFINITIONS)
         if (typeof window !== "undefined") {
-          window.localStorage.removeItem("bunker_admin_actor")
+          removeClientStorage("bunker_admin_actor")
         }
       } finally {
         setLoading(false)

@@ -1,15 +1,9 @@
 import type { Metadata } from "next"
 import { Analytics } from "@vercel/analytics/next"
 import { SpeedInsights } from "@vercel/speed-insights/next"
-import { Roboto } from "next/font/google"
+import { preload } from "react-dom"
+import "./fonts/roboto.css"
 import "./globals.css"
-
-const roboto = Roboto({
-  subsets: ["latin"],
-  weight: ["400", "500", "700", "900"],
-  display: "swap",
-  variable: "--font-roboto",
-})
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://cosulich.vercel.app"),
@@ -40,8 +34,9 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  preload("/fonts/roboto/roboto-v51-latin.0a44e0bb6ba5c853.woff2", { as: "font", type: "font/woff2", crossOrigin: "anonymous" })
   return (
-    <html lang="en" className={roboto.variable}>
+    <html lang="en">
       <body>
         {children}
         <Analytics />

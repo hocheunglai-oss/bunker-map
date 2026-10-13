@@ -1,0 +1,116 @@
+{
+  "scope": "Phonebook contact persistence, CardDAV count interpretation, Exchange trigger lease continuity, and Outlook recipient-map continuity",
+  "status": "local_candidate_tested_not_deployed",
+  "verificationDateUtc": "2026-10-13",
+  "sourceFreezeObservedAt": "2026-10-13T02:19:52Z",
+  "checkout": "/private/tmp/fcuno-sitewide-followup-49kM2f/site",
+  "baseCommit": "2325abb6f0e25cf74b91b2b06f5f901712df359d",
+  "baseTree": "8c384e8faaacf191968bbb8dd866ea966187c4aa",
+  "externalMutations": [],
+  "browserIsolation": "Separate headless Chromium contexts; every non-fixture-origin browser request is blocked. Test-owned contexts and browsers are closed in finally blocks. No personal Chrome session was attached or controlled.",
+  "reproducedFindings": [
+    {
+      "id": "contact-update-zero-row-acknowledgement",
+      "redProof": "The actual Phonebook page claimed a saved edit and started remote sync after an externally deleted source row produced a zero-row successful update. The retained browser regression failed before the change.",
+      "fix": "Require UPDATE-select-single and the exact returned source ID before local acknowledgement, history entry, or CardDAV upsert. Preserve an unsaved draft and show a direct error for PGRST116 or missing rows.",
+      "currentProof": "Actual-page stale-delete regression and actual Supabase SDK/admin proxy request and zero-row error propagation tests pass."
+    },
+    {
+      "id": "new-contact-ambiguous-insert-duplicate",
+      "redProof": "A synthetic database committed a new contact then lost its response; the old page's retry generated another source identity. Assertion observed 2 contacts instead of 1.",
+      "fix": "Give each open new-contact draft a stable UUID and manual source key. Replay the same INSERT. A primary-key conflict is acknowledged only after exact readback of all supplied business fields, identity, source key, and favourite, excluding computed search_text. No upsert or overwrite is used.",
+      "currentProof": "Actual-page committed-insert lost-reply retry retains one source row. Changed phone details or an externally changed favourite refuse replay acknowledgement, preserve the draft, and send no remote upsert. Actual SDK/admin proxy preserves stable identity and allows only an authorized exact readback."
+    },
+    {
+      "id": "contact-edit-favourite-and-pending-save-ownership",
+      "fix": "Do not reset favourite during ordinary edits. Lock fields, cancellation, deletion, and directory navigation during database persistence. Use a per-save token so an older remote completion cannot release a newer database save. Release the editor after database acknowledgement rather than waiting for remote CardDAV verification.",
+      "currentProof": "Actual-page thrown request preserves draft and restores Save; retry preserves an externally changed favourite. Deferred edit and creation tests prove lock behavior. Older remote completion does not unlock a newer pending save."
+    },
+    {
+      "id": "older-sync-misleading-newer-save-message",
+      "redProof": "Independent review reproduced ALICE remote completion while BOB database Save was pending. The old success message appeared despite BOB remaining locked; retained regression observed 1 success acknowledgement instead of 0.",
+      "fix": "A contact feedback epoch advances on newer save/editor/field/selection actions. Older sync callbacks still persist and retry their operations but cannot replace feedback for the newer editor or pending save.",
+      "currentProof": "Actual-page older success and failure while a newer database save is pending, plus unsaved-newer-draft success/failure regressions pass. The exact earlier failed retry operation and token remain intact before and after the newer successful Save."
+    },
+    {
+      "id": "carddav-incomplete-count-and-resource-alias",
+      "redProof": "An incomplete inner XML response produced HTTP 200 counts instead of unavailable. Uppercase/percent-encoded aliases of a canonical managed card were incorrectly treated as the canonical contact ID. Both retained regressions failed before the change.",
+      "fix": "Reject oversized, declared-entity, incomplete multistatus/response, missing or ambiguous href, and undecodable-href inventories. Managed count requires the exact lowercase canonical writer resource path. Aliases remain visible as other resources and cannot conceal a missing canonical card.",
+      "currentProof": "Count and existing reconcile/delete suites pass. No cleanup, remote deletion, or contact migration was performed."
+    },
+    {
+      "id": "exchange-trigger-ambiguous-dispatch-revokes-lease",
+      "redProof": "A synthetic Azure-accepted dispatch with a lost reply or body reached the old catch path, released the reserved worker lease, and returned a failure; HTTP 408 also returned a definitive failure. The first three retained trigger regression groups failed before the change.",
+      "fix": "Bound webhook request and body readback to 15 seconds. Preserve the reserved run for lost replies, timeout, throttling, and ambiguous server responses. Return an unconfirmed queued outcome, not false failure. Explicit rejection statuses release the reservation; pre-dispatch failure still releases it. All status/trigger responses are private and no-store.",
+      "currentProof": "Seven route tests cover accepted response, lost reply, explicit TimeoutError, lost body after a newer worker status, 408/429/500/503, definite 400/401/403/404/405/410, pre-dispatch store failure, repeat under retained lease, and unsigned/View denial."
+    }
+  ],
+  "verifiedUnchangedContracts": [
+    {
+      "scope": "Phonebook source and durable worker queue",
+      "paths": ["supabase/migrations/20260930074908_phonebook_carddav_authoritative_reconciliation.sql", "lib/phonebookSyncClient.ts", "lib/phonebookCarddavReconcile.ts", "app/api/phonebook/carddav-sync/route.ts", "app/api/cron/phonebook-carddav-reconcile/route.ts"],
+      "evidence": "Existing synthetic suites verify transactional source queueing, version-bound acknowledgement, serial upload-only batches, partial 207 retention, deletion intent, exact remote verification, empty-source cleanup refusal, quarantine before conditional deletion, shared leases, and source restoration checks. These worker/schema files were not changed by this contacts patch."
+    },
+    {
+      "scope": "Outlook existing-contact editor",
+      "paths": ["app/admin/outlookaddressbook/page.tsx", "tests/outlook-contact-editor.browser.test.cjs"],
+      "evidence": "The real unchanged editor passes 12 synthetic browser groups for local drafts, single atomic normalized PATCH, member/source identity retention, invalid email rejection, failed/thrown Save retry, pending locks, deleted stale source, source-book changes, undo reload and mobile use."
+    },
+    {
+      "scope": "Certified-recipient availability during ordinary Exchange synchronization",
+      "paths": ["app/api/outlook-addin/recipient-map/route.ts", "lib/outlookRecipientMapAvailability.ts", "tests/outlook-recipient-map-continuity.test.ts"],
+      "evidence": "Real route and availability helper keep a valid certified snapshot usable for pending/processing queues. Failed/terminal, stale, inconsistent or corrupt certification fails closed. Unsigned or insufficiently permitted requests cannot fetch certified data. These runtime files were not changed."
+    }
+  ],
+  "verification": [
+    { "command": "PATH=/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH node --import tsx --test tests/phonebook-*.test.ts tests/outlook-*.test.ts", "result": "pass", "tests": 152, "failed": 0, "skipped": 0 },
+    { "command": "PATH=/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH NODE_PATH=/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules CHROME_EXECUTABLE_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' node tests/phonebook-sync.browser.test.cjs", "result": "pass", "behaviorGroups": 18, "data": "in-memory synthetic only" },
+    { "command": "PATH=/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH NODE_PATH=/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules CHROME_EXECUTABLE_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' node tests/outlook-contact-editor.browser.test.cjs", "result": "pass", "behaviorGroups": 12, "data": "in-memory synthetic only" },
+    { "command": "PATH=/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH node node_modules/typescript/bin/tsc --noEmit --incremental false", "result": "pass" },
+    { "command": "PATH=/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH node node_modules/eslint/bin/eslint.js app/admin/phonebook/page.tsx app/api/outlook-addressbook/exchange-sync/route.ts lib/phonebookCarddav.ts tests/phonebook-carddav-sync.test.ts tests/phonebook-save-proxy.test.ts tests/outlook-exchange-sync-trigger.test.ts tests/outlook-recipient-map-continuity.test.ts tests/fixtures/phonebook-sync-mocks.ts tests/outlook-addin-auth.test.ts", "result": "pass_with_baseline_warnings", "errors": 0, "warnings": 10, "baseline": "Production-base Phonebook page was independently linted from git show HEAD and has the same 10 hook/unused-helper warnings. No rule was suppressed." },
+    { "command": "git diff --check", "result": "pass" }
+  ],
+  "baselineTestHarnessRepairs": [
+    "The expanded Outlook test glob initially exposed two unchanged baseline test errors. Production auth-dialog already imports/interpolates password bounds but its test-generated HTML lacked those bindings. The test now imports and passes the real password-policy constants and asserts the exact generated bounds.",
+    "Production audit-log whitelist already includes spc_mfa_test_events alongside Outlook insertion attempts and SPC user-management events. Its stale regex expectation now names the actual three tables while retaining the non-undoable insertion audit assertions.",
+    "An existing Phonebook queue-version fixture used a never-reassigned let; it is now an explicitly typed const to satisfy the unchanged lint rule."
+  ],
+  "changedSourceSha256": {
+    "app/admin/phonebook/page.tsx": "ec6423b472fc29b0ff92dbc5f50d3f1c98559c2d5dcb3d5b70928cd13581193f",
+    "app/api/outlook-addressbook/exchange-sync/route.ts": "dee2524ffb379dd1b57f6e3d40a2802c59caad48f00462e0c2cec512329cf28d",
+    "lib/phonebookCarddav.ts": "17ddbf155e6aa759c28142669b494555837a28d3ba75cb433ba255f976f1f1da",
+    "tests/fixtures/phonebook-sync-mocks.ts": "ceec9518e8fcc2c08e1bcdea5a4a03212ce8d7ef79a50c9ea8fcd20d92f9270d",
+    "tests/outlook-addin-auth.test.ts": "8130f12af71bb6f1c504d15689c74b561317956a44ac998d7d7ca3f3f935bcd0",
+    "tests/outlook-exchange-sync-trigger.test.ts": "633dae75f9e68f11a34ed8b55d0def3830f21bd5ef75618b9f50bb653f786834",
+    "tests/outlook-recipient-map-continuity.test.ts": "ce2bb2d2f84168ef7bb75a144bbee11f857572a04d263a2d986f3c677bab3c79",
+    "tests/phonebook-carddav-sync.test.ts": "9c829db4c7594d1afbc5a10795a317b08bd42a8c96068914d2eca42fa6d63ed1",
+    "tests/phonebook-save-proxy.test.ts": "45aea4ead3cb7e2ad44bbd63b4f81851e47e6137edd7ceb421d885a3ff6a9b9e",
+    "tests/phonebook-sync.browser.test.cjs": "10d26a4b9a7664383d449b11015ed58e6e06657bad3e07d012cd462bd0fd8636"
+  },
+  "unchangedBoundarySha256": {
+    "app/api/admin/supabase/route.ts": "b5803634c9cb7bb5680b636db8bdd1b75e8ae70e9734ed8813c65f5d230af668",
+    "app/admin/outlookaddressbook/page.tsx": "2da4851905c33ffe4dddc418a7bf067a0900ec5b1ed28b05438cf421d37c625f",
+    "lib/phonebookSyncClient.ts": "204d3b9cf8b237f143ba1348b15e0e93f9804ad84c6671ec4a46a274d282f3f0",
+    "lib/phonebookCarddavReconcile.ts": "bd07f71bf035f475e4e09fb901e1ebc9e18e7240774fe7d5feb69daba893b978",
+    "app/api/phonebook/carddav-sync/route.ts": "f54e4f3133edea71506dde0a72f47cf6e0d93f7fe303aaf5cb47c0e76e94d578",
+    "app/api/cron/phonebook-carddav-reconcile/route.ts": "fdbaaa14ad74c387162cad6f216b8c7c968b272c6f7416300128ae54f19652b6",
+    "app/api/outlook-addin/recipient-map/route.ts": "036405ee4ce77822f6c66970b0c8610e828c72c2baf2e1212173d52782548da9",
+    "lib/outlookRecipientMapAvailability.ts": "d60aa2785136f2c43ab3240f15f2e53f399cd74c0007a083897f92e21ad58913",
+    "tests/outlook-contact-editor.browser.test.cjs": "16d8881f72c1a404026d54b9ed4681b6aa7e59018c0218e04387098410eaf839",
+    "tests/fixtures/phonebook-sync-page.tsx": "521574fef49400761ec3c982aed37dc18c895f2b6efcc0a4405c42bf770f31c5",
+    "scripts/azure-automation/sync-fcuno-outlook-addressbook.ps1": "045ed302b8929e1c5f4563346ee4b6cdbedeabd9c7e1f50169b2aba459e4f7d9"
+  },
+  "limitationsAndRemainingWork": [
+    "No actual Azure job, Exchange mutation, CardDAV write/delete, outbound email, phone refresh, hosted business-data mutation, or deployment was performed. These proofs do not certify current live worker configuration, end-to-end device delivery, or a live fix.",
+    "The historical five extra contacts and LAM CHUN FU duplication were not removed or causally attributed. The recreated lost-insert-reply flaw is a proven duplication mechanism, not proof that it created those particular historical records.",
+    "Count hardening is not a complete XML parser or a full vCard/reconcile certification. Existing count behavior still ignores foreign/nested resources and tolerates statusless direct members; destructive reconciliation retains its independently stricter parser.",
+    "Contact counts are source/server inventories, not proof that the iPhone's local cache has refreshed. Source IDs and canonical resource paths must match; equal totals alone do not prove identical content.",
+    "Stable creation identity is retained only while that new-contact draft remains open. After an unconfirmed Save, closing it and starting another draft can still create a distinct contact; the message instructs checking the directory first.",
+    "Ordinary multi-user Phonebook edits remain last-writer-wins without a revision CAS. Company creation/edit/delete, archive and undo acknowledgements are outside this narrow fix. Outlook contact/group creation lost-successful-reply idempotency has not been independently certified here.",
+    "An ambiguous Azure dispatch that never actually reached Azure may retain its reservation for up to the existing 30-minute lease. This intentionally prevents overlapping workers; it does not promise immediate automatic recovery.",
+    "The repository PowerShell worker Get-IncrementalSyncOutcome still marks any backlog, including active processing, as failed with AlwaysNotify=true and also notifies successful changed runs. Its email contains technical ledger detail. Incident suppression/minimal email redesign remains separate unfinished work. No local pwsh is installed, and this worker was neither changed nor executed during this review.",
+    "Recipient-map continuity preserves only an already valid certified projection during ordinary pending/processing sync. Failed, stale or inconsistent certification intentionally remains unavailable rather than substituting uncertified recipients.",
+    "Actual proxy/SDK tests use synthetic authorization and mocked final database transport. They prove current request shape, policy dispatch and denial ordering, not live service-role grants or real cookie authentication. Root owns independent hosted metadata/auth/release verification.",
+    "No Supabase migration, package or lockfile, shared proxy policy, Outlook auth-dialog or taskpane runtime was changed by this contacts work. Sitewide debugging remains incomplete."
+  ]
+}

@@ -2756,7 +2756,11 @@ export async function autoConfirmOverdueAttendance(
   const calendar = await loadAttendanceCalendarContext(client)
   const holidayDates = new Set(calendar.holidaysByDate.keys())
   const period = previousMonthPeriod(now)
-  if (hongKongWorkingDayNumber(now, holidayDates) !== 3) {
+  const cutoff = hktTimestampForDateAndTime(hktDateFromTimestamp(now), "18:00")
+  if (
+    hongKongWorkingDayNumber(now, holidayDates) !== 3 ||
+    !cutoff || now.getTime() < cutoff.getTime()
+  ) {
     return { skipped: true, ...period, systemConfirmed: 0 }
   }
   const [{ data: reminded, error: reminderError }, { data: confirmations, error: confirmationError }] = await Promise.all([

@@ -61,6 +61,13 @@ const nextConfig = {
   async headers() {
     return [
       {
+        // Only content-addressed, pinned font assets may be cached permanently.
+        source: "/fonts/roboto/:font(roboto-v51-[a-z-]+\\.[a-f0-9]{16}\\.woff2)",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+        ],
+      },
+      {
         source: "/api/spc/:path*",
         headers: [
           { key: "Cache-Control", value: "private, no-store" },

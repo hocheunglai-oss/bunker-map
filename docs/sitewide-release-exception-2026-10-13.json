@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-10-13T03:03:04Z",
+  "status": "approved-conditional-one-time-exception-not-yet-released",
+  "approvedBy": "Otto Lai, directly in this chat",
+  "question": "May I follow that recommendation: release the tested site fixes only after the font issue and all other checks pass, while leaving the development-tool warning open?",
+  "answer": "Yes, proceed with that one-time exception",
+  "scope": {
+    "pullRequest": "https://github.com/hocheunglai-oss/bunker-map/pull/53",
+    "advisory": "GHSA-vfj7-8cjw-p6xm",
+    "package": "braces",
+    "installedVersion": "3.0.3",
+    "dependencyChain": "eslint-config-next -> @next/eslint-plugin-next -> fast-glob -> micromatch -> braces",
+    "classification": "Development code-checking dependency; stack exhaustion from deeply nested crafted patterns",
+    "notEvidenceOfCompromise": true,
+    "initialFullAuditHighPackageEntries": 5,
+    "initialUnderlyingAdvisories": 1,
+    "initialProductionAuditVulnerabilities": 0,
+    "compatiblePublishedFixAtReview": false
+  },
+  "conditions": [
+    "Resolve the separate hosted font-build failure and verify the exact updated candidate.",
+    "All other functional, build, access-control, contract and security release checks must pass.",
+    "Rerun unchanged full and production dependency audits on the final PR head. If another advisory or failure appears, this exception does not cover it.",
+    "Keep the advisory, failing full-audit evidence and follow-up obligation visible; do not disable or suppress any scanner or audit.",
+    "Use only the reviewed exact candidate and verified canonical deployment target; preserve the dirty primary checkout."
+  ],
+  "notAuthorizedByThisException": [
+    "Any other failed release check or security finding",
+    "A dependency downgrade or an unreviewed upgrade",
+    "Changes to production data, permissions, real contacts, email recipients or Azure configuration",
+    "A claim that the whole site is bug-free or that the advisory is remediated"
+  ],
+  "followUp": "Keep the development dependency warning open and reassess when a compatible fixed release is available. No ongoing bypass or recurring waiver is created."
+}

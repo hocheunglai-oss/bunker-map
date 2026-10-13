@@ -8,6 +8,7 @@ import { AdminAiWorkbench } from "@/components/AdminAiWorkbench"
 import { PASSWORD_MIN_LENGTH } from "@/lib/passwordPolicy"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { normaliseOidcAuthorizeReturnTo } from "@/lib/fcunoOidcContinuation"
+import { removeClientStorage, writeClientStorage } from "@/lib/clientStorage"
 
 const HOLIDAY_MARKET_CODES = "HK CN TW SG KR JP VN US"
 const HKO_TROPICAL_CYCLONE_MAP_URL = "https://www.hko.gov.hk/en/wxinfo/currwx/tc_gis.htm"
@@ -478,45 +479,47 @@ export default function AdminPage() {
     setSubmitting(true)
     setMessage("")
 
-    const response = await fetch("/api/admin/login", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ username, password }),
-    })
+    try {
+      const response = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      })
+      const data = await response.json()
 
-    const data = await response.json()
+      if (!response.ok) {
+        setMessage(data.message || "Login failed.")
+        return
+      }
 
-    if (!response.ok) {
-      setMessage(data.message || "Login failed.")
-      setSubmitting(false)
-      return
-    }
+      if (data.user?.username) {
+        writeClientStorage(
+          "bunker_admin_actor",
+          JSON.stringify({
+            username: data.user.username,
+            displayName: data.user.displayName || data.user.username,
+            role: data.user.role || null,
+            resetRequired: data.user.resetRequired === true,
+            permissions: data.user.permissions || {},
+            pages: data.user.pages || [],
+          }),
+        )
+      }
 
-    if (data.user?.username) {
-      window.localStorage.setItem(
-        "bunker_admin_actor",
-        JSON.stringify({
-          username: data.user.username,
-          displayName: data.user.displayName || data.user.username,
-          role: data.user.role || null,
-          resetRequired: data.user.resetRequired === true,
-          permissions: data.user.permissions || {},
-          pages: data.user.pages || [],
-        }),
+      const target = normaliseOidcAuthorizeReturnTo(
+        new URLSearchParams(window.location.search).get("returnTo"),
+        window.location.origin,
       )
+      if (target && data.user?.resetRequired !== true) {
+        window.location.assign(target)
+        return
+      }
+      window.location.reload()
+    } catch {
+      setMessage("Unable to sign in. Please try again.")
+    } finally {
+      setSubmitting(false)
     }
-
-    const target = normaliseOidcAuthorizeReturnTo(
-      new URLSearchParams(window.location.search).get("returnTo"),
-      window.location.origin,
-    )
-    if (target && data.user?.resetRequired !== true) {
-      window.location.assign(target)
-      return
-    }
-    window.location.reload()
   }
 
   async function handlePasswordReset(event: React.FormEvent<HTMLFormElement>) {
@@ -542,7 +545,7 @@ export default function AdminPage() {
         return
       }
 
-      window.localStorage.removeItem("bunker_admin_actor")
+      removeClientStorage("bunker_admin_actor")
       const target = normaliseOidcAuthorizeReturnTo(
         new URLSearchParams(window.location.search).get("returnTo"),
         window.location.origin,
@@ -570,7 +573,7 @@ export default function AdminPage() {
         return
       }
 
-      window.localStorage.removeItem("bunker_admin_actor")
+      removeClientStorage("bunker_admin_actor")
       window.location.reload()
     } catch {
       setMessage("Unable to sign out. Please try again.")

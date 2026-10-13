@@ -1,0 +1,77 @@
+{
+  "scope": "Attendance-only continuation of the site-wide debug; local synthetic verification, not a hosted deployment certificate",
+  "baseCommit": "2325abb6f0e25cf74b91b2b06f5f901712df359d",
+  "baseTree": "8c384e8faaacf191968bbb8dd866ea966187c4aa",
+  "candidate": "/private/tmp/fcuno-sitewide-followup-49kM2f/site",
+  "safety": {
+    "hostedReadsOrWrites": false,
+    "realAttendanceChanged": false,
+    "emailsOrCronJobsInvoked": false,
+    "personalBrowserUsed": false,
+    "browserContexts": "Dedicated headless Chromium contexts, external browser requests blocked, owned contexts/browser/local HTTP server closed in finally",
+    "database": "In-memory PGlite only; fixture never reads env files and supplies explicitly synthetic backend credentials"
+  },
+  "findingsFixed": [
+    {
+      "id": "attendance-confirmation-year-ownership",
+      "before": "A delayed monthly or annual confirmation captured the previous selected-year load callback. Changing YEAR before completion let that callback supersede the new request and install old-year data under the new YEAR label. Another confirmation could also replace the shared pending state.",
+      "redEvidence": "The actual client from immutable base 2325abb6f0e25cf74b91b2b06f5f901712df359d passes real save/reload and failed retry, then fails the held API/SQL save plus year-change regression: OPEN count 0 instead of 1.",
+      "fix": "Record selected-year ownership in refs updated synchronously by the only year setters; invalidate in-flight load IDs on selection; stale callbacks return before issuing a new read. Serialize monthly/annual confirmations using a synchronous pending ref and disable other confirmation buttons until settlement. Monthly pending identity includes year.",
+      "greenEvidence": "Seven actual-page/guard browser groups pass, including both monthly and annual held confirmation/year changes; four actual-page to real-route to constrained-SQL to real-GET groups pass. Failed storage leaves SQL unchanged, successful retry persists, and saved confirmation survives a full page reload."
+    },
+    {
+      "id": "attendance-auto-confirm-18h-cutoff",
+      "before": "The automatic confirmation helper checked only third Hong Kong working day. Although the normal cron is scheduled at 18:00 HKT, an authorized earlier execution could confirm before the promised deadline.",
+      "redEvidence": "Actual helper with only database boundary synthetic incorrectly returns skipped=false and writes at 2026-11-03T16:00:00Z (00:00 HKT on third working day). New cutoff test failed before the guard; two adjacent helper tests passed.",
+      "fix": "Require current time at or after the same day's 18:00 HKT timestamp using the existing date/time helpers, in addition to third-working-day validation.",
+      "greenEvidence": "Four actual-helper tests pass: before18 skip without attendance reads/writes; exact18 inclusive; persisted holiday shifts day; existing personal confirmation untouched; pending update retains status=pending predicate; repeated18:15 run changes neither actor nor first timestamp."
+    }
+  ],
+  "ownershipAndTimeProof": {
+    "actualApiAndDataHelpers": "View self-confirmation succeeds only for exact signed-in admin_user_id plus active person. Other person's ID, pending/reset status, no linked user, inactive person, edit/reminder/sync actions and no-access requests are denied. Editor exceptions remain.",
+    "hongKongBoundary": "Actual confirmation API/helper tests prove September becomes confirmable at 2026-09-30T16:00:00Z and December at 2026-12-31T16:00:00Z, not UTC midnight. Current/future months remain denied for both View and Edit.",
+    "fullFlow": "Actual AttendanceRecordClient and AdminRouteGuard; actual attendance GET/POST route; actual attendanceData ownership, validation, upsert, monthly read and calculations; real PostgreSQL table constraints extracted from repository migrations; persisted row assertions; actual GET and browser reload. Only authentication/user directory/email/sync/Supabase-transport boundaries are synthetic."
+  },
+  "files": [
+    {"path":"app/admin/attendancerecord/AttendanceRecordClient.tsx","sha256":"98b86f25249da0e48a52a289ef086c623b2bea8d39cb5cf2620ad6b206a96bc4"},
+    {"path":"lib/attendanceData.ts","sha256":"8e2d0d05e5902de60b816b0c267d130729c65980fc788c1076c8785c1400b4c7"},
+    {"path":"tests/attendance-confirmation-api.test.ts","sha256":"32c85b5b72501833325e0d08f8f9683610424d65cf482c69ef5aa2e8c853ea61"},
+    {"path":"tests/attendance-auto-confirm-cutoff.test.ts","sha256":"2408f842dcedd99ade8c93bc28e005112f7a5ebd08bd704cd793515b2d23ce55"},
+    {"path":"tests/attendance-confirmation.browser.test.cjs","sha256":"a91c6f285486f2692283084229de8cb0711a8eab8fc275fe20c17b20fecd9c9b"},
+    {"path":"tests/attendance-confirmation-persistence.browser.test.cjs","sha256":"8387a76f02cba9d7e93712fdf3bd27caca301d3aa37d8ffa467ec4bc8a78cef5"}
+  ],
+  "commands": {
+    "allAttendance": "NODE_PATH=/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules /Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --conditions=react-server --import tsx --test tests/attendance*.test.ts",
+    "pageBrowser": "NODE_PATH=/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules CHROME_EXECUTABLE_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' /Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node tests/attendance-confirmation.browser.test.cjs",
+    "persistenceBrowser": "NODE_PATH=/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules CHROME_EXECUTABLE_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' PGLITE_MODULE_PATH=/private/tmp/fcuno-parser-sql-runtime-kGWo4E/node_modules/@electric-sql/pglite/dist/index.js /Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node tests/attendance-confirmation-persistence.browser.test.cjs",
+    "immutableRed": "Append --baseline-client-ref=2325abb6f0e25cf74b91b2b06f5f901712df359d to persistenceBrowser; expected failure at held save/year-change assertion, without changing workspace sources",
+    "typecheck": "/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node node_modules/typescript/bin/tsc --noEmit --incremental false",
+    "focusedLint": "/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node node_modules/eslint/bin/eslint.js app/admin/attendancerecord/AttendanceRecordClient.tsx lib/attendanceData.ts tests/attendance-confirmation-api.test.ts tests/attendance-auto-confirm-cutoff.test.ts",
+    "browserSyntax": "/Users/ottolai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --check tests/attendance-confirmation-persistence.browser.test.cjs",
+    "diffCheck": "git diff --check"
+  },
+  "results": {
+    "allAttendance": {"pass":139,"fail":0},
+    "actualPageBrowser": {"passGroups":7,"fail":0},
+    "actualPersistenceBrowser": {"passGroups":4,"fail":0},
+    "immutableRaceBaseline": "Expected red reproduced on exact released client; first two persistence groups pass, held save/year switch assertion fails 0 !== 1",
+    "typecheck": "pass",
+    "focusedTsTsxLint": "pass, no errors or warnings",
+    "browserSyntax": "pass",
+    "diffCheck": "pass",
+    "initialInvocationCorrections": [
+      "Initial TypeScript API invocation without --conditions=react-server failed importing server-only, not application logic; corrected command passes.",
+      "Repository ESLint global react-hooks rule is not configured for CJS. Including browser CJS files in lint fails plugin resolution; TS/TSX lint and CJS node syntax/runtime checks pass. No shared config changed.",
+      "New annual browser coverage first exposed a fixture-only th selector assumption; annual rows use td. Selector now covers th and td before final green runs."
+    ]
+  },
+  "limitationsAndUnchangedPolicy": [
+    "No real hosted database, production cookies/session resolution, email delivery, or scheduled job was exercised. Root owns hosted verification and deployment.",
+    "PGlite full-flow uses actual foundational table definitions and confirmation uniqueness/check/FK constraints, but does not claim parity with hosted RLS, audit, backup fencing or source-invalidation triggers. The automatic-confirm helper's repeated-run proof uses stateful synthetic DB responses, not a hosted cron run.",
+    "Disputes remain the documented direct-contact-with-administrator workflow; no dispute form or dispute API exists in this scope.",
+    "Year-end confirmation still reuses the December confirmation row with annual-summary note, as before. This change does not redesign or separate annual acknowledgement storage.",
+    "Independent tabs still use the existing confirmation upsert semantics; this patch prevents overlapping operations within one page but does not add cross-tab compare-and-swap or immutable confirmation history.",
+    "The automatic helper still runs only on the third Hong Kong working day; this patch does not add next-day catch-up after a whole-day missed schedule. Holiday accuracy depends on the persisted Event Calendar.",
+    "The mounted page's current month/year is initialized on load as before. An open page crossing midnight/month-end should be refreshed; server cutoff/closed-month validation remains authoritative."
+  ]
+}

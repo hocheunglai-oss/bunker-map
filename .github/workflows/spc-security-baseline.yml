@@ -45,6 +45,12 @@ jobs:
       - name: Build the production application
         run: npm run build
 
+      - name: Verify pinned font assets and routing boundaries
+        run: npx --no-install tsx --test tests/roboto-self-hosting.test.ts
+
+      - name: Verify font delivery in the built production server
+        run: node tests/roboto-self-hosting.production.test.cjs
+
   static-security-evidence:
     name: Focused tests and dependency audit
     runs-on: ubuntu-latest
@@ -100,6 +106,13 @@ jobs:
           set -o pipefail
           npx --no-install tsx --test tests/ccinfo-table-persistence.test.ts 2>&1 | tee ccinfo-table-tests.tap
 
+      - name: Verify country renaming and coherent pricing publication
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/ccinfo*.test.ts tests/price-setter*.test.ts tests/admin-price-history.test.ts tests/market-price-history.test.ts tests/price-history-records.test.ts tests/report-publication*.test.ts 2>&1 | tee country-pricing-tests.tap
+
       - name: Verify Outlook contact validation and atomic update boundary
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
@@ -113,6 +126,13 @@ jobs:
         run: |
           set -o pipefail
           npx --no-install tsx --test tests/phonebook-*.test.ts 2>&1 | tee phonebook-sync-tests.tap
+
+      - name: Verify optional client storage and Exchange trigger acknowledgement
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npx --no-install tsx --test tests/client-storage.test.ts tests/outlook-exchange-sync-trigger.test.ts tests/outlook-recipient-map-continuity.test.ts 2>&1 | tee session-trigger-tests.tap
 
       - name: Audit production dependencies
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -155,8 +175,10 @@ jobs:
             attendance-tests.tap
             calendar-tests.tap
             ccinfo-table-tests.tap
+            country-pricing-tests.tap
             outlook-contact-tests.tap
             phonebook-sync-tests.tap
+            session-trigger-tests.tap
             security-audit-production.json
             security-audit-full.json
             npm-signature-audit.txt

@@ -811,6 +811,9 @@ export default function AttendanceRecordClient() {
   const monthRequestRef = useRef(0)
   const yearRequestRef = useRef(0)
   const settingsRequestRef = useRef(0)
+  const summaryYearRef = useRef(selectedSummaryYear)
+  const allTimeYearRef = useRef(selectedAllTimeYear)
+  const confirmationPendingRef = useRef(false)
 
   const canEdit =
     authenticated &&
@@ -845,7 +848,7 @@ export default function AttendanceRecordClient() {
   }, [authenticated, currentYear, selectedMonth])
 
   const loadSelectedYear = useCallback(async () => {
-    if (!authenticated) return
+    if (!authenticated || summaryYearRef.current !== selectedSummaryYear) return
     const requestId = yearRequestRef.current + 1
     yearRequestRef.current = requestId
     setYearLoading(true)
@@ -873,7 +876,7 @@ export default function AttendanceRecordClient() {
   }, [authenticated, currentMonth, currentYear, selectedSummaryYear])
 
   const loadAllTime = useCallback(async () => {
-    if (!authenticated) return
+    if (!authenticated || allTimeYearRef.current !== selectedAllTimeYear) return
     const requestId = settingsRequestRef.current + 1
     settingsRequestRef.current = requestId
     setSettingsLoading(true)
@@ -1395,7 +1398,9 @@ export default function AttendanceRecordClient() {
   }
 
   async function confirmMonth(personId: string, month: number) {
-    setPendingAction(`save-confirmation:${personId}:${month}`)
+    if (confirmationPendingRef.current || pendingAction) return
+    confirmationPendingRef.current = true
+    setPendingAction(`save-confirmation:${personId}:${selectedSummaryYear}:${month}`)
     setNotice("")
     try {
       const payload = await postAttendance("save-confirmation", {
@@ -1411,11 +1416,14 @@ export default function AttendanceRecordClient() {
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Attendance confirmation could not be saved.")
     } finally {
+      confirmationPendingRef.current = false
       setPendingAction("")
     }
   }
 
   async function confirmAnnualSummary(personId: string) {
+    if (confirmationPendingRef.current || pendingAction) return
+    confirmationPendingRef.current = true
     setPendingAction(`save-annual-confirmation:${personId}:${selectedAllTimeYear}`)
     setNotice("")
     try {
@@ -1433,6 +1441,7 @@ export default function AttendanceRecordClient() {
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Year-end summary confirmation could not be saved.")
     } finally {
+      confirmationPendingRef.current = false
       setPendingAction("")
     }
   }
@@ -1709,7 +1718,10 @@ export default function AttendanceRecordClient() {
                   <select
                     value={selectedSummaryYear}
                     onChange={(event) => {
-                      setSelectedSummaryYear(Number(event.target.value))
+                      const nextYear = Number(event.target.value)
+                      summaryYearRef.current = nextYear
+                      yearRequestRef.current += 1
+                      setSelectedSummaryYear(nextYear)
                       setSelectedSummaryPersonId("all")
                       setYearData({})
                       setReminderSelection(new Set())
@@ -1818,10 +1830,10 @@ export default function AttendanceRecordClient() {
                                   className={styles.confirmButton}
                                   data-admin-view-safe="true"
                                   onClick={() => void confirmMonth(row.person.id, section.month)}
-                                  disabled={!row.summary?.canConfirm || pendingAction === `save-confirmation:${row.person.id}:${section.month}`}
+                                  disabled={!row.summary?.canConfirm || Boolean(pendingAction)}
                                   title={row.summary?.canConfirm ? `Confirm ${section.label} attendance` : "Only this staff member or an editor can confirm"}
                                 >
-                                  {pendingAction === `save-confirmation:${row.person.id}:${section.month}` ? "SAVING…" : "CONFIRM"}
+                                  {pendingAction === `save-confirmation:${row.person.id}:${selectedSummaryYear}:${section.month}` ? "SAVING…" : "CONFIRM"}
                                 </button>
                               )}
                             </td>
@@ -1849,7 +1861,10 @@ export default function AttendanceRecordClient() {
                   <select
                     value={selectedAllTimeYear}
                     onChange={(event) => {
-                      setSelectedAllTimeYear(Number(event.target.value))
+                      const nextYear = Number(event.target.value)
+                      allTimeYearRef.current = nextYear
+                      settingsRequestRef.current += 1
+                      setSelectedAllTimeYear(nextYear)
                       setSettings(EMPTY_SETTINGS)
                     }}
                     disabled={settingsLoading}
@@ -1939,7 +1954,7 @@ export default function AttendanceRecordClient() {
                                 className={styles.confirmButton}
                                 data-admin-view-safe="true"
                                 onClick={() => void confirmAnnualSummary(person.id)}
-                                disabled={pendingAction === `save-annual-confirmation:${person.id}:${selectedAllTimeYear}`}
+                                disabled={Boolean(pendingAction)}
                               >
                                 {pendingAction === `save-annual-confirmation:${person.id}:${selectedAllTimeYear}` ? "SAVING…" : "CONFIRM YEAR"}
                               </button>

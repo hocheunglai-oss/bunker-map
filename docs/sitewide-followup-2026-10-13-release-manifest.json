@@ -1,0 +1,520 @@
+{
+  "schemaVersion": 1,
+  "status": "Frozen locally verified follow-up candidate; final hosted checks and production release pending",
+  "createdAt": "2026-10-13T03:11:46Z",
+  "connectionsPolicySource": "config/fcunoConnections.ts",
+  "connections": {
+    "schemaVersion": 1,
+    "policyVersion": 2,
+    "connectionOrder": [
+      "api",
+      "cli",
+      "chrome"
+    ],
+    "github": {
+      "repository": "hocheunglai-oss/bunker-map",
+      "mutationAccount": "hocheunglai-oss"
+    },
+    "vercel": {
+      "team": "hocheunglai-6535s-projects",
+      "teamId": "team_MbKDazzCrou3eKTuausPv4X2",
+      "project": "bunker-map-c2ks",
+      "projectId": "prj_8OifIFDF7Gcpd2i4VSRJOHjL3A9Q",
+      "productionOrigins": [
+        "https://fcuno.com",
+        "https://spc.fcuno.com"
+      ]
+    },
+    "supabase": {
+      "projectRef": "gglyugbrnyvyfktgwert"
+    },
+    "browser": {
+      "fallbackProfile": "Otto"
+    },
+    "ecosystem": {
+      "productionOrigin": "https://eco.fcuno.com",
+      "knowledgeExtractionPath": "/api/ecosystem/knowledge-extract"
+    },
+    "federation": {
+      "issuer": "https://fcuno.com",
+      "protocolVersion": "1.0",
+      "syncAudience": "fcos-identity-sync",
+      "syncJwksUrl": "https://fcuno.com/api/fcos-identity-sync/jwks",
+      "oidcClientId": "fcos-production",
+      "oidcRedirectUris": [
+        "https://pjforfvchygdyqfcgpmw.supabase.co/auth/v1/callback"
+      ],
+      "fcos": {
+        "repository": "hocheunglai-oss/fcos",
+        "vercelTeam": "hocheunglai-6535s-projects",
+        "vercelProject": "fcos",
+        "vercelProjectId": "prj_0pUORPGfFPyKtYhKr6ecwJ9ydvEs",
+        "supabaseProjectRef": "pjforfvchygdyqfcgpmw",
+        "productionOrigin": "https://fcos.fcuno.com",
+        "syncEndpoint": "https://fcos.fcuno.com/api/fcuno/identity-sync"
+      }
+    }
+  },
+  "files": [
+    {
+      "path": ".github/workflows/spc-security-baseline.yml",
+      "bytes": 8069,
+      "sha256": "da19062e6695e889445023a0399cd4a2467d4b545f7444a5ccabf33e2d067d43",
+      "mode": "100644",
+      "kind": "workflow"
+    },
+    {
+      "path": "app/admin/attendancerecord/AttendanceRecordClient.tsx",
+      "bytes": 92646,
+      "sha256": "98b86f25249da0e48a52a289ef086c623b2bea8d39cb5cf2620ad6b206a96bc4",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "app/admin/eventcalendar/page.tsx",
+      "bytes": 112296,
+      "sha256": "daf15cea9dff3b9eb91135c9a264a8fbd7fbd34f4b4d58ed59e05dddc4d68f5a",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "app/admin/page.tsx",
+      "bytes": 28072,
+      "sha256": "83d3275d08ae163f9e45bf9b38a7af27242728213f4d5c4550c524f1c24c2c6b",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "app/admin/phonebook/page.tsx",
+      "bytes": 131041,
+      "sha256": "ec6423b472fc29b0ff92dbc5f50d3f1c98559c2d5dcb3d5b70928cd13581193f",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "app/api/admin/audit-logs/route.ts",
+      "bytes": 9464,
+      "sha256": "145c9e8269181e2b19750c9080ae22c24dd7037553b95ab7ca0396490fdacc71",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "app/api/outlook-addressbook/exchange-sync/route.ts",
+      "bytes": 9863,
+      "sha256": "dee2524ffb379dd1b57f6e3d40a2802c59caad48f00462e0c2cec512329cf28d",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "app/fonts/roboto.css",
+      "bytes": 20604,
+      "sha256": "7602802d2ff90653f2db97a56090629f729c2fa681744c055b51d737c3afb324",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "app/layout.tsx",
+      "bytes": 1238,
+      "sha256": "a285e9e5b7ca3b8e9b55cace68663b331b5b473d4839bb6c28d8bf1c1ac6cc01",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "components/AdminNavigationShell.tsx",
+      "bytes": 18355,
+      "sha256": "d78ed0f5f0a52547fc2c758b8cd8691a561928f3e3bca96ca880b712a5d616bc",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "components/SpcNavigationShell.tsx",
+      "bytes": 12674,
+      "sha256": "9603ffe4c626b06ecff2a3969b41ac2784abbc2cb4c6284050b2af67bed8dd2e",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "docs/approved-pago-pago-label-repair-2026-10-13.sql",
+      "bytes": 4640,
+      "sha256": "bf48040c5c1a53ee062da67e444f8ce4a82daad23ced1035699397dbe8bce4b6",
+      "mode": "100644",
+      "kind": "evidence"
+    },
+    {
+      "path": "docs/sitewide-approved-country-label-normalization-2026-10-13.json",
+      "bytes": 8191,
+      "sha256": "40bdf027b4c6af648541c877c422a228245905bc3db30a44d57f844a362b2c3e",
+      "mode": "100644",
+      "kind": "evidence"
+    },
+    {
+      "path": "docs/sitewide-attendance-followup-2026-10-12.json",
+      "bytes": 9447,
+      "sha256": "9238ab7633aa8d36e44ecd3cf90911618a10da4f123005b72a752cbecb9899df",
+      "mode": "100644",
+      "kind": "evidence"
+    },
+    {
+      "path": "docs/sitewide-calendars-followup-2026-10-12.json",
+      "bytes": 13282,
+      "sha256": "dcb925e5c475f4fe7077d98608ca55d5fbb711585ec4dee9f838603f46aab8fe",
+      "mode": "100644",
+      "kind": "evidence"
+    },
+    {
+      "path": "docs/sitewide-client-session-followup-2026-10-13.json",
+      "bytes": 5622,
+      "sha256": "2d80f363593dcc56ff52e29b018c232aebd5bb4ce8794f6c149e904ba6342073",
+      "mode": "100644",
+      "kind": "evidence"
+    },
+    {
+      "path": "docs/sitewide-contacts-followup-2026-10-12.json",
+      "bytes": 15717,
+      "sha256": "8c096d5019fc4ddde31fb0228bce3df5d712d445c7f6e682224896b233664eb8",
+      "mode": "100644",
+      "kind": "evidence"
+    },
+    {
+      "path": "docs/sitewide-followup-2026-10-13.md",
+      "bytes": 9986,
+      "sha256": "2ea0487962bd427fd015e6b53d9d01e52cf3f232071dadc3a8b0a3677fba82e2",
+      "mode": "100644",
+      "kind": "evidence"
+    },
+    {
+      "path": "docs/sitewide-followup-live-baseline-2026-10-13.json",
+      "bytes": 20532,
+      "sha256": "c31a6aefd998b139f8408ee6c2eb657a2ed147588bb2e31051a2837422390712",
+      "mode": "100644",
+      "kind": "evidence"
+    },
+    {
+      "path": "docs/sitewide-font-self-hosting-2026-10-13.json",
+      "bytes": 18147,
+      "sha256": "9a58b397f1d32bce6690ca31c295a7cd129c447092e0cb0ce45fde6a77562961",
+      "mode": "100644",
+      "kind": "evidence"
+    },
+    {
+      "path": "docs/sitewide-release-exception-2026-10-13.json",
+      "bytes": 2203,
+      "sha256": "806b524e6631261742ee1a5bf3f4bbc17c46365a5a917d393716cc1a3ce57267",
+      "mode": "100644",
+      "kind": "evidence"
+    },
+    {
+      "path": "lib/attendanceData.ts",
+      "bytes": 105536,
+      "sha256": "8e2d0d05e5902de60b816b0c267d130729c65980fc788c1076c8785c1400b4c7",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "lib/auditLog.ts",
+      "bytes": 59138,
+      "sha256": "91bd99a47d9ffecec5cbed928b02519953caa09ca36b977820f4e06c48ebba61",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "lib/clientStorage.ts",
+      "bytes": 1209,
+      "sha256": "fd010767e026ff466909ececd8209d6bf08ee90bb4f46831849f3972b6bcec20",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "lib/phonebookCarddav.ts",
+      "bytes": 27410,
+      "sha256": "17ddbf155e6aa759c28142669b494555837a28d3ba75cb433ba255f976f1f1da",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "lib/supabase.ts",
+      "bytes": 4450,
+      "sha256": "961b846e3c0b1a1a42e99534b3a8075aeeaedf24d38af8ee77319d0c96c8cc5d",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "lib/useSimpleAdminAuth.ts",
+      "bytes": 5674,
+      "sha256": "807fabf647939776940b3ce21063f657ae115f479f3262fa97e1504593a4a51b",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "lib/useSpcAuth.ts",
+      "bytes": 8311,
+      "sha256": "cec2678ce451bef34185472fc13fb21f0c429a7608c188d163ae6e1bc05082be",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "next.config.js",
+      "bytes": 3194,
+      "sha256": "40da8c003dd698413665f7114cc4eb7ca9a3582ae2ccecc328cee45864568081",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "proxy.ts",
+      "bytes": 2415,
+      "sha256": "85d381803c8429c4cbd6e5c1637bb87622ee67f6b37f29971112b0638f486adc",
+      "mode": "100644",
+      "kind": "runtime"
+    },
+    {
+      "path": "public/fonts/roboto/OFL.txt",
+      "bytes": 4394,
+      "sha256": "061402327a96aadb0bfb694a960ed289ecd38d383e396243831ab81feb109c41",
+      "mode": "100644",
+      "kind": "asset"
+    },
+    {
+      "path": "public/fonts/roboto/roboto-v51-cyrillic-ext.e44224eb71a96cb3.woff2",
+      "bytes": 31472,
+      "sha256": "e44224eb71a96cb33bd046ded16a4e22bb441b170bdfbcba0268a754141b97c8",
+      "mode": "100644",
+      "kind": "asset"
+    },
+    {
+      "path": "public/fonts/roboto/roboto-v51-cyrillic.32886c5ec61a0d06.woff2",
+      "bytes": 19624,
+      "sha256": "32886c5ec61a0d06e5677a98c5ed78a5f1c788c18c5e8d7dcd931c4b6dc19830",
+      "mode": "100644",
+      "kind": "asset"
+    },
+    {
+      "path": "public/fonts/roboto/roboto-v51-greek-ext.5fdfeaf926cac990.woff2",
+      "bytes": 1632,
+      "sha256": "5fdfeaf926cac990770dfa66011bdb87d6b69f43c42aa759dcdcf0a7a197c19a",
+      "mode": "100644",
+      "kind": "asset"
+    },
+    {
+      "path": "public/fonts/roboto/roboto-v51-greek.4813e3dfbbb23708.woff2",
+      "bytes": 13984,
+      "sha256": "4813e3dfbbb23708c817ef7fd3fd9c82cd0d33c778def0897f0447f1c364ce64",
+      "mode": "100644",
+      "kind": "asset"
+    },
+    {
+      "path": "public/fonts/roboto/roboto-v51-latin-ext.cdd53dc5576a79f3.woff2",
+      "bytes": 24444,
+      "sha256": "cdd53dc5576a79f35cf280dfbd9c1cb2a5dd2f0ede30afba9b9ccdc7fe12e7d0",
+      "mode": "100644",
+      "kind": "asset"
+    },
+    {
+      "path": "public/fonts/roboto/roboto-v51-latin.0a44e0bb6ba5c853.woff2",
+      "bytes": 37520,
+      "sha256": "0a44e0bb6ba5c8537e8814c148ef7755f1bce12112361231f595ecc584a18d7a",
+      "mode": "100644",
+      "kind": "asset"
+    },
+    {
+      "path": "public/fonts/roboto/roboto-v51-math.297193369eea6001.woff2",
+      "bytes": 36292,
+      "sha256": "297193369eea600161f4b5219bd7b08850180fcfe0752f1a2eaa436575cd03b7",
+      "mode": "100644",
+      "kind": "asset"
+    },
+    {
+      "path": "public/fonts/roboto/roboto-v51-symbols.fab8a0056d92fdd8.woff2",
+      "bytes": 16692,
+      "sha256": "fab8a0056d92fdd8d64fed4b049744144e1d24d08762c513bff78265299ed7a3",
+      "mode": "100644",
+      "kind": "asset"
+    },
+    {
+      "path": "public/fonts/roboto/roboto-v51-vietnamese.2071148c26bd0430.woff2",
+      "bytes": 10572,
+      "sha256": "2071148c26bd0430cad316373c26db399e0cf8f6275b9e1a2c1b831f05ee7dc3",
+      "mode": "100644",
+      "kind": "asset"
+    },
+    {
+      "path": "tests/attendance-auto-confirm-cutoff.test.ts",
+      "bytes": 4578,
+      "sha256": "2408f842dcedd99ade8c93bc28e005112f7a5ebd08bd704cd793515b2d23ce55",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/attendance-confirmation-api.test.ts",
+      "bytes": 10972,
+      "sha256": "32c85b5b72501833325e0d08f8f9683610424d65cf482c69ef5aa2e8c853ea61",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/attendance-confirmation-persistence.browser.test.cjs",
+      "bytes": 21513,
+      "sha256": "8387a76f02cba9d7e93712fdf3bd27caca301d3aa37d8ffa467ec4bc8a78cef5",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/attendance-confirmation.browser.test.cjs",
+      "bytes": 14899,
+      "sha256": "a91c6f285486f2692283084229de8cb0711a8eab8fc275fe20c17b20fecd9c9b",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/ccinfo-country-rename-audit.test.ts",
+      "bytes": 9691,
+      "sha256": "d678745f514f54b72cdb72f958be59d5511103d8b043fe2c3ae1b4e9838a4545",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/ccinfo-proxy-conflicts.test.ts",
+      "bytes": 6158,
+      "sha256": "d9fd7d33e545bbecbaf38fa1146ab4ca64c0bb5862e1e8e9433d265c05506da4",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/client-session-storage.browser.test.cjs",
+      "bytes": 15379,
+      "sha256": "a43c0beef0bcfee3cd9ced6732b409574b52524cf8ae90e66c2d4e2f5c798487",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/client-storage.test.ts",
+      "bytes": 3300,
+      "sha256": "568714225b01119b4cf23762132c5d5504d9b59811610d421fece0f362d5b957",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/event-calendar-settings.browser.test.cjs",
+      "bytes": 36969,
+      "sha256": "7935e9c16da21f4c16d5cbd9f485d772fb073bcb4b9439c78af1dddbd527e648",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/fixtures/client-session-page.tsx",
+      "bytes": 2615,
+      "sha256": "f2ebd3e18c4160266e836369c0ecd63075afabfda4e5359ea8ede9c283fc6c98",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/fixtures/phonebook-sync-mocks.ts",
+      "bytes": 10660,
+      "sha256": "ceec9518e8fcc2c08e1bcdea5a4a03212ce8d7ef79a50c9ea8fcd20d92f9270d",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/fixtures/roboto-google-v51.css",
+      "bytes": 22476,
+      "sha256": "8e669fb5e4b5f9ffa09f93041826ed0a21d843e8e438bc6fefed7114f3fab1eb",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/outlook-addin-auth.test.ts",
+      "bytes": 11870,
+      "sha256": "8130f12af71bb6f1c504d15689c74b561317956a44ac998d7d7ca3f3f935bcd0",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/outlook-exchange-sync-trigger.test.ts",
+      "bytes": 8050,
+      "sha256": "633dae75f9e68f11a34ed8b55d0def3830f21bd5ef75618b9f50bb653f786834",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/outlook-recipient-map-continuity.test.ts",
+      "bytes": 6233,
+      "sha256": "ce2bb2d2f84168ef7bb75a144bbee11f857572a04d263a2d986f3c677bab3c79",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/phonebook-carddav-sync.test.ts",
+      "bytes": 30354,
+      "sha256": "9c829db4c7594d1afbc5a10795a317b08bd42a8c96068914d2eca42fa6d63ed1",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/phonebook-save-proxy.test.ts",
+      "bytes": 6740,
+      "sha256": "45aea4ead3cb7e2ad44bbd63b4f81851e47e6137edd7ceb421d885a3ff6a9b9e",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/phonebook-sync.browser.test.cjs",
+      "bytes": 29745,
+      "sha256": "10d26a4b9a7664383d449b11015ed58e6e06657bad3e07d012cd462bd0fd8636",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/roboto-self-hosting.browser.test.cjs",
+      "bytes": 7402,
+      "sha256": "77c78ca93773ce10961dd9b38f0a2013077ee93f1c19131e62988497472a98b1",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/roboto-self-hosting.production.test.cjs",
+      "bytes": 6054,
+      "sha256": "eb58bb883c99b0c76f81513c807788613b3bb29e65d1bab4e7cd529fbc158ba7",
+      "mode": "100644",
+      "kind": "test"
+    },
+    {
+      "path": "tests/roboto-self-hosting.test.ts",
+      "bytes": 9775,
+      "sha256": "c9d3447f1e50f5456361551fa1713a6eb9484fedf6942fe699a1f614091a83b0",
+      "mode": "100644",
+      "kind": "test"
+    }
+  ],
+  "baseCommit": "2325abb6f0e25cf74b91b2b06f5f901712df359d",
+  "baseTree": "8c384e8faaacf191968bbb8dd866ea966187c4aa",
+  "packageSha256": "d5dcbbd10664b8b70fb6a1e6e8fb7310178299ad796605e82da46a37ee51d74e",
+  "lockSha256": "374276b46de16cb277852559ccbfc4f9c9be2e58cd3d674caa3db425d79f9af9",
+  "selfExclusion": "This manifest does not hash itself. All changed files except this manifest must appear exactly once in files. No .env, secrets, node_modules, build outputs, user dirty checkout files or database migrations included.",
+  "verification": {
+    "distinctTypeScriptTests": 714,
+    "browserBehaviouralGroups": 154,
+    "countryPricingPgliteTests": 94,
+    "countryPricingNativePostgres17_6Tests": 28,
+    "productionBuild": {
+      "passed": true,
+      "generatedPages": 108
+    },
+    "typecheck": "passed",
+    "scopedLint": {
+      "errors": 0,
+      "existingWarnings": 19
+    },
+    "contractDigest": "7fc54e7c3bd79fb014ad81dc6d9190d021549d9428486ef85ed78fdff95d7cc2",
+    "independentRuntimeReview": "All bounded changed-runtime scopes passed; final session 13 browser groups/helper 4 and final font 8 unit/3 browser/3 real built-server groups independently rerun on frozen source hashes",
+    "liveBaseline": "docs/sitewide-followup-live-baseline-2026-10-13.json",
+    "builtServerFontRoutingGroups": 3,
+    "fontEvidence": "docs/sitewide-font-self-hosting-2026-10-13.json",
+    "whitespaceReview": "Staged source checked; two harmless new EOF blank lines removed. Exact official OFL.txt line21 upstream trailing space intentionally retained."
+  },
+  "releaseGates": {
+    "currentCi": "Must pass on exact updated PR head except the explicitly approved single advisory",
+    "developmentDependencyAudit": "All audit commands unchanged. Explicit conditional one-time human exception only for GHSA-vfj7-8cjw-p6xm; final full audit must contain no additional advisory and production audit must pass. See docs/sitewide-release-exception-2026-10-13.json.",
+    "fontBuild": "Final exact-head hosted build and pinned font delivery must pass; initial PR53 font-loader failure is not waived.",
+    "codeql": "Final exact-head security checks must pass; no warning suppression or finding dismissal authorized.",
+    "approvedCountryCorrection": "docs/approved-pago-pago-label-repair-2026-10-13.sql may be applied only after guard is released, canonical project is verified and exact fresh preconditions still match."
+  }
+}

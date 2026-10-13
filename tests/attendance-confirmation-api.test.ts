@@ -214,6 +214,24 @@ test("both View and Edit retain the real Hong Kong closed-month validation", asy
   }
 })
 
+test("confirmation opens at Hong Kong midnight, not UTC midnight, including year rollover", async () => {
+  for (const boundary of [
+    { before: "2026-09-30T15:59:59.999Z", after: "2026-09-30T16:00:00.000Z", year: 2026, month: 9 },
+    { before: "2026-12-31T15:59:59.999Z", after: "2026-12-31T16:00:00.000Z", year: 2026, month: 12 },
+  ]) {
+    mock.timers.setTime(new Date(boundary.before).getTime())
+    const app = harness()
+    const input = confirmation({ year: boundary.year, month: boundary.month })
+    assert.equal((await app.request(input)).status, 400)
+    assert.deepEqual(app.writes, [])
+    mock.timers.setTime(new Date(boundary.after).getTime())
+    const response = await app.request(input)
+    assert.equal(response.status, 200)
+    assert.equal(response.body.confirmation.confirmedAt, boundary.after)
+    assert.equal(app.writes.length, 1)
+  }
+})
+
 test("Edit retains confirmation, reset and attendance edit rights", async () => {
   const app = harness({ permission: "edit" })
   assert.equal((await app.request(confirmation({ personId: OTHER_PERSON_ID }))).status, 200)

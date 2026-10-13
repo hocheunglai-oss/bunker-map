@@ -233,6 +233,38 @@ test("a multistatus tombstone is excluded from the inventory", async () => {
   assert.equal(payload.carddavOrphanCount, 0)
 })
 
+test("an incomplete or entity-bearing inventory cannot publish reassuring contact counts", async () => {
+  for (const xml of [
+    `<d:multistatus xmlns:d="DAV:"><d:response><d:href>/book/bunker-map-${id(1)}.vcf</d:href></d:multistatus>`,
+    '<d:multistatus xmlns:d="DAV:"><d:response><d:propstat><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>',
+    '<!DOCTYPE multistatus [<!ENTITY contact "hidden">]><d:multistatus xmlns:d="DAV:"></d:multistatus>',
+  ]) {
+    const f = fixture({ onFetch: () => new Response(xml, { status: 207 }) })
+    const response = await f.get()
+    assert.equal(response.status, 503)
+    assert.equal((await response.json()).message, "CardDAV count unavailable. Please retry.")
+    assert.deepEqual(f.calls.map((call) => call.method), ["PROPFIND"])
+  }
+})
+
+test("only the exact managed resource identity counts as a matching source contact", async () => {
+  const aliasId = "abcdefab-abcd-4abc-8abc-abcdefabcdef"
+  const aliases = [`bunker-map-${aliasId.toUpperCase()}.vcf`, `bunker-map-%61${aliasId.slice(1)}.vcf`]
+  for (const alias of aliases) {
+    const f = fixture({ rows: [contact(1, { id: aliasId })], onFetch: () => new Response(
+      `<d:multistatus xmlns:d="DAV:"><d:response><d:href>/book/${alias}</d:href></d:response></d:multistatus>`, { status: 207 }) })
+    const response = await f.get()
+    assert.equal(response.status, 200)
+    const payload = await response.json()
+    assert.equal(payload.savedContactCount, 1)
+    assert.equal(payload.carddavTotalCount, 1)
+    assert.equal(payload.carddavContactCount, 0)
+    assert.equal(payload.carddavOtherCount, 1)
+    assert.equal(payload.carddavMatchedCount, 0)
+    assert.equal(payload.carddavMissingCount, 1)
+  }
+})
+
 test("authorizes phonebook edit permission before reading or syncing contacts", async () => {
   for (const [permissionError, status] of [["Unauthorized", 401], ["Forbidden", 403]] as const) {
     const f = fixture({ permissionError })
@@ -284,8 +316,7 @@ test("busy common writer lock keeps explicit changes queued without a remote wri
 })
 
 test("manual acknowledgment preserves a newer queued version", async () => {
-  let f: ReturnType<typeof fixture>
-  f = fixture({ onFetch: (call) => {
+  const f: ReturnType<typeof fixture> = fixture({ onFetch: (call) => {
     if (call.method === "GET") f.queue[0].version = randomUUID()
     return undefined
   } })

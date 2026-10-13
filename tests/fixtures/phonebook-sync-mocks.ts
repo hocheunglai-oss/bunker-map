@@ -4,7 +4,7 @@ type Row = Record<string, unknown> & { id: string }
 type SyncPlan = { failedIds?: string[]; status?: number; malformed?: boolean; reject?: boolean; defer?: boolean }
 type RecordedRequest = { url: string; method: string; body: Record<string, unknown> | null }
 type Operation = { table: string; method: string; payload: Record<string, unknown> | null; filters: { field: string; value: unknown; operator?: "in" }[] }
-type QueryResult = { data: unknown; error: { message: string } | null }
+type QueryResult = { data: unknown; error: { message: string; code?: string } | null }
 export type PhonebookSyncHarness = {
   contacts: Row[]
   companies: Row[]
@@ -18,6 +18,9 @@ export type PhonebookSyncHarness = {
   failCompanyDeletes: boolean
   companyDeleteRetrySnapshots: Array<Array<{ id: string; operation: string }>>
   countOverrides: Record<string, number>
+  contactWriteFailure: "reject" | "commit-reject" | null
+  deferContactWrite: boolean
+  releaseContactWrite: (() => void) | null
 }
 declare global { interface Window { __phonebookSyncHarness: PhonebookSyncHarness } }
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
@@ -33,7 +36,7 @@ export function installPhonebookSyncHarness() {
     { id: "synthetic-contact-c", full_name: "CAROL TEST", company: "ALPHA SHIPPING", company_source_id: "company-a", favorite: false, mobile_1: "+85293334444", personal_email: "carol@example.test" },
     { id: "synthetic-contact-d", full_name: "DAVE TEST", company: "BETA SHIPPING", company_source_id: "company-b", favorite: false, mobile_1: "+6591112222", personal_email: "dave@example.test" },
   ]
-  window.__phonebookSyncHarness = { contacts, companies, requests: [], operations: [], syncPlan: [], malformedContacts: false, releaseSync: null, activeSyncs: 0, maxConcurrentSyncs: 0, failCompanyDeletes: false, companyDeleteRetrySnapshots: [], countOverrides: {} }
+  window.__phonebookSyncHarness = { contacts, companies, requests: [], operations: [], syncPlan: [], malformedContacts: false, releaseSync: null, activeSyncs: 0, maxConcurrentSyncs: 0, failCompanyDeletes: false, companyDeleteRetrySnapshots: [], countOverrides: {}, contactWriteFailure: null, deferContactWrite: false, releaseContactWrite: null }
   window.fetch = async (input, init) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, window.location.origin)
     const method = init?.method || (input instanceof Request ? input.method : "GET")
@@ -103,6 +106,15 @@ class Query implements PromiseLike<QueryResult> {
       return { data: this.singular ? result[0] || null : result, error: null }
     }
     harness.operations.push(operation)
+    if (operation.table === "phonebook_contacts" && ["POST", "PATCH"].includes(operation.method) && harness.deferContactWrite) {
+      await new Promise<void>((resolve) => { harness.releaseContactWrite = resolve })
+      harness.releaseContactWrite = null
+      harness.deferContactWrite = false
+    }
+    const contactWriteFailure = operation.table === "phonebook_contacts" && ["POST", "PATCH"].includes(operation.method)
+      ? harness.contactWriteFailure : null
+    if (contactWriteFailure) harness.contactWriteFailure = null
+    if (contactWriteFailure === "reject") throw new Error("Synthetic contact write network failure")
     if (operation.table === "phonebook_companies" && operation.method === "DELETE") {
       harness.companyDeleteRetrySnapshots.push(JSON.parse(localStorage.getItem("phonebook_carddav_pending:v2") || "[]") as Array<{ id: string; operation: string }>)
       if (harness.failCompanyDeletes) return { data: null, error: { message: "Synthetic company deletion failure" } }
@@ -110,6 +122,7 @@ class Query implements PromiseLike<QueryResult> {
     if (operation.method === "PATCH") {
       const matched = rows.filter(matches)
       matched.forEach((row) => Object.assign(row, operation.payload))
+      if (contactWriteFailure === "commit-reject") throw new Error("Synthetic lost contact write response")
       return { data: this.singular ? clone(matched[0] || null) : clone(matched), error: null }
     }
     if (operation.method === "DELETE") {
@@ -117,8 +130,10 @@ class Query implements PromiseLike<QueryResult> {
       return { data: null, error: null }
     }
     if (operation.method === "POST") {
-      const inserted = { ...operation.payload, id: crypto.randomUUID() } as Row
+      const inserted = { ...operation.payload, id: operation.payload?.id || crypto.randomUUID() } as Row
+      if (rows.some((row) => row.id === inserted.id)) return { data: null, error: { code: "23505", message: "Synthetic duplicate primary key" } }
       rows.push(inserted)
+      if (contactWriteFailure === "commit-reject") throw new Error("Synthetic lost contact write response")
       return { data: clone(inserted), error: null }
     }
     throw new Error(`Unexpected local fixture operation: ${operation.method}`)
