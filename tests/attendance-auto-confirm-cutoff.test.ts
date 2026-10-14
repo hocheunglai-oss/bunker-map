@@ -6,6 +6,7 @@ import {
   autoConfirmOverdueAttendance,
   loadAttendancePeopleForPeriod,
 } from "../lib/attendanceData"
+import { hasCyDingTalkAutoConfirmException } from "../lib/attendanceAutoConfirmPolicy"
 
 type Row = Record<string, unknown>
 
@@ -27,6 +28,15 @@ const pending = {
   id: "confirmation-1", person_id: "person-1", year: 2026, month: 10,
   status: "pending", updated_at: "2026-11-04T09:00:00.000Z",
 }
+const cyPerson = {
+  ...person,
+  id: "e2cd1a9d-95c1-4292-940a-884537f35cf3",
+  staff_code: "CY",
+  dingtalk_user_id: null,
+}
+const cyAssignment = { ...assignment, person_id: cyPerson.id }
+const cyReminder = { ...reminder, person_id: cyPerson.id }
+const cyPending = { ...pending, person_id: cyPerson.id }
 const successfulSync = {
   id: "latest", status: "succeeded", started_at: "2026-11-04T10:00:20.000Z",
   completed_at: "2026-11-04T10:00:25.000Z",
@@ -192,7 +202,11 @@ function fakeClient(input: {
       return query
     },
   } as unknown as SupabaseClient
-  return { client, writes, readTables, tables, bumpRevision() { sourceRevision += 1 } }
+  return {
+    client, writes, readTables, tables,
+    bumpRevision() { sourceRevision += 1 },
+    currentRevision() { return sourceRevision },
+  }
 }
 
 test("third working-day cutoff stays at 18:00 HKT across holidays and catch-up days", () => {
@@ -242,6 +256,147 @@ test("a later unrelated success does not invalidate valid person-specific requer
   const missingIdentity = fakeClient({ people: [{ ...person, dingtalk_user_id: null }] })
   await assert.rejects(autoConfirmOverdueAttendance(missingIdentity.client, now), /no DingTalk identity/)
   assert.deepEqual(missingIdentity.writes, [])
+})
+
+test("CY's ongoing exception is bound to his person and staff code from October 2026", () => {
+  const cy = { id: cyPerson.id, staffCode: "CY" }
+  assert.equal(hasCyDingTalkAutoConfirmException(cy, { year: 2026, month: 9 }), false)
+  assert.equal(hasCyDingTalkAutoConfirmException(cy, { year: 2026, month: 10 }), true)
+  assert.equal(hasCyDingTalkAutoConfirmException(cy, { year: 2027, month: 1 }), true)
+  assert.equal(hasCyDingTalkAutoConfirmException({ ...cy, staffCode: "OTHER" }, { year: 2027, month: 1 }), false)
+  assert.equal(hasCyDingTalkAutoConfirmException({ ...cy, id: "another-person" }, { year: 2027, month: 1 }), false)
+})
+
+test("CY system-confirms only after a sent second reminder and the normal cutoff, without DingTalk coverage", async () => {
+  const input = {
+    people: [{ ...cyPerson }], assignments: [{ ...cyAssignment }],
+    reminders: [{ ...cyReminder }], confirmations: [{ ...cyPending }],
+    syncHistory: [] as Row[], sync: null,
+  }
+  const early = fakeClient(input)
+  assert.equal((await autoConfirmOverdueAttendance(
+    early.client, new Date("2026-11-04T09:59:59.000Z"))).systemConfirmed, 0)
+  assert.deepEqual(early.writes, [])
+
+  const missingReminder = fakeClient({ ...input, reminders: [] })
+  assert.equal((await autoConfirmOverdueAttendance(missingReminder.client, now)).systemConfirmed, 0)
+  assert.deepEqual(missingReminder.writes, [])
+
+  const ready = fakeClient(input)
+  assert.equal((await autoConfirmOverdueAttendance(ready.client, now)).systemConfirmed, 1)
+  assert.equal(ready.writes[0].confirmed_by, "system:attendance-cy-dingtalk-exception")
+  assert.match(String(ready.writes[0].note), /not employee approval or independent proof of attendance/)
+  assert.equal(ready.readTables.includes("attendance_sync_runs"), false)
+  assert.equal(ready.currentRevision(), 1)
+  assert.equal((await autoConfirmOverdueAttendance(ready.client, now)).systemConfirmed, 0)
+  assert.equal(ready.writes.length, 1)
+})
+
+test("CY's exception still applies if a DingTalk ID is linked before his access works", async () => {
+  const app = fakeClient({
+    people: [{ ...cyPerson, dingtalk_user_id: "ding-cy" }],
+    assignments: [{ ...cyAssignment }], reminders: [{ ...cyReminder }],
+    confirmations: [{ ...cyPending }], syncHistory: [], sync: null,
+  })
+  assert.equal((await autoConfirmOverdueAttendance(app.client, now)).systemConfirmed, 1)
+  assert.equal(app.writes[0].confirmed_by, "system:attendance-cy-dingtalk-exception")
+  assert.equal(app.readTables.includes("attendance_sync_runs"), false)
+})
+
+test("CY's scoped confirmation rejects a DingTalk link added or changed after the cron requery selection", async () => {
+  for (const expectedId of [null, "old-ding-cy"]) {
+    const app = fakeClient({
+      people: [{ ...cyPerson, dingtalk_user_id: "new-ding-cy" }],
+      assignments: [{ ...cyAssignment }], reminders: [{ ...cyReminder }],
+      confirmations: [{ ...cyPending }], syncHistory: [], sync: null,
+    })
+    await assert.rejects(autoConfirmOverdueAttendance(
+      app.client, now, undefined, "cyDingTalkException", expectedId,
+    ), { name: "AttendanceSourceChangedError" })
+    assert.deepEqual(app.writes, [])
+  }
+})
+
+test("a linked CY identity mismatch still blocks his exception", async () => {
+  const app = fakeClient({
+    people: [{ ...cyPerson, dingtalk_user_id: "ding-cy" }],
+    assignments: [{ ...cyAssignment }], reminders: [{ ...cyReminder }],
+    confirmations: [{ ...cyPending }], syncHistory: [], sync: null,
+    rawPunches: [{ id: "wrong-link", person_id: cyPerson.id,
+      dingtalk_user_id: "old-ding-cy", work_date: "2026-10-12" }],
+  })
+  await assert.rejects(autoConfirmOverdueAttendance(app.client, now), /punches from another DingTalk identity/)
+  assert.deepEqual(app.writes, [])
+})
+
+test("CY and a synchronized colleague both confirm under their own safeguards", async () => {
+  const app = fakeClient({
+    people: [{ ...cyPerson }, { ...person }],
+    assignments: [{ ...cyAssignment }, { ...assignment }],
+    reminders: [{ ...cyReminder }, { ...reminder }],
+    confirmations: [{ ...cyPending }, { ...pending }],
+  })
+  assert.equal((await autoConfirmOverdueAttendance(app.client, now)).systemConfirmed, 2)
+  assert.deepEqual(new Map(app.writes.map((row) => [row.person_id, row.confirmed_by])), new Map([
+    [cyPerson.id, "system:attendance-cy-dingtalk-exception"],
+    [person.id, "system:attendance-auto-confirm"],
+  ]))
+  assert.equal(app.currentRevision(), 1)
+})
+
+test("CY's scoped confirmation succeeds when another person's DingTalk coverage fails", async () => {
+  const app = fakeClient({
+    people: [{ ...cyPerson }, { ...person }],
+    assignments: [{ ...cyAssignment }, { ...assignment }],
+    reminders: [{ ...cyReminder }, { ...reminder }],
+    confirmations: [{ ...cyPending }, { ...pending }],
+    syncHistory: [], sync: null,
+  })
+  assert.equal((await autoConfirmOverdueAttendance(
+    app.client, now, undefined, "cyDingTalkException")).systemConfirmed, 1)
+  await assert.rejects(autoConfirmOverdueAttendance(
+    app.client, now, undefined, "ordinary"), /incomplete full-month synchronization coverage/)
+  assert.deepEqual(app.writes.map((row) => row.person_id), [cyPerson.id])
+})
+
+test("CY's exception does not weaken another person's missing-identity guard", async () => {
+  const unlinked = { ...person, id: "other-person", dingtalk_user_id: null }
+  const app = fakeClient({
+    people: [{ ...cyPerson }, unlinked],
+    assignments: [{ ...cyAssignment }, { ...assignment, person_id: unlinked.id }],
+    reminders: [{ ...cyReminder }, { ...reminder, person_id: unlinked.id }],
+    confirmations: [{ ...cyPending }, { ...pending, person_id: unlinked.id }],
+    syncHistory: [], sync: null,
+  })
+  await assert.rejects(autoConfirmOverdueAttendance(app.client, now), /no DingTalk identity/)
+  assert.equal(app.writes.length, 0)
+  assert.equal((await autoConfirmOverdueAttendance(
+    app.client, now, undefined, "cyDingTalkException")).systemConfirmed, 1)
+  assert.deepEqual(app.writes.map((row) => row.person_id), [cyPerson.id])
+})
+
+test("CY's exception preserves anomaly, reopened-review, and source-revision guards", async () => {
+  const base = {
+    people: [{ ...cyPerson }], assignments: [{ ...cyAssignment }],
+    reminders: [{ ...cyReminder }], confirmations: [{ ...cyPending }],
+    syncHistory: [] as Row[], sync: null,
+  }
+  const anomaly = fakeClient({ ...base, openAnomalyCount: 1 })
+  await assert.rejects(autoConfirmOverdueAttendance(anomaly.client, now), /punch correction requires review/)
+  assert.deepEqual(anomaly.writes, [])
+
+  const reopened = fakeClient({
+    ...base, confirmations: [{ ...cyPending, updated_at: "2026-11-04T10:00:01.000Z" }],
+  })
+  assert.equal((await autoConfirmOverdueAttendance(reopened.client, now)).systemConfirmed, 0)
+  assert.deepEqual(reopened.writes, [])
+
+  const app = fakeClient({
+    ...base, beforeConfirmationWrite() { app.bumpRevision() },
+  })
+  await assert.rejects(autoConfirmOverdueAttendance(app.client, now),
+    { name: "AttendanceSourceChangedError" })
+  assert.deepEqual(app.writes, [])
 })
 
 test("a missing sync identity blocks all candidates before any confirmation is written", async () => {

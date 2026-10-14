@@ -1815,11 +1815,13 @@ export default function AttendanceRecordClient() {
                       section.rows.map((row, rowIndex) => {
                         const confirmation = row.summary?.confirmation
                         const confirmed = confirmation?.status === "confirmed"
-                        const retrospectiveSystemConfirmed = confirmation?.confirmedBy === "system:attendance-retrospective-confirm"
+                        const exceptionalSystemConfirmed =
+                          confirmation?.confirmedBy === "system:attendance-retrospective-confirm" ||
+                          confirmation?.confirmedBy === "system:attendance-cy-dingtalk-exception"
                         const systemConfirmed = confirmed && (
-                          confirmation?.confirmedBy === "system:attendance-auto-confirm" || retrospectiveSystemConfirmed
+                          confirmation?.confirmedBy === "system:attendance-auto-confirm" || exceptionalSystemConfirmed
                         )
-                        const confirmationTitle = retrospectiveSystemConfirmed
+                        const confirmationTitle = exceptionalSystemConfirmed
                           ? [displayDateTime(confirmation?.confirmedAt || null), confirmation?.note].filter(Boolean).join(" · ")
                           : displayDateTime(confirmation?.confirmedAt || null)
                         const open = !yearData[section.month]?.periodClosed
@@ -1854,7 +1856,7 @@ export default function AttendanceRecordClient() {
                                 <span
                                   className={styles.confirmedBadge}
                                   title={confirmationTitle}
-                                  aria-label={retrospectiveSystemConfirmed ? `System confirmed. ${confirmation?.note || ""}` : undefined}
+                                  aria-label={exceptionalSystemConfirmed ? `System confirmed. ${confirmation?.note || ""}` : undefined}
                                 >
                                   {systemConfirmed ? "SYSTEM CONFIRMED" : "CONFIRMED"}
                                 </span>

@@ -16,6 +16,11 @@ import {
   previousMonthPeriod,
 } from "@/lib/attendanceMonthEnd"
 import {
+  CY_DINGTALK_EXCEPTION_ACTOR,
+  CY_DINGTALK_EXCEPTION_NOTE,
+  hasCyDingTalkAutoConfirmException,
+} from "@/lib/attendanceAutoConfirmPolicy"
+import {
   loadAttendanceCalendarContext,
   sortAttendancePeople,
   type AttendanceHoliday,
@@ -3016,10 +3021,16 @@ async function requireNoOpenDingTalkPunchAnomalies(
   }))
 }
 
+type AutoConfirmTarget =
+  | { personId: string; kind: "dingTalk"; dingTalkUserId: string }
+  | { personId: string; kind: "cyDingTalkException"; dingTalkUserId: string | null }
+type AutoConfirmScope = "all" | "ordinary" | "cyDingTalkException"
+
 async function loadAutoConfirmSnapshot(
   client: SupabaseClient,
   period: { year: number; month: number },
   now: Date,
+  scope: AutoConfirmScope,
 ) {
   const sourceRevision = await getAttendanceSourceRevision(client)
   const [calendar, people, assignmentsResult, remindersResult, confirmationsResult] = await Promise.all([
@@ -3044,7 +3055,7 @@ async function loadAutoConfirmSnapshot(
   const confirmations = (confirmationsResult.data || []).map(asRow)
   const byPerson = new Map(confirmations.map((value) => [String(value.person_id), value]))
   const eligiblePeople = new Map(people.map((person) => [person.id, person]))
-  const targets: Array<{ personId: string; dingTalkUserId: string }> = []
+  const targets: AutoConfirmTarget[] = []
   if (cutoff && now.getTime() >= cutoff.getTime()) {
     const seen = new Set<string>()
     for (const value of reminders) {
@@ -3058,10 +3069,17 @@ async function loadAutoConfirmSnapshot(
       // checked RPC also rejects a review reopened after this snapshot.
       if (existing && (existing.status !== "pending" || !updatedAt ||
           !Number.isFinite(Date.parse(updatedAt)) || Date.parse(updatedAt) >= cutoff.getTime())) continue
+      const cyException = hasCyDingTalkAutoConfirmException(person, period)
+      if (scope === "ordinary" && cyException) continue
+      if (scope === "cyDingTalkException" && !cyException) continue
+      if (cyException) {
+        targets.push({ personId, kind: "cyDingTalkException", dingTalkUserId: person.dingTalkUserId?.trim() || null })
+        continue
+      }
       if (!person.dingTalkUserId?.trim()) {
         throw new Error("Attendance auto-confirm blocked: a pending person has no DingTalk identity.")
       }
-      targets.push({ personId, dingTalkUserId: person.dingTalkUserId.trim() })
+      targets.push({ personId, kind: "dingTalk", dingTalkUserId: person.dingTalkUserId.trim() })
     }
   }
   targets.sort((left, right) => left.personId.localeCompare(right.personId))
@@ -3094,50 +3112,66 @@ export async function autoConfirmOverdueAttendance(
     month: number
     people: Array<{ id: string; dingTalkUserId: string }>
   }) => Promise<void>,
+  scope: AutoConfirmScope = "all",
+  expectedCyDingTalkUserId?: string | null,
 ) {
   const period = previousMonthPeriod(now)
-  const initial = await loadAutoConfirmSnapshot(client, period, now)
+  const initial = await loadAutoConfirmSnapshot(client, period, now, scope)
   if (!initial.cutoff || now.getTime() < initial.cutoff.getTime()) {
     return { skipped: true, ...period, systemConfirmed: 0 }
   }
   const { cutoff, targets } = initial
+  if (scope === "cyDingTalkException" && expectedCyDingTalkUserId !== undefined &&
+    targets.some((target) => target.kind === "cyDingTalkException" &&
+      target.dingTalkUserId !== expectedCyDingTalkUserId)) {
+    throw new AttendanceSourceChangedError()
+  }
+  const dingTalkTargets = targets.flatMap((target) => target.kind === "dingTalk" ? [target] : [])
+  const linkedCyTargets = targets.flatMap((target) => target.kind === "cyDingTalkException" && target.dingTalkUserId
+    ? [{ personId: target.personId, dingTalkUserId: target.dingTalkUserId }] : [])
+  const identityTargets = [...dingTalkTargets, ...linkedCyTargets]
   if (targets.length) {
     const monthStart = hktTimestampForDateAndTime(dateRangeForMonth(period.year, period.month).start, "00:00")!
     if (monthStart < DINGTALK_ATTENDANCE_IMPORT_CUTOFF) {
       throw new Error("Attendance auto-confirm blocked: this month begins before the DingTalk import cutoff.")
     }
-    await requireMatchingHistoricalDingTalkIdentity(client, period, targets)
+    await requireMatchingHistoricalDingTalkIdentity(client, period, identityTargets)
     if (await getAttendanceSourceRevision(client) !== initial.sourceRevision) {
       throw new AttendanceSourceChangedError()
     }
-    await beforeCoverageCheck?.({
-      ...period,
-      people: targets.map((target) => ({ id: target.personId, dingTalkUserId: target.dingTalkUserId })),
-    })
+    if (dingTalkTargets.length) {
+      await beforeCoverageCheck?.({
+        ...period,
+        people: dingTalkTargets.map((target) => ({ id: target.personId, dingTalkUserId: target.dingTalkUserId })),
+      })
+    }
   }
   let verified = initial
-  if (beforeCoverageCheck && targets.length) {
-    verified = await loadAutoConfirmSnapshot(client, period, now)
+  if (beforeCoverageCheck && dingTalkTargets.length) {
+    verified = await loadAutoConfirmSnapshot(client, period, now, scope)
     if (verified.fingerprint !== initial.fingerprint) {
       throw new AttendanceSourceChangedError()
     }
   }
   const verifiedAt = new Date(Math.max(now.getTime(), Date.now()))
-  await requireMatchingHistoricalDingTalkIdentity(client, period, targets)
-  await requireFullMonthAttendanceSyncCoverage(client, period, targets, cutoff, verifiedAt)
+  await requireMatchingHistoricalDingTalkIdentity(client, period, identityTargets)
+  await requireFullMonthAttendanceSyncCoverage(client, period, dingTalkTargets, cutoff, verifiedAt)
   await requireNoOpenDingTalkPunchAnomalies(client, period, targets)
   if (await getAttendanceSourceRevision(client) !== verified.sourceRevision) {
     throw new AttendanceSourceChangedError()
   }
   let systemConfirmed = 0
-  for (const { personId } of targets) {
+  for (const target of targets) {
+    const { personId } = target
+    const cyException = target.kind === "cyDingTalkException"
     const { data, error } = await client.rpc("save_attendance_monthly_confirmation_checked", {
       p_person_id: personId,
       p_year: period.year,
       p_month: period.month,
       p_status: "confirmed",
-      p_note: "System confirmed after the second reminder. The employee may dispute the record directly with an administrator.",
-      p_actor: "system:attendance-auto-confirm",
+      p_note: cyException ? CY_DINGTALK_EXCEPTION_NOTE
+        : "System confirmed after the second reminder. The employee may dispute the record directly with an administrator.",
+      p_actor: cyException ? CY_DINGTALK_EXCEPTION_ACTOR : "system:attendance-auto-confirm",
       p_expected_revision: verified.sourceRevision,
       p_auto_cutoff: cutoff.toISOString(),
     })

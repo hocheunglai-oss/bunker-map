@@ -7,6 +7,7 @@ import {
 } from "@/lib/attendanceData"
 import { requeryAttendanceMonthForAutoConfirmation } from "@/lib/attendanceSync"
 import { previousMonthPeriod } from "@/lib/attendanceMonthEnd"
+import { hasCyDingTalkAutoConfirmException } from "@/lib/attendanceAutoConfirmPolicy"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -26,18 +27,54 @@ export async function GET(request: Request) {
     const service = getAttendanceServiceClient()
     const now = new Date()
     const period = previousMonthPeriod(now)
-    // Recheck the entire closed month for every linked person, including
-    // already-confirmed staff. A later DingTalk correction must reopen their
-    // record even when there is nobody left for this cron to auto-confirm.
-    const people = (await loadAttendancePeopleForPeriod(service, period.year, period.month))
+    // Keep CY's DingTalk requery separate. If a link is later added, a failed
+    // requery may have persisted only part of the month, so withhold his
+    // confirmation until a complete requery succeeds.
+    const linkedPeople = (await loadAttendancePeopleForPeriod(service, period.year, period.month))
       .filter((person) => person.dingTalkUserId?.trim())
+    const ordinaryPeople = linkedPeople
+      .filter((person) => !hasCyDingTalkAutoConfirmException(person, period))
       .map((person) => ({ id: person.id, dingtalkUserId: person.dingTalkUserId!.trim() }))
-    const syncSignal = AbortSignal.timeout(45_000)
-    await requeryAttendanceMonthForAutoConfirmation({
-      ...period, people, now: new Date(), supabase: service, signal: syncSignal,
-    })
-    const result = await autoConfirmOverdueAttendance(service, new Date())
-    return NextResponse.json({ success: true, ...result }, { headers: { "Cache-Control": "private, no-store" } })
+    const cyPeople = linkedPeople
+      .filter((person) => hasCyDingTalkAutoConfirmException(person, period))
+      .map((person) => ({ id: person.id, dingtalkUserId: person.dingTalkUserId!.trim() }))
+    const [ordinaryRequery, cyRequery] = await Promise.allSettled([
+      requeryAttendanceMonthForAutoConfirmation({
+        ...period, people: ordinaryPeople, now, supabase: service, signal: AbortSignal.timeout(45_000),
+      }),
+      requeryAttendanceMonthForAutoConfirmation({
+        ...period, people: cyPeople, now, supabase: service, signal: AbortSignal.timeout(45_000),
+      }),
+    ])
+    if (cyRequery.status === "rejected") {
+      console.error("CY attendance exception requery failed", cyRequery.reason)
+    }
+
+    // CY is checked independently so another employee's DingTalk failure or
+    // missing identity cannot prevent his authorized system confirmation.
+    const cyRequeryFailed = cyPeople.length > 0 && cyRequery.status === "rejected"
+    let cySystemConfirmed = 0
+    let cyConfirmationError: unknown = null
+    if (!cyRequeryFailed) {
+      try {
+        cySystemConfirmed = (await autoConfirmOverdueAttendance(
+          service, now, undefined, "cyDingTalkException", cyPeople[0]?.dingtalkUserId ?? null,
+        ))
+          .systemConfirmed
+      } catch (error) {
+        cyConfirmationError = error
+        console.error("CY attendance exception confirmation failed", error)
+      }
+    }
+    if (ordinaryRequery.status === "rejected") throw ordinaryRequery.reason
+    const result = await autoConfirmOverdueAttendance(service, now, undefined, "ordinary")
+    if (cyRequeryFailed) throw new Error("CY DingTalk requery failed; system confirmation withheld.")
+    if (cyConfirmationError !== null) throw cyConfirmationError
+    return NextResponse.json({
+      success: true, ...result, systemConfirmed: result.systemConfirmed + cySystemConfirmed,
+      cySystemConfirmed,
+      cyDingTalkRequery: cyPeople.length ? cyRequery.status : "not-linked",
+    }, { headers: { "Cache-Control": "private, no-store" } })
   } catch (error) {
     console.error("Attendance auto-confirm failed", error)
     return NextResponse.json({ message: "Attendance auto-confirm failed." }, { status: 500 })
