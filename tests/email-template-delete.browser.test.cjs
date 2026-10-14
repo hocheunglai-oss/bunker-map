@@ -1,0 +1,169 @@
+/* Bundles the actual editor. Synthetic local memory only; no business-data writes. */
+const assert = require("node:assert/strict")
+const http = require("node:http")
+const path = require("node:path")
+const fs = require("node:fs")
+const { build } = require("esbuild")
+
+async function main() {
+  const root = path.resolve(__dirname, "..")
+  const bundle = await build({ absWorkingDir: root, entryPoints: ["tests/fixtures/email-template-delete.tsx"], bundle: true, write: false, outdir: "template-delete-fixture", platform: "browser", format: "iife", jsx: "automatic", logLevel: "warning", define: { "process.env.NODE_ENV": '"development"' }, plugins: [{ name: "synthetic-auth-only", setup(builder) { builder.onResolve({ filter: /^@\/lib\/useSimpleAdminAuth$/ }, () => ({ path: path.join(root, "tests/fixtures/email-template-delete-auth.ts") })) } }] })
+  const assets = new Map(bundle.outputFiles.map(file => [`/${path.basename(file.path)}`, file.contents]))
+  const script = [...assets.keys()].find(name => name.endsWith(".js"))
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+    :root{--fc-admin-font:Arial,sans-serif;--fc-admin-page-bg:#f4f5f8;--fc-admin-panel-bg:#fff;--fc-admin-panel-soft-bg:#f8f9fc;--fc-admin-panel-text:#20232a;--fc-admin-heading:#20232a;--fc-admin-border:#ccd0d8;--fc-admin-border-soft:#dfe2e8;--fc-admin-muted:#69707d;--fc-text:#20232a;--fc-muted:#69707d;--fc-row-bg:#f4f5f8;--fc-row-text:#20232a;--fc-row-border:#dfe2e8;--fc-row-active-bg:#e7f2ff;--fc-row-active-text:#0054af;--fc-admin-button-bg:#f4f5f8;--fc-admin-button-text:#20232a;--fc-admin-button-border:#ccd0d8;--fc-admin-success-bg:#218838;--fc-admin-success-text:#fff;--fc-admin-success-border:#218838;--fc-admin-danger-bg:#dc001b;--fc-admin-danger-text:#fff;--fc-admin-danger-border:#dc001b;--fc-admin-link:#0672ed;--fc-accent:#0672ed;--fc-error:#b00020;--fc-tool-input-bg:#fff;--fc-tool-input-text:#20232a;--fc-input-border:#ccd0d8;--fc-admin-input-bg:#fff;--fc-admin-input-text:#20232a}
+    @media(prefers-color-scheme:dark){:root{--fc-admin-page-bg:#121820;--fc-admin-panel-bg:#1a2330;--fc-admin-panel-soft-bg:#202c3c;--fc-admin-panel-text:#eef3fa;--fc-admin-heading:#eef3fa;--fc-admin-border:#536072;--fc-admin-border-soft:#3d4d60;--fc-admin-muted:#b4c0d1;--fc-text:#eef3fa;--fc-muted:#b4c0d1;--fc-row-bg:#202c3c;--fc-row-text:#eef3fa;--fc-row-border:#536072;--fc-row-active-bg:#123f6b;--fc-row-active-text:#e1f0ff;--fc-admin-button-bg:#293648;--fc-admin-button-text:#eef3fa;--fc-admin-button-border:#536072;--fc-error:#ff91a2;--fc-tool-input-bg:#202c3c;--fc-tool-input-text:#eef3fa;--fc-input-border:#536072;--fc-admin-input-bg:#202c3c;--fc-admin-input-text:#eef3fa}}
+    *{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:var(--fc-admin-page-bg);color:var(--fc-text)}button,input,select,textarea{font:inherit}button:disabled{opacity:.55}input,textarea{min-width:0}
+    </style></head><body><div id="root"></div><script src="${script}"></script></body></html>`
+  const server = http.createServer((req,res) => { if (req.method !== "GET") { res.writeHead(405); return res.end() } const content = assets.get(new URL(req.url,"http://127.0.0.1").pathname); res.setHeader("Content-Type",content?"text/javascript":"text/html"); res.end(content||html) })
+  await new Promise(resolve => server.listen(0,"127.0.0.1",resolve))
+  const origin = `http://127.0.0.1:${server.address().port}`
+  const playwright = require("playwright")
+  const engine = process.env.BROWSER_ENGINE || "chromium"
+  const executablePath = engine === "webkit" ? process.env.WEBKIT_EXECUTABLE_PATH : process.env.CHROME_EXECUTABLE_PATH
+  const browser = await playwright[engine].launch({headless:true,...(executablePath?{executablePath}:{})})
+  const context = await browser.newContext({viewport:{width:1440,height:1000}})
+  const errors = []
+  await context.route("**/*",route=>new URL(route.request().url()).origin===origin?route.continue():route.abort())
+  let page
+  const requests = () => page.evaluate(()=>window.__templateDeleteHarness.requests)
+  async function reset() { if(page)await page.close();page=await context.newPage();page.setDefaultTimeout(8000);page.on("pageerror",error=>errors.push(error.message));await page.goto(origin);await page.getByRole("button",{name:"Synthetic A",exact:true}).click();await page.locator('input[value="Synthetic A"]').waitFor() }
+  async function remove() { page.once("dialog",dialog=>dialog.accept());await page.getByRole("button",{name:"Delete",exact:true}).click() }
+  try {
+    await reset()
+    await page.evaluate(()=>window.__templateDeleteHarness.failSaveIds.add("synthetic-a"))
+    await page.locator('input[value="Synthetic A"]').fill("Unsaved A")
+    await page.getByRole("button",{name:"Save Now",exact:true}).click()
+    await page.getByRole("alert").filter({hasText:"Template action failed."}).waitFor()
+    await page.getByRole("button",{name:"Synthetic B",exact:true}).click()
+    await page.locator('input[value="Synthetic B"]').waitFor()
+    await remove()
+    await page.waitForFunction(()=>window.__templateDeleteHarness.requests.some(r=>r.action==="delete-template"))
+    assert.equal((await requests()).filter(r=>r.action==="save-template").length,1,"deleting B must not retry or flush unrelated failed A")
+    assert.equal((await requests()).find(r=>r.action==="delete-template").id,"synthetic-b")
+    assert.equal(await page.getByRole("button",{name:"Unsaved A",exact:true}).count(),1,"unrelated unsaved draft remains")
+    console.log("PASS: unrelated failed autosave cannot block deletion or discard its draft")
+
+    await reset()
+    await page.evaluate(()=>window.__templateDeleteHarness.failSaveIds.add("synthetic-a"))
+    await page.locator('input[value="Synthetic A"]').fill("Failed target draft")
+    await page.getByRole("button",{name:"Save Now",exact:true}).click()
+    await page.getByRole("button",{name:"Retry Save",exact:true}).waitFor()
+    await remove()
+    await page.waitForFunction(()=>window.__templateDeleteHarness.templates.every(row=>row.id!=="synthetic-a"))
+    assert.deepEqual((await requests()).map(r=>r.action),["save-template","delete-template"],"a failed target draft does not need a successful save before confirmed deletion")
+    console.log("PASS: failed target autosave does not prevent confirmed deletion")
+
+    await reset()
+    await page.locator('input[value="Synthetic A"]').fill("Discard this confirmed-deletion draft")
+    await remove()
+    await page.waitForFunction(()=>window.__templateDeleteHarness.templates.every(row=>row.id!=="synthetic-a"))
+    await page.waitForTimeout(950)
+    assert.deepEqual((await requests()).map(r=>r.action),["delete-template"],"the deleted draft must never be saved or recreated by its timer")
+    console.log("PASS: confirmed deletion cancels target draft autosave; no recreation")
+
+    await reset()
+    await page.evaluate(()=>{window.__templateDeleteHarness.deferSave=true})
+    await page.locator('input[value="Synthetic A"]').fill("In-flight title")
+    await page.getByRole("button",{name:"Save Now",exact:true}).click()
+    await page.waitForFunction(()=>Boolean(window.__templateDeleteHarness.releaseSave))
+    await page.locator('input[value="In-flight title"]').fill("Newer unsaved draft during save")
+    await remove()
+    assert.equal(await page.getByRole("button",{name:"Delete",exact:true}).isDisabled(),true)
+    await page.getByRole("button",{name:"Delete",exact:true}).evaluate(element=>element.click())
+    assert.equal((await requests()).length,1,"delete waits for the in-flight target save")
+    await page.evaluate(()=>window.__templateDeleteHarness.releaseSave())
+    await page.waitForFunction(()=>window.__templateDeleteHarness.requests.length===2)
+    assert.equal((await requests())[1].expectedRevision,2,"delete uses the server revision returned by the completed save")
+    await page.waitForFunction(()=>window.__templateDeleteHarness.templates.every(row=>row.id!=="synthetic-a"))
+    assert.deepEqual((await requests()).map(r=>r.action),["save-template","delete-template"])
+    assert.equal((await requests())[1].expectedRevision,2,"delete uses the server revision returned by the completed save")
+    await page.waitForTimeout(950)
+    assert.equal((await requests()).length,2)
+    console.log("PASS: deletion waits for the current save, uses its revision, blocks double deletion")
+
+    await reset()
+    await page.evaluate(()=>{window.__templateDeleteHarness.deferSave=true;window.__templateDeleteHarness.conflictSave=true})
+    await page.locator('input[value="Synthetic A"]').fill("Conflicting in-flight draft")
+    await page.getByRole("button",{name:"Save Now",exact:true}).click()
+    await page.waitForFunction(()=>Boolean(window.__templateDeleteHarness.releaseSave))
+    await remove()
+    await page.evaluate(()=>window.__templateDeleteHarness.releaseSave())
+    await page.waitForFunction(()=>window.__templateDeleteHarness.requests.length>1 || Array.from(document.querySelectorAll("button")).some(button=>button.textContent==="Server Reloaded"))
+    await page.waitForFunction(()=>Array.from(document.querySelectorAll("button")).find(button=>button.textContent?.trim()==="Delete")?.disabled===false)
+    assert.deepEqual((await requests()).map(r=>r.action),["save-template"],"in-flight save conflict must abort this deletion before using a newly reloaded colleague revision")
+    await page.getByRole("alert").filter({hasText:"Template changed during save."}).waitFor()
+    assert.equal(await page.locator('input[value="Concurrent server change"]').count(),1)
+    assert.equal(await page.evaluate(()=>window.__templateDeleteHarness.templates.length),3)
+    await page.evaluate(()=>{window.__templateDeleteHarness.conflictSave=false})
+    await remove()
+    await page.waitForFunction(()=>window.__templateDeleteHarness.templates.every(row=>row.id!=="synthetic-a"))
+    assert.deepEqual((await requests()).map(r=>r.action),["save-template","delete-template"],"a fresh explicit confirmation may delete the reviewed server version")
+    assert.equal((await requests())[1].expectedRevision,2)
+    console.log("PASS: an in-flight save conflict aborts deletion and preserves the colleague's version")
+
+    await reset()
+    await page.evaluate(()=>{window.__templateDeleteHarness.failDelete=true})
+    await page.locator('input[value="Synthetic A"]').fill("Keep this draft if delete fails")
+    await remove()
+    await page.getByRole("alert").filter({hasText:"Synthetic deletion failure."}).waitFor()
+    assert.equal(await page.locator('input[value="Keep this draft if delete fails"]').count(),1)
+    assert.equal(await page.getByRole("button",{name:"Retry Save",exact:true}).count(),1)
+    await page.evaluate(()=>{window.__templateDeleteHarness.failDelete=false})
+    await page.getByRole("button",{name:"Retry Save",exact:true}).click()
+    await page.waitForFunction(()=>window.__templateDeleteHarness.templates[0].title==="Keep this draft if delete fails")
+    assert.deepEqual((await requests()).map(r=>r.action),["delete-template","save-template"])
+    console.log("PASS: failed deletion preserves draft and permits a safe save retry")
+
+    await reset()
+    await page.evaluate(()=>{window.__templateDeleteHarness.concurrentDelete=true})
+    await remove()
+    await page.getByRole("alert").filter({hasText:"Template changed before deletion."}).waitFor()
+    assert.equal(await page.locator('input[value="Concurrent server change"]').count(),1)
+    assert.equal(await page.evaluate(()=>window.__templateDeleteHarness.templates.length),3)
+    console.log("PASS: concurrent edit is never deleted; server version reloads")
+
+    await reset()
+    await page.evaluate(()=>{window.__templateDeleteHarness.templates.shift()})
+    await remove()
+    await page.waitForFunction(()=>window.__templateDeleteHarness.requests.some(r=>r.action==="delete-template"))
+    await page.getByRole("button",{name:"Synthetic A",exact:true}).waitFor({state:"hidden"})
+    assert.equal(await page.getByRole("button",{name:"Synthetic A",exact:true}).count(),0)
+    console.log("PASS: already-deleted target is removed locally without recreation")
+
+    await reset()
+    page.once("dialog",dialog=>dialog.dismiss())
+    await page.getByRole("button",{name:"Delete",exact:true}).click()
+    assert.deepEqual(await requests(),[],"cancelled deletion sends no write")
+    console.log("PASS: Cancel keeps the template and sends no write")
+
+    if (process.env.VISUAL_OUTPUT_DIR) {
+      fs.mkdirSync(process.env.VISUAL_OUTPUT_DIR,{recursive:true})
+      for (const width of [1440,320,390]) for (const colorScheme of ["light","dark"]) for (const signedout of [false,true]) {
+        const cell = await browser.newContext({viewport:{width,height:width===1440?1000:844},colorScheme,isMobile:width<768,hasTouch:width<768,deviceScaleFactor:1})
+        await cell.route("**/*",route=>new URL(route.request().url()).origin===origin?route.continue():route.abort())
+        const visual = await cell.newPage()
+        visual.on("pageerror",error=>errors.push(error.message))
+        try {
+          await visual.goto(`${origin}${signedout?"?signedout=1":""}`)
+          if (signedout) await visual.getByText("Please log in from the admin homepage first.").waitFor()
+          else { await visual.getByRole("button",{name:"Synthetic A",exact:true}).click();await visual.locator('input[value="Synthetic A"]').waitFor() }
+          await visual.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))
+          const overflow = await visual.evaluate(()=>({viewport:innerWidth,scroll:document.documentElement.scrollWidth}))
+          assert.ok(overflow.scroll<=overflow.viewport+1,`${engine} ${width} ${colorScheme} ${signedout?"signedout":"signedin"} has horizontal overflow: ${JSON.stringify(overflow)}`)
+          await visual.screenshot({path:path.join(process.env.VISUAL_OUTPUT_DIR,`${engine}-${width}-${colorScheme}-${signedout?"out":"in"}.png`),fullPage:true})
+          if (!signedout) {
+            visual.once("dialog",dialog=>dialog.accept())
+            await visual.getByRole("button",{name:"Delete",exact:true}).click()
+            await visual.waitForFunction(()=>window.__templateDeleteHarness.templates.every(row=>row.id!=="synthetic-a"))
+            await visual.getByRole("button",{name:"Synthetic A",exact:true}).waitFor({state:"hidden"})
+            assert.equal(await visual.getByRole("button",{name:"Synthetic A",exact:true}).count(),0)
+          } else assert.equal(await visual.evaluate(()=>window.__templateDeleteHarness.requests.length),0)
+          console.log(`PASS: ${engine} ${width} ${colorScheme} ${signedout?"signedout":"signedin + delete"}; no horizontal overflow`)
+        } finally { await cell.close() }
+      }
+    }
+    assert.deepEqual(errors,[])
+  } finally { await context.close();await browser.close();await new Promise(resolve=>server.close(resolve)) }
+}
+main().catch(error=>{console.error(error);process.exitCode=1})
