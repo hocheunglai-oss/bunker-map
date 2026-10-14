@@ -8,6 +8,8 @@ import {
   AttendanceValidationError,
   AttendanceAlreadyConfirmedError,
   AttendancePunchReviewRequiredError,
+  AttendanceSyncReviewRequiredError,
+  AttendanceIdentityReviewRequiredError,
   AttendanceSourceChangedError,
   attendancePersonBelongsToAdminUser,
   deleteAttendanceLeave,
@@ -55,7 +57,9 @@ function errorStatus(error: unknown) {
   if (error.message === "Unauthorized") return 401
   if (error.message === "Forbidden") return 403
   if (error instanceof AttendanceSourceChangedError || error instanceof AttendanceAlreadyConfirmedError ||
-      error instanceof AttendancePunchReviewRequiredError) return 409
+      error instanceof AttendancePunchReviewRequiredError ||
+      error instanceof AttendanceSyncReviewRequiredError ||
+      error instanceof AttendanceIdentityReviewRequiredError) return 409
   if (error instanceof AttendanceValidationError) return 400
   return 500
 }

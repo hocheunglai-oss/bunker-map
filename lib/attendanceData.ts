@@ -189,6 +189,20 @@ export class AttendancePunchReviewRequiredError extends Error {
   }
 }
 
+export class AttendanceSyncReviewRequiredError extends Error {
+  constructor() {
+    super("DingTalk synchronization is incomplete for this attendance period. Recheck the source before confirmation.")
+    this.name = "AttendanceSyncReviewRequiredError"
+  }
+}
+
+export class AttendanceIdentityReviewRequiredError extends Error {
+  constructor() {
+    super("DingTalk punches from a different linked identity need administrator review before this attendance period can be confirmed.")
+    this.name = "AttendanceIdentityReviewRequiredError"
+  }
+}
+
 export async function getAttendanceSourceRevision(client: SupabaseClient) {
   const { data, error } = await client.rpc("attendance_source_revision")
   throwIfError(error, "Could not read the attendance source revision.")
@@ -2507,6 +2521,12 @@ export async function saveAttendanceMonthlyConfirmation(
   }
   if (error?.message?.includes("ATTENDANCE_DINGTALK_ANOMALY_OPEN:")) {
     throw new AttendancePunchReviewRequiredError()
+  }
+  if (error?.message?.includes("ATTENDANCE_SYNC_INCOMPLETE:")) {
+    throw new AttendanceSyncReviewRequiredError()
+  }
+  if (error?.message?.includes("ATTENDANCE_DINGTALK_IDENTITY_MISMATCH:")) {
+    throw new AttendanceIdentityReviewRequiredError()
   }
   throwIfError(error, confirmed ? "Could not save monthly confirmation." : "Could not reset monthly confirmation.")
   const confirmation = Array.isArray(data) ? data[0] : data

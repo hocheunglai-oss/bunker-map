@@ -19,12 +19,16 @@ const migration = readFileSync(new URL(
   "../supabase/migrations/20261014044017_attendance_failed_sync_invalidation.sql",
   import.meta.url,
 ), "utf8")
+const confirmationGuardMigration = readFileSync(new URL(
+  "../supabase/migrations/20261014052239_attendance_unresolved_sync_confirmation_guard.sql",
+  import.meta.url,
+), "utf8")
 
 const personA = "11111111-1111-4111-8111-111111111111"
 const personB = "22222222-2222-4222-8222-222222222222"
 const personC = "33333333-3333-4333-8333-333333333333"
 
-async function setup() {
+async function setup({ legacyRuns = [], legacyRaw = [], preGuardConfirmations = [] } = {}) {
   const db = new PGlite()
   await db.exec(`
     create role anon;
@@ -48,7 +52,11 @@ async function setup() {
       portion text, code text, source text, note text, created_by text,
       updated_by text, units numeric
     );
-    create table public.attendance_manual_overrides (id uuid primary key, person_id uuid, work_date date);
+    create table public.attendance_manual_overrides (
+      id uuid primary key default gen_random_uuid(), person_id uuid, work_date date,
+      action text, raw_punch_id uuid, check_type text, punch_time timestamptz,
+      reason text, created_by text, updated_by text
+    );
     create table public.attendance_team_assignments (
       id uuid primary key, person_id uuid, effective_from date, effective_to date,
       updated_at timestamptz
@@ -149,6 +157,44 @@ async function setup() {
     (id,staff_code,team,is_active,employment_start_date,dingtalk_user_id)
     values ($1,'B','BT',true,'2026-09-01','ding-b'),
       ($2,'C','BT',true,'2026-09-01','ding-c')`, [personB, personC])
+  for (const run of legacyRuns) {
+    await db.query(`insert into public.attendance_sync_runs
+      (window_from,window_to,status,started_at,completed_at,
+       requested_people,people_requested,failure_scope)
+      values ($1,$2,$3,'2026-10-14T09:00:00Z',$4,
+        $5::jsonb,$6,$7::jsonb)`, [run.from, run.to, run.status ?? 'partial',
+      run.status === 'running' ? null : '2026-10-14T10:00:00Z',
+      JSON.stringify(run.manifest ?? {}), run.count ?? 0,
+      JSON.stringify(run.scope ?? { unknown: true, affected: [] })])
+  }
+  for (const raw of legacyRaw) {
+    const rawId = (await db.query(`insert into public.attendance_raw_punches
+      (person_id,work_date,dingtalk_user_id,source_type)
+      values ($1,$2,$3,$4) returning id`,
+    [raw.person, raw.date, raw.userId, raw.sourceType])).rows[0].id
+    if (raw.overrideAction) {
+      await db.query(`insert into public.attendance_manual_overrides
+        (person_id,work_date,action,raw_punch_id,check_type,punch_time,
+         reason,created_by,updated_by)
+        values ($1,$2,$3,$4,$5,$6,'Reviewed identity rotation','manager','manager')`,
+      [raw.person, raw.date, raw.overrideAction,
+        raw.overrideAction === "exclude" ? rawId : null,
+        raw.overrideAction === "replace" ? "OnDuty" : null,
+        raw.overrideAction === "replace" ? "2026-09-15T01:00:00Z" : null])
+    }
+  }
+  for (const confirmation of preGuardConfirmations) {
+    const revision = Number((await db.query(
+      "select revision from private.attendance_source_revision_state",
+    )).rows[0].revision)
+    await db.query(`insert into public.attendance_monthly_confirmations
+      (person_id,year,month,status,confirmed_at,confirmed_by,
+       confirmed_source_revision,note,created_by,updated_by)
+      values ($1,$2,$3,'confirmed',clock_timestamp(),'manager',$4,$5,'manager','manager')`,
+    [confirmation.person, confirmation.year, confirmation.month, revision,
+      confirmation.note ?? ''])
+  }
+  await db.exec(confirmationGuardMigration)
   const confirm = async (person, month) => {
     const revision = Number((await db.query(
       "select revision from private.attendance_source_revision_state",
@@ -163,13 +209,16 @@ async function setup() {
     [person, month, revision])
   }
   const run = async ({ from, to, status = "running", manifest = {}, count = 0,
-    scope = { unknown: true, affected: [] } }) => {
-    const completed = status === "running" ? null : "2026-10-14T10:00:00Z"
+    scope = { unknown: true, affected: [] },
+    startedAt = "2026-10-14T09:00:00Z", completedAt = "2026-10-14T10:00:00Z",
+    attempted = status === "succeeded" ? 1 : 0 }) => {
+    const completed = status === "running" ? null : completedAt
     return (await db.query(`insert into public.attendance_sync_runs
-      (window_from,window_to,status,completed_at,requested_people,people_requested,failure_scope)
-      values ($1,$2,$3,$4,$5::jsonb,$6,$7::jsonb) returning id`,
-    [from, to, status, completed, JSON.stringify(manifest), count,
-      JSON.stringify(scope)])).rows[0].id
+      (window_from,window_to,status,started_at,completed_at,
+       requested_people,people_requested,batches_attempted,failure_scope)
+      values ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9::jsonb) returning id`,
+    [from, to, status, startedAt, completed, JSON.stringify(manifest), count,
+      attempted, JSON.stringify(scope)])).rows[0].id
   }
   const finish = async (id, { status = "partial", manifest = {}, count = 0,
     scope = { unknown: true, affected: [] } } = {}) => {
@@ -270,6 +319,12 @@ test("an unchanged terminal run cannot reset a later reviewed confirmation", asy
       status: "failed", manifest: { [personA]: "ding-a" }, count: 1,
     })
     assert.deepEqual(await app.statuses(), [[personA, 9, "pending"]])
+    await assert.rejects(app.confirm(personA, 9), /ATTENDANCE_SYNC_INCOMPLETE/)
+    await app.run({
+      from: "2026-09-10T00:00:00Z", to: "2026-09-11T00:00:00Z",
+      status: "succeeded", manifest: { [personA]: "ding-a" }, count: 1,
+      startedAt: "2026-10-14T11:00:00Z", completedAt: "2026-10-14T12:00:00Z",
+    })
     await app.confirm(personA, 9)
     await app.db.query(`update public.attendance_sync_runs set status='failed' where id=$1`, [runId])
     assert.deepEqual(await app.statuses(), [[personA, 9, "confirmed"]])
@@ -371,5 +426,420 @@ test("DingTalk or linked admin identity changes reopen that person's confirmed h
     } finally {
       await app.db.close()
     }
+  }
+})
+
+test("a malformed punch blocks only the affected person's month until that day is rechecked", async () => {
+  const app = await setup()
+  try {
+    await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+      status: "partial", manifest: { [personA]: "ding-a" }, count: 1,
+      scope: { unknown: false, affected: [{ person_id: personA, work_date: "2026-09-11" }] },
+    })
+    await assert.rejects(app.confirm(personA, 9), /ATTENDANCE_SYNC_INCOMPLETE/)
+    await app.confirm(personB, 9)
+    await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+      status: "succeeded", manifest: { [personA]: "old-ding-a" }, count: 1,
+      startedAt: "2026-10-14T11:00:00Z", completedAt: "2026-10-14T12:00:00Z",
+    })
+    await assert.rejects(app.confirm(personA, 9), /ATTENDANCE_SYNC_INCOMPLETE/)
+    await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+      status: "succeeded", manifest: { [personA]: "ding-a" }, count: 1,
+      startedAt: "2026-10-14T11:00:00Z", completedAt: "2026-10-14T12:00:00Z",
+    })
+    await app.confirm(personA, 9)
+    assert.deepEqual(await app.statuses(), [
+      [personA, 9, "confirmed"], [personB, 9, "confirmed"],
+    ])
+  } finally {
+    await app.db.close()
+  }
+})
+
+test("an unknown failed window needs later complete coverage; an earlier success cannot clear it", async () => {
+  const app = await setup()
+  try {
+    const manifest = { [personA]: "ding-a" }
+    await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-12T16:00:00Z",
+      status: "succeeded", manifest, count: 1,
+      startedAt: "2026-10-14T07:00:00Z", completedAt: "2026-10-14T08:00:00Z",
+    })
+    await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-12T16:00:00Z",
+      status: "failed", manifest, count: 1,
+    })
+    await assert.rejects(app.confirm(personA, 9), /ATTENDANCE_SYNC_INCOMPLETE/)
+    await app.confirm(personB, 9)
+    await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+      status: "succeeded", manifest, count: 1,
+      startedAt: "2026-10-14T11:00:00Z", completedAt: "2026-10-14T12:00:00Z",
+    })
+    await assert.rejects(app.confirm(personA, 9), /ATTENDANCE_SYNC_INCOMPLETE/)
+    await app.run({
+      from: "2026-09-11T16:00:00Z", to: "2026-09-12T16:00:00Z",
+      status: "succeeded", manifest, count: 1,
+      startedAt: "2026-10-14T11:00:00Z", completedAt: "2026-10-14T12:00:00Z",
+    })
+    await app.confirm(personA, 9)
+    assert.deepEqual(await app.statuses(), [
+      [personA, 9, "confirmed"], [personB, 9, "confirmed"],
+    ])
+  } finally {
+    await app.db.close()
+  }
+})
+
+test("a September sync failure blocks December annual approval but not December monthly approval", async () => {
+  const app = await setup()
+  try {
+    const revision = async () => app.revision()
+    const save = async (person, note) => app.db.query(`select * from
+      public.save_attendance_monthly_confirmation_checked(
+        $1,2025,12,'confirmed',$2,'manager',$3)`,
+    [person, note, await revision()])
+    await app.run({
+      from: "2025-09-10T16:00:00Z", to: "2025-09-11T16:00:00Z",
+      status: "partial", manifest: { [personA]: "ding-a" }, count: 1,
+      scope: { unknown: false, affected: [{ person_id: personA, work_date: "2025-09-11" }] },
+    })
+    assert.equal((await save(personA, "")).rows[0].status, "confirmed")
+    await assert.rejects(save(personA, "annual-summary"), /ATTENDANCE_SYNC_INCOMPLETE/)
+    assert.equal((await save(personB, "annual-summary")).rows[0].status, "confirmed")
+    await app.run({
+      from: "2025-09-10T16:00:00Z", to: "2025-09-11T16:00:00Z",
+      status: "succeeded", manifest: { [personA]: "ding-a" }, count: 1,
+      startedAt: "2026-10-14T11:00:00Z", completedAt: "2026-10-14T12:00:00Z",
+    })
+    assert.equal((await save(personA, "annual-summary")).rows[0].note, "annual-summary")
+  } finally {
+    await app.db.close()
+  }
+})
+
+test("a ledger-only partial sync leaves confirmation to the anomaly guard", async () => {
+  const app = await setup()
+  try {
+    await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+      status: "partial", manifest: { [personA]: "ding-a" }, count: 1,
+      scope: { unknown: false, affected: [] },
+    })
+    await app.confirm(personA, 9)
+    assert.deepEqual(await app.statuses(), [[personA, 9, "confirmed"]])
+  } finally {
+    await app.db.close()
+  }
+})
+
+test("an unknown person on a known date blocks each staff member until their own recheck", async () => {
+  const app = await setup()
+  try {
+    await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+      status: "partial", manifest: { [personA]: "ding-a", [personB]: "ding-b" }, count: 2,
+      scope: { unknown: false, affected: [{ person_id: null, work_date: "2026-09-11" }] },
+    })
+    for (const person of [personA, personB]) {
+      await assert.rejects(app.confirm(person, 9), /ATTENDANCE_SYNC_INCOMPLETE/)
+    }
+    await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+      status: "succeeded", manifest: { [personA]: "ding-a" }, count: 1,
+      startedAt: "2026-10-14T11:00:00Z", completedAt: "2026-10-14T12:00:00Z",
+    })
+    await app.confirm(personA, 9)
+    await assert.rejects(app.confirm(personB, 9), /ATTENDANCE_SYNC_INCOMPLETE/)
+    await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+      status: "succeeded", manifest: { [personB]: "ding-b" }, count: 1,
+      startedAt: "2026-10-14T11:00:00Z", completedAt: "2026-10-14T12:00:00Z",
+    })
+    await app.confirm(personB, 9)
+  } finally {
+    await app.db.close()
+  }
+})
+
+test("known unknown-person scope with a valid manifest excludes an unlinked manual-source person", async () => {
+  const app = await setup()
+  try {
+    await app.db.query(`update public.attendance_people set dingtalk_user_id=null
+      where id=$1`, [personC])
+    await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+      status: "partial", manifest: { [personA]: "ding-a" }, count: 1,
+      scope: { unknown: false, affected: [{ person_id: null, work_date: "2026-09-11" }] },
+    })
+    await assert.rejects(app.confirm(personA, 9), /ATTENDANCE_SYNC_INCOMPLETE/)
+    await app.confirm(personB, 9)
+    await app.confirm(personC, 9)
+
+    await app.run({
+      from: "2025-09-10T16:00:00Z", to: "2025-09-11T16:00:00Z",
+      status: "partial", manifest: { [personA]: "ding-a" }, count: 1,
+      scope: { unknown: false, affected: [{ person_id: null, work_date: "2025-09-11" }] },
+    })
+    const annual = async (person) => app.db.query(`select * from
+      public.save_attendance_monthly_confirmation_checked(
+        $1,2025,12,'confirmed','annual-summary','manager',$2)`,
+    [person, await app.revision()])
+    await assert.rejects(annual(personA), /ATTENDANCE_SYNC_INCOMPLETE/)
+    assert.equal((await annual(personC)).rows[0].status, "confirmed")
+  } finally {
+    await app.db.close()
+  }
+})
+
+test("a bad scoped date outside the queried window cannot be silently reconfirmed", async () => {
+  const app = await setup()
+  try {
+    await app.run({
+      from: "2026-10-10T16:00:00Z", to: "2026-10-11T16:00:00Z",
+      status: "partial", manifest: { [personA]: "ding-a" }, count: 1,
+      scope: { unknown: false, affected: [{ person_id: personA, work_date: "2026-09-11" }] },
+    })
+    await assert.rejects(app.confirm(personA, 9), /ATTENDANCE_SYNC_INCOMPLETE/)
+    await app.confirm(personB, 9)
+    await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+      status: "succeeded", manifest: { [personA]: "ding-a" }, count: 1,
+      startedAt: "2026-10-14T11:00:00Z", completedAt: "2026-10-14T12:00:00Z",
+    })
+    await app.confirm(personA, 9)
+  } finally {
+    await app.db.close()
+  }
+})
+
+test("migration skips unidentifiable legacy failures and running rows but opts in known evidence", async () => {
+  const app = await setup({ legacyRuns: [
+    {
+      from: "2026-08-20T16:00:00Z", to: "2026-08-21T16:00:00Z",
+    },
+    {
+      from: "2026-08-21T16:00:00Z", to: "2026-08-22T16:00:00Z",
+      status: "running",
+    },
+    {
+      from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+      scope: { unknown: false, affected: [{ person_id: personA, work_date: "2026-09-11" }] },
+    },
+    {
+      from: "2026-10-10T16:00:00Z", to: "2026-10-11T16:00:00Z",
+      manifest: { [personA]: "ding-a" }, count: 1,
+    },
+  ] })
+  try {
+    const flags = (await app.db.query(`select confirmation_guard_applies
+      from public.attendance_sync_runs order by window_from`)).rows
+      .map((row) => row.confirmation_guard_applies)
+    assert.deepEqual(flags, [false, false, true, true])
+    await app.confirm(personA, 8)
+    await assert.rejects(app.confirm(personA, 9), /ATTENDANCE_SYNC_INCOMPLETE/)
+    await assert.rejects(app.confirm(personA, 10), /ATTENDANCE_SYNC_INCOMPLETE/)
+    await app.confirm(personB, 9)
+    await app.confirm(personB, 10)
+  } finally {
+    await app.db.close()
+  }
+})
+
+test("a future stuck running sync blocks until later successful rechecks cover each person", async () => {
+  const app = await setup()
+  try {
+    await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+      status: "running",
+    })
+    const flag = (await app.db.query(`select confirmation_guard_applies from
+      public.attendance_sync_runs where status='running'`)).rows[0].confirmation_guard_applies
+    assert.equal(flag, true)
+    for (const person of [personA, personB]) {
+      await assert.rejects(app.confirm(person, 9), /ATTENDANCE_SYNC_INCOMPLETE/)
+    }
+    await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+      status: "succeeded", manifest: { [personA]: "ding-a" }, count: 1,
+      startedAt: "2026-10-14T11:00:00Z", completedAt: "2026-10-14T12:00:00Z",
+    })
+    await app.confirm(personA, 9)
+    await assert.rejects(app.confirm(personB, 9), /ATTENDANCE_SYNC_INCOMPLETE/)
+    await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+      status: "succeeded", manifest: { [personB]: "ding-b" }, count: 1,
+      startedAt: "2026-10-14T11:00:00Z", completedAt: "2026-10-14T12:00:00Z",
+    })
+    await app.confirm(personB, 9)
+  } finally {
+    await app.db.close()
+  }
+})
+
+test("new empty-manifest failures default to guarded and require each person's later recheck", async () => {
+  const app = await setup()
+  try {
+    await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+      status: "failed",
+    })
+    const flag = (await app.db.query(`select confirmation_guard_applies from
+      public.attendance_sync_runs where status='failed'`)).rows[0].confirmation_guard_applies
+    assert.equal(flag, true)
+    for (const person of [personA, personB]) {
+      await assert.rejects(app.confirm(person, 9), /ATTENDANCE_SYNC_INCOMPLETE/)
+    }
+    await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+      status: "succeeded", manifest: { [personA]: "ding-a" }, count: 1,
+      startedAt: "2026-10-14T11:00:00Z", completedAt: "2026-10-14T12:00:00Z",
+    })
+    await app.confirm(personA, 9)
+    await assert.rejects(app.confirm(personB, 9), /ATTENDANCE_SYNC_INCOMPLETE/)
+  } finally {
+    await app.db.close()
+  }
+})
+
+test("guard date bounds follow running windows, known dates, and completed success", async () => {
+  const app = await setup()
+  try {
+    const id = await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+      status: "running",
+    })
+    const period = async () => (await app.db.query(`select
+      lower(confirmation_guard_period)::text as first_date,
+      upper(confirmation_guard_period)::text as next_date
+      from public.attendance_sync_runs where id=$1`, [id])).rows[0]
+    assert.deepEqual(await period(), {
+      first_date: "2026-09-11", next_date: "2026-09-12",
+    })
+    await app.finish(id, {
+      status: "partial", manifest: { [personA]: "ding-a" }, count: 1,
+      scope: { unknown: false, affected: [{ person_id: personA, work_date: "2026-10-09" }] },
+    })
+    assert.deepEqual(await period(), {
+      first_date: "2026-10-09", next_date: "2026-10-10",
+    })
+    await app.finish(id, { status: "succeeded", manifest: { [personA]: "ding-a" }, count: 1 })
+    assert.deepEqual(await period(), { first_date: null, next_date: null })
+    const index = (await app.db.query(`select count(*)::integer as count from pg_indexes
+      where schemaname='public' and indexname='attendance_sync_runs_guard_period_idx'`)).rows[0]
+    assert.equal(index.count, 1)
+  } finally {
+    await app.db.close()
+  }
+})
+
+test("migration reopens only previously confirmed months and annual rows with unresolved evidence", async () => {
+  const app = await setup({
+    legacyRuns: [
+      {
+        from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+        scope: { unknown: false, affected: [{ person_id: personA, work_date: "2026-09-11" }] },
+      },
+      {
+        from: "2025-09-10T16:00:00Z", to: "2025-09-11T16:00:00Z",
+        scope: { unknown: false, affected: [{ person_id: personA, work_date: "2025-09-11" }] },
+      },
+    ],
+    preGuardConfirmations: [
+      { person: personA, year: 2026, month: 9 },
+      { person: personB, year: 2026, month: 9 },
+      { person: personA, year: 2025, month: 12, note: "annual-summary" },
+    ],
+  })
+  try {
+    const rows = (await app.db.query(`select person_id,year,month,status,updated_by
+      from public.attendance_monthly_confirmations order by year,month,person_id`)).rows
+    assert.deepEqual(rows.map((row) => [row.person_id, row.year, row.month, row.status]), [
+      [personA, 2025, 12, "pending"],
+      [personA, 2026, 9, "pending"],
+      [personB, 2026, 9, "confirmed"],
+    ])
+    assert.equal(rows[0].updated_by, "system:attendance-source-review")
+    assert.equal(rows[1].updated_by, "system:attendance-source-review")
+  } finally {
+    await app.db.close()
+  }
+})
+
+test("DingTalk identity guard reopens later mismatches but preserves legacy XLS history", async () => {
+  const app = await setup({
+    legacyRaw: [
+      { person: personA, date: "2026-08-12", userId: "legacy-id", sourceType: "LEGACY_XLS" },
+      { person: personA, date: "2026-09-15", userId: "old-ding-a", sourceType: "DINGTALK" },
+    ],
+    preGuardConfirmations: [
+      { person: personA, year: 2026, month: 8 },
+      { person: personA, year: 2026, month: 9 },
+      { person: personA, year: 2026, month: 12, note: "annual-summary" },
+    ],
+  })
+  try {
+    assert.deepEqual(await app.statuses(), [
+      [personA, 8, "confirmed"], [personA, 9, "pending"], [personA, 12, "pending"],
+    ])
+    await app.confirm(personA, 8)
+    await assert.rejects(app.confirm(personA, 9), /ATTENDANCE_DINGTALK_IDENTITY_MISMATCH/)
+    await app.db.query(`update public.attendance_people set dingtalk_user_id=null
+      where id=$1`, [personA])
+    await assert.rejects(app.confirm(personA, 9), /ATTENDANCE_DINGTALK_IDENTITY_MISMATCH/)
+  } finally {
+    await app.db.close()
+  }
+})
+
+test("an audited raw exclusion clears an old-ID mismatch, but a replacement alone does not", async () => {
+  const app = await setup({
+    legacyRaw: [
+      { person: personA, date: "2026-09-15", userId: "old-ding-a",
+        sourceType: "DINGTALK", overrideAction: "exclude" },
+      { person: personB, date: "2026-09-15", userId: "old-ding-b",
+        sourceType: "DINGTALK", overrideAction: "replace" },
+    ],
+    preGuardConfirmations: [
+      { person: personA, year: 2026, month: 9 },
+      { person: personA, year: 2026, month: 12, note: "annual-summary" },
+      { person: personB, year: 2026, month: 9 },
+      { person: personB, year: 2026, month: 12, note: "annual-summary" },
+    ],
+  })
+  try {
+    assert.deepEqual(await app.statuses(), [
+      [personA, 9, "confirmed"], [personA, 12, "confirmed"],
+      [personB, 9, "pending"], [personB, 12, "pending"],
+    ])
+    await app.confirm(personA, 9)
+    await app.confirm(personA, 12)
+    await assert.rejects(app.confirm(personB, 9), /ATTENDANCE_DINGTALK_IDENTITY_MISMATCH/)
+    await assert.rejects(app.confirm(personB, 12), /ATTENDANCE_DINGTALK_IDENTITY_MISMATCH/)
+  } finally {
+    await app.db.close()
+  }
+})
+
+test("a failed query for an old DingTalk ID cannot be cleared by a new-ID success", async () => {
+  const app = await setup()
+  try {
+    await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+      status: "partial", manifest: { [personA]: "old-ding-a" }, count: 1,
+      scope: { unknown: false, affected: [{ person_id: personA, work_date: "2026-09-11" }] },
+    })
+    await app.run({
+      from: "2026-09-10T16:00:00Z", to: "2026-09-11T16:00:00Z",
+      status: "succeeded", manifest: { [personA]: "ding-a" }, count: 1,
+      startedAt: "2026-10-14T11:00:00Z", completedAt: "2026-10-14T12:00:00Z",
+    })
+    await assert.rejects(app.confirm(personA, 9), /ATTENDANCE_SYNC_INCOMPLETE/)
+    await app.confirm(personB, 9)
+  } finally {
+    await app.db.close()
   }
 })

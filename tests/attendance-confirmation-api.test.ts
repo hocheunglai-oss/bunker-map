@@ -5,6 +5,8 @@ import { transformSync } from "esbuild"
 import {
   AttendanceAlreadyConfirmedError,
   AttendancePunchReviewRequiredError,
+  AttendanceSyncReviewRequiredError,
+  AttendanceIdentityReviewRequiredError,
   AttendanceSourceChangedError,
   AttendanceValidationError,
   attendancePersonBelongsToAdminUser,
@@ -130,7 +132,8 @@ function harness(options: {
     },
     "@/lib/attendanceData": {
       AttendanceValidationError, AttendanceSourceChangedError, AttendanceAlreadyConfirmedError,
-      AttendancePunchReviewRequiredError,
+      AttendancePunchReviewRequiredError, AttendanceSyncReviewRequiredError,
+      AttendanceIdentityReviewRequiredError,
       attendancePersonBelongsToAdminUser, saveAttendanceMonthlyConfirmation,
       async saveAttendanceDayEdit(actualClient: unknown, input: unknown, actor: string) {
         assert.equal(actualClient, client)
@@ -187,6 +190,20 @@ test("an unresolved DingTalk correction returns a clear confirmation conflict", 
   const response = await app.request(confirmation())
   assert.equal(response.status, 409)
   assert.match(response.body.message, /DingTalk punch discrepancy needs administrator review/)
+})
+
+test("an unresolved DingTalk sync failure returns a clear confirmation conflict", async () => {
+  const app = harness({ rpcError: "ATTENDANCE_SYNC_INCOMPLETE: recheck required" })
+  const response = await app.request(confirmation())
+  assert.equal(response.status, 409)
+  assert.match(response.body.message, /synchronization is incomplete.*Recheck the source/)
+})
+
+test("a historical DingTalk identity mismatch returns a clear confirmation conflict", async () => {
+  const app = harness({ rpcError: "ATTENDANCE_DINGTALK_IDENTITY_MISMATCH: review required" })
+  const response = await app.request(confirmation())
+  assert.equal(response.status, 409)
+  assert.match(response.body.message, /different linked identity.*administrator review/)
 })
 
 test("View user cannot confirm another user's statement or their inactive attendance record", async () => {
