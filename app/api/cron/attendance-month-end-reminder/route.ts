@@ -40,13 +40,19 @@ export async function GET(request: Request) {
 
   try {
     const client = getAttendanceServiceClient()
-    const [confirmationReminder, annualSummary] = await Promise.all([
-      sendAttendanceSecondReminders(client),
-      sendAttendanceAnnualSummaryReminders(client),
-    ])
+    const confirmationReminder = await sendAttendanceSecondReminders(client)
+    const annualSummary = await sendAttendanceAnnualSummaryReminders(client)
     const failed = confirmationReminder.failed + annualSummary.failed
-    return privateJson({ success: failed === 0, confirmationReminder, annualSummary }, {
-      status: failed > 0 ? 502 : 200,
+    const unavailable = confirmationReminder.unavailable
+    const blocked = annualSummary.blocked
+    if (unavailable > 0) {
+      console.error(`Attendance reminder has ${unavailable} eligible staff without a usable linked account.`)
+    }
+    if (blocked > 0) {
+      console.error(`Attendance year-end summary withheld for ${blocked} staff with unresolved DingTalk punch discrepancies.`)
+    }
+    return privateJson({ success: failed === 0 && unavailable === 0 && blocked === 0, confirmationReminder, annualSummary }, {
+      status: failed > 0 || unavailable > 0 || blocked > 0 ? 502 : 200,
     })
   } catch (error) {
     console.error("Attendance month-end reminder failed", error)

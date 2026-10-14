@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs"
 import { afterEach, beforeEach, mock, test } from "node:test"
 import { transformSync } from "esbuild"
 import {
+  AttendanceAlreadyConfirmedError,
+  AttendancePunchReviewRequiredError,
+  AttendanceSourceChangedError,
   AttendanceValidationError,
   attendancePersonBelongsToAdminUser,
   saveAttendanceMonthlyConfirmation,
@@ -30,6 +33,7 @@ function harness(options: {
   permission?: "none" | "view" | "edit"
   adminUserId?: string | null
   signedIn?: boolean
+  rpcError?: string
 } = {}) {
   const permission = options.permission ?? "view"
   const session = {
@@ -46,6 +50,21 @@ function harness(options: {
   const edits: unknown[] = []
   let clientCreations = 0
   const client = {
+    async rpc(name: string, args: Record<string, unknown>) {
+      assert.equal(name, "save_attendance_monthly_confirmation_checked")
+      assert.equal(args.p_expected_revision, args.p_status === "confirmed" ? 7 : null)
+      writes.push(args)
+      if (options.rpcError) return { data: null, error: { message: options.rpcError } }
+      return {
+        data: [{ id: "synthetic-confirmation", person_id: args.p_person_id,
+          year: args.p_year, month: args.p_month, status: args.p_status,
+          confirmed_at: args.p_status === "confirmed" ? new Date().toISOString() : null,
+          confirmed_by: args.p_status === "confirmed" ? args.p_actor : null,
+          note: args.p_note, created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString() }],
+        error: null,
+      }
+    },
     from(table: string) {
       assert.ok(["attendance_people", "attendance_monthly_confirmations"].includes(table))
       const filters: Record<string, unknown> = {}
@@ -110,7 +129,9 @@ function harness(options: {
       },
     },
     "@/lib/attendanceData": {
-      AttendanceValidationError, attendancePersonBelongsToAdminUser, saveAttendanceMonthlyConfirmation,
+      AttendanceValidationError, AttendanceSourceChangedError, AttendanceAlreadyConfirmedError,
+      AttendancePunchReviewRequiredError,
+      attendancePersonBelongsToAdminUser, saveAttendanceMonthlyConfirmation,
       async saveAttendanceDayEdit(actualClient: unknown, input: unknown, actor: string) {
         assert.equal(actualClient, client)
         assert.equal(actor, session.username)
@@ -144,7 +165,7 @@ function harness(options: {
 
 function confirmation(overrides: Record<string, unknown> = {}) {
   return { action: "save-confirmation", confirmation: {
-    personId: PERSON_ID, year: 2026, month: 9, status: "confirmed", ...overrides,
+    personId: PERSON_ID, year: 2026, month: 9, status: "confirmed", sourceRevision: 7, ...overrides,
   } }
 }
 
@@ -159,6 +180,13 @@ test("View user can confirm their own closed month through the actual API and da
   assert.equal(response.body.confirmation.confirmedAt, "2026-10-02T04:00:00.000Z")
   assert.deepEqual(app.ownershipFilters, [{ id: PERSON_ID, admin_user_id: USER_ID, is_active: true }])
   assert.equal(app.writes.length, 1)
+})
+
+test("an unresolved DingTalk correction returns a clear confirmation conflict", async () => {
+  const app = harness({ rpcError: "ATTENDANCE_DINGTALK_ANOMALY_OPEN: review required" })
+  const response = await app.request(confirmation())
+  assert.equal(response.status, 409)
+  assert.match(response.body.message, /DingTalk punch discrepancy needs administrator review/)
 })
 
 test("View user cannot confirm another user's statement or their inactive attendance record", async () => {

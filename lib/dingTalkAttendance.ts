@@ -226,7 +226,12 @@ export class DingTalkAttendanceClient {
     }
   }
 
-  private async requestToken() {
+  private requestSignal(signal?: AbortSignal) {
+    const timeout = AbortSignal.timeout(this.timeoutMs)
+    return signal ? AbortSignal.any([timeout, signal]) : timeout
+  }
+
+  private async requestToken(signal?: AbortSignal) {
     const response = await this.fetchImpl(DINGTALK_TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -235,7 +240,7 @@ export class DingTalkAttendanceClient {
         appSecret: this.appSecret,
       }),
       cache: "no-store",
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: this.requestSignal(signal),
     })
     const payload = await readJsonObject(response)
     const token = payload.accessToken
@@ -264,13 +269,13 @@ export class DingTalkAttendanceClient {
     return token
   }
 
-  private async getToken() {
+  private async getToken(signal?: AbortSignal) {
     if (this.cachedToken && this.cachedToken.expiresAt > this.now()) {
       return this.cachedToken.value
     }
 
     if (!this.tokenRequest) {
-      this.tokenRequest = this.requestToken().finally(() => {
+      this.tokenRequest = this.requestToken(signal).finally(() => {
         this.tokenRequest = null
       })
     }
@@ -278,9 +283,11 @@ export class DingTalkAttendanceClient {
     return this.tokenRequest
   }
 
-  async listRecords(input: unknown) {
+  async listRecords(input: unknown, options: { signal?: AbortSignal } = {}) {
     const query = validateDingTalkAttendanceQuery(input, this.now())
-    const accessToken = await this.getToken()
+    options.signal?.throwIfAborted()
+    const accessToken = await this.getToken(options.signal)
+    options.signal?.throwIfAborted()
     const response = await this.fetchImpl(
       `${DINGTALK_ATTENDANCE_URL}?access_token=${encodeURIComponent(accessToken)}`,
       {
@@ -290,7 +297,7 @@ export class DingTalkAttendanceClient {
         },
         body: JSON.stringify(query),
         cache: "no-store",
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: this.requestSignal(options.signal),
       },
     )
     const payload = await readJsonObject(response)
@@ -305,8 +312,9 @@ export class DingTalkAttendanceClient {
 
     const rawRecords = payload.recordresult
     if (
-      (rawRecords !== undefined && rawRecords !== null && !Array.isArray(rawRecords)) ||
-      (Array.isArray(rawRecords) && rawRecords.some((record) => !isRecord(record)))
+      !Array.isArray(rawRecords) ||
+      rawRecords.some((record) => !isRecord(record)) ||
+      payload.hasMore === true
     ) {
       throw new DingTalkAttendanceUpstreamError(
         "DingTalk returned invalid attendance records.",
@@ -314,7 +322,7 @@ export class DingTalkAttendanceClient {
       )
     }
 
-    const records = (rawRecords || []) as DingTalkAttendanceRecord[]
+    const records = rawRecords as DingTalkAttendanceRecord[]
     return { query, records }
   }
 }

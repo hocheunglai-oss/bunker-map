@@ -34,6 +34,7 @@ const TRUTH_CHECKPOINT_SCHEMA = "fcuno-exchange-backup-checkpoint/v1"
 const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
 const FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD = "20260830182946"
 const PHONEBOOK_CARDDAV_RECONCILIATION_MIGRATION_HEAD = "20260930074908"
+const ATTENDANCE_DINGTALK_ANOMALY_MIGRATION_HEAD = "20261014044009"
 const BACKUP_LOCK_NAME = "daily-supabase-drive-v2"
 const BACKUP_LOCK_LEASE_SECONDS = 15 * 60
 const BACKUP_EXPORT_PAGE_SIZE = 500
@@ -223,6 +224,13 @@ const TABLES: TableConfig[] = [
   { key: "attendanceReminderDispatches", table: "attendance_reminder_dispatches", order: [{ column: "id", ascending: true }] },
   { key: "attendanceSyncRuns", table: "attendance_sync_runs", order: [{ column: "id", ascending: true }] },
 ]
+
+const PRIVATE_ATTENDANCE_SECTIONS = [
+  { key: "attendanceDingtalkPunchAnomalies", primaryKey: "id" },
+  { key: "attendanceDingtalkPunchAnomalyResolutions", primaryKey: "anomaly_id" },
+  { key: "attendanceDingtalkMissingPunchAnomalies", primaryKey: "id" },
+  { key: "attendanceDingtalkMissingPunchResolutions", primaryKey: "anomaly_id" },
+] as const
 
 const TRUTH_MANAGED_TABLES = new Set([
   "outlook_exchange_sync_certifications",
@@ -584,6 +592,40 @@ async function streamTableRows(
     )
     await appendRows(batch)
     if (batch.length < BACKUP_EXPORT_PAGE_SIZE) break
+  }
+}
+
+async function streamPrivateAttendanceRows(
+  supabase: ReturnType<typeof getSupabaseClient>,
+  config: (typeof PRIVATE_ATTENDANCE_SECTIONS)[number],
+  appendRows: (rows: unknown[]) => Promise<void>
+) {
+  let after: string | null = null
+  for (;;) {
+    const data: unknown = await retrySupabaseRead(
+      () => supabase.rpc("get_attendance_dingtalk_anomaly_backup_page", {
+        p_section: config.key,
+        p_after: after,
+        p_limit: BACKUP_EXPORT_PAGE_SIZE,
+      }),
+      `export ${config.key} after ${after || "start"}`
+    )
+    if (!Array.isArray(data) || data.length > BACKUP_EXPORT_PAGE_SIZE) {
+      throw new Error(`Invalid private attendance backup page for ${config.key}.`)
+    }
+    for (const row of data as unknown[]) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) {
+        throw new Error(`Invalid private attendance backup row for ${config.key}.`)
+      }
+      const key: string = String((row as Record<string, unknown>)[config.primaryKey] || "").toLowerCase()
+      if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(key) ||
+        (after !== null && key <= after)) {
+        throw new Error(`Private attendance backup order changed for ${config.key}.`)
+      }
+      after = key
+    }
+    await appendRows(data)
+    if (data.length < BACKUP_EXPORT_PAGE_SIZE) break
   }
 }
 
@@ -1130,6 +1172,26 @@ async function buildBackupFile(
         )
       }
       isFirstSection = false
+    }
+
+    if (inventory.migrationHead >= ATTENDANCE_DINGTALK_ANOMALY_MIGRATION_HEAD) {
+      for (const config of PRIVATE_ATTENDANCE_SECTIONS) {
+        try {
+          await writeBackupSection(
+            writer,
+            config.key,
+            isFirstSection,
+            (appendRows) => streamPrivateAttendanceRows(supabase, config, appendRows),
+            sections,
+            counts
+          )
+        } catch (error) {
+          throw new Error(
+            `Backup failed while reading ${config.key}: ${getErrorMessage(error)}`
+          )
+        }
+        isFirstSection = false
+      }
     }
 
     const referencedSnapshotHashes = new Set<string>()

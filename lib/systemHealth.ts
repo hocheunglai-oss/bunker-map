@@ -59,6 +59,7 @@ const SPC_DELIVERY_ROUTES_MIGRATION_HEAD = "20260819025850"
 const SPC_LOST_REASON_OPTIONS_MIGRATION_HEAD = "20260831101207"
 const FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD = "20260830182946"
 const PHONEBOOK_CARDDAV_RECONCILIATION_MIGRATION_HEAD = "20260930074908"
+const ATTENDANCE_DINGTALK_ANOMALY_MIGRATION_HEAD = "20261014044009"
 const OUTLOOK_TEMPLATE_RESOLUTION_SCHEMA =
   "fcuno.outlook-template-recipient-resolution/v1"
 const OUTLOOK_TEMPLATE_TRUTH_SCHEMA =
@@ -257,6 +258,13 @@ const BACKUP_TRUTH_SECTIONS = [
   },
 ] as const
 
+const BACKUP_PRIVATE_ATTENDANCE_SECTION_KEYS = [
+  "attendanceDingtalkPunchAnomalies",
+  "attendanceDingtalkPunchAnomalyResolutions",
+  "attendanceDingtalkMissingPunchAnomalies",
+  "attendanceDingtalkMissingPunchResolutions",
+] as const
+
 const BACKUP_EXTERNAL_SECTION_KEYS = [
   "googleContacts",
   "googleCalendarEvents",
@@ -317,6 +325,8 @@ function getBackupArtifactContract(migrationHead: string, pricingSchemaVersion: 
   ].sort()
   const requiredSectionKeys = [
     ...tableSections.map(({ key }) => key),
+    ...(migrationHead >= ATTENDANCE_DINGTALK_ANOMALY_MIGRATION_HEAD
+      ? BACKUP_PRIVATE_ATTENDANCE_SECTION_KEYS : []),
     ...BACKUP_TRUTH_SECTIONS.map(({ key }) => key),
     ...BACKUP_EXTERNAL_SECTION_KEYS,
   ].sort()

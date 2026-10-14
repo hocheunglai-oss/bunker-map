@@ -45,7 +45,7 @@
     },
     {
       "path": "/api/cron/attendance-auto-confirm",
-      "schedule": "0 10 * * *"
+      "schedule": "10 10 * * *"
     },
     {
       "path": "/api/spc/security-maintenance",

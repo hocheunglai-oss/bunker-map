@@ -1,6 +1,8 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
+import type { SupabaseClient } from "@supabase/supabase-js"
+import { getOpenAnnualAttendancePunchAnomalyCount } from "../lib/attendanceData"
 import {
   hongKongWorkingDayNumber,
   isLastHongKongWorkingDay,
@@ -58,6 +60,8 @@ test("single confirmation reminder is authenticated, scheduled at 08:00 HKT, and
   assert.match(data, /system:attendance-second-reminder-cron/)
   assert.match(data, /dispatch_kind: "second_reminder"/)
   assert.match(data, /pending\.error\?\.code === "23505"/)
+  assert.match(route, /confirmationReminder\.unavailable/)
+  assert.match(route, /failed > 0 \|\| unavailable > 0 \|\| blocked > 0 \? 502 : 200/)
   assert.doesNotMatch(route, /sendAttendanceMonthEndReviewReminders/)
 })
 
@@ -72,12 +76,12 @@ test("single email gives confirmation instructions, deadline, and dispute rights
 })
 
 test("all eligible users receive the reminder and system confirmation remains distinct", () => {
-  assert.match(vercel, /attendance-auto-confirm[\s\S]*?"schedule": "0 10 \* \* \*"/)
+  assert.match(vercel, /attendance-auto-confirm[\s\S]*?"schedule": "10 10 \* \* \*"/)
   assert.match(autoRoute, /timingSafeEqual/)
   assert.match(autoRoute, /CRON_SECRET/)
   assert.match(data, /dispatch_kind: "second_reminder"/)
   assert.doesNotMatch(data, /confirmedIds\.has\(personId\)/)
-  assert.match(data, /confirmed_by: "system:attendance-auto-confirm"/)
+  assert.match(data, /p_actor: "system:attendance-auto-confirm"/)
   assert.match(data, /The employee may dispute the record directly with an administrator/)
   assert.match(client, /SYSTEM CONFIRMED/)
   assert.match(workflowMigration, /'second_reminder'/)
@@ -95,4 +99,51 @@ test("first working day of January sends an idempotent year-end balance summary"
   assert.match(data, /contacting an administrator directly/)
   assert.match(annualMigration, /'annual_summary'/)
   assert.match(annualMigration, /attendance_reminder_dispatches_annual_summary_once/)
+})
+
+test("year-end email checks all twelve months and blocks dispatch on source anomalies", async () => {
+  const months: number[] = []
+  const client = {
+    async rpc(name: string, args: { p_month: number; p_year: number; p_person_id: string }) {
+      assert.equal(name, "attendance_open_dingtalk_punch_anomaly_count")
+      assert.equal(args.p_year, 2026)
+      assert.equal(args.p_person_id, "person-a")
+      months.push(args.p_month)
+      return { data: args.p_month === 9 ? 1 : 0, error: null }
+    },
+  } as unknown as SupabaseClient
+  assert.equal(await getOpenAnnualAttendancePunchAnomalyCount(client, "person-a", 2026), 1)
+  assert.deepEqual(months.sort((a, b) => a - b), Array.from({ length: 12 }, (_, index) => index + 1))
+
+  const sender = data.slice(
+    data.indexOf("export async function sendAttendanceAnnualSummaryReminders"),
+    data.indexOf("export async function sendAttendanceSecondReminders"),
+  )
+  const anomalyCheckPosition = sender.indexOf("getOpenAnnualAttendancePunchAnomalyCount(")
+  const dispatchPosition = sender.indexOf('client.from("attendance_reminder_dispatches").insert(')
+  assert.ok(anomalyCheckPosition >= 0 && dispatchPosition > anomalyCheckPosition)
+  assert.match(sender, /if \(openAnomalies > 0\) \{\s+results\.push\("blocked"\)/)
+  assert.match(route, /annualSummary\.blocked/)
+  assert.match(route, /blocked > 0 \? 502 : 200/)
+})
+
+test("year-end anomaly check fails closed when the database cannot verify a month", async () => {
+  const client = {
+    async rpc(_name: string, args: { p_month: number }) {
+      return args.p_month === 4
+        ? { data: null, error: { message: "Anomaly query failed." } }
+        : { data: 0, error: null }
+    },
+  } as unknown as SupabaseClient
+  await assert.rejects(
+    getOpenAnnualAttendancePunchAnomalyCount(client, "person-a", 2026),
+    /Anomaly query failed/,
+  )
+  const invalidClient = {
+    async rpc() { return { data: null, error: null } },
+  } as unknown as SupabaseClient
+  await assert.rejects(
+    getOpenAnnualAttendancePunchAnomalyCount(invalidClient, "person-a", 2026),
+    /review count is invalid/,
+  )
 })
