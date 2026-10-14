@@ -162,7 +162,11 @@
 
 .excelPanel {
   max-height: none;
-  overflow: visible;
+  overflow: auto;
+}
+
+.yearSummaryTable {
+  min-width: 1180px;
 }
 
 .monthRecordTable,

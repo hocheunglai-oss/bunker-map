@@ -8,7 +8,7 @@
 const assert = require("node:assert/strict")
 const http = require("node:http")
 const path = require("node:path")
-const { readFileSync } = require("node:fs")
+const { mkdirSync, readFileSync } = require("node:fs")
 const { execFileSync } = require("node:child_process")
 const { build } = require("esbuild")
 const { pathToFileURL } = require("node:url")
@@ -238,6 +238,7 @@ async function main() {
       } }] })
     const assets = new Map(bundle.outputFiles.map((file) => [`/${path.basename(file.path)}`, file.contents]))
     const script = [...assets.keys()].find((key) => key.endsWith(".js"))
+    const stylesheet = [...assets.keys()].find((key) => key.endsWith(".css"))
     const apiRequests = []
     server = http.createServer(async (request, response) => {
       try {
@@ -251,16 +252,27 @@ async function main() {
           apiRequests.push({ method: request.method, url: request.url, body: body ? JSON.parse(body) : null, status: result.status })
           response.writeHead(result.status, Object.fromEntries(result.headers)); response.end(await result.text()); return
         }
+        if (pathname === "/globals.css") {
+          response.setHeader("Content-Type", "text/css")
+          response.end(`html,body{margin:0}\n${readFileSync(path.join(root, "app/globals.css"), "utf8")
+            .replace(/^@import "tailwindcss";/, "")}`)
+          return
+        }
         assert.equal(request.method, "GET")
         const asset = assets.get(pathname)
         response.setHeader("Content-Type", asset ? pathname.endsWith(".css") ? "text/css" : "text/javascript" : "text/html")
-        response.end(asset || `<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div><script src="${script}"></script></body></html>`)
+        response.end(asset || `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/globals.css">${stylesheet ? `<link rel="stylesheet" href="${stylesheet}">` : ""}</head><body><div id="root"></div><script src="${script}"></script></body></html>`)
       } catch (error) { response.writeHead(500); response.end(error.message) }
     })
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
     const base = `http://127.0.0.1:${server.address().port}`
-    const { chromium } = require("playwright")
-    browser = await chromium.launch({ headless: true, ...(process.env.CHROME_EXECUTABLE_PATH ? { executablePath: process.env.CHROME_EXECUTABLE_PATH } : {}) })
+    const { chromium, webkit } = require("playwright")
+    const browserName = process.env.ATTENDANCE_BROWSER || "chromium"
+    assert.ok(["chromium", "webkit"].includes(browserName), `Unsupported browser: ${browserName}`)
+    const browserEngine = browserName === "webkit" ? webkit : chromium
+    const executablePath = browserName === "webkit"
+      ? process.env.WEBKIT_EXECUTABLE_PATH : process.env.CHROME_EXECUTABLE_PATH
+    browser = await browserEngine.launch({ headless: true, ...(executablePath ? { executablePath } : {}) })
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
     const errors = []; const external = []
     await context.route("**/*", (route) => {
@@ -345,6 +357,41 @@ async function main() {
     assert.match(await retrospectiveBadge.getAttribute("aria-label"), /no DingTalk verification or staff approval/)
     assert.equal((await app.saved()).filter((row) => row.person_id === otherId && row.month === 5).length, 1)
     console.log("PASS: a distinct audited retrospective actor displays SYSTEM CONFIRMED with its source caveat after reload")
+
+    const ongoingNote = "CY DingTalk exception; system action without employee approval or punch verification."
+    await app.db.query(`update public.attendance_monthly_confirmations
+      set confirmed_by='system:attendance-cy-dingtalk-exception', note=$1
+      where person_id=$2 and year=$3 and month=5`, [ongoingNote, otherId, app.closedYear])
+    await page.reload()
+    await page.getByRole("button", { name: "MONTHLY STATEMENT", exact: true }).click()
+    await page.waitForFunction(() => !document.querySelector('[aria-label="Monthly attendance year"]').disabled)
+    await page.getByLabel("Monthly attendance year").selectOption(String(app.closedYear))
+    const ongoingBadge = rows("BT").nth(4).getByText("SYSTEM CONFIRMED", { exact: true })
+    await ongoingBadge.waitFor()
+    assert.match(await ongoingBadge.getAttribute("title"), /CY DingTalk exception/)
+    assert.match(await ongoingBadge.getAttribute("aria-label"), /without employee approval or punch verification/)
+    console.log("PASS: CY's ongoing system actor displays SYSTEM CONFIRMED with the exception caveat after reload")
+    for (const width of [320, 390, 1440]) {
+      for (const colorScheme of ["light", "dark"]) {
+        await page.setViewportSize({ width, height: 850 })
+        await page.emulateMedia({ colorScheme })
+        await ongoingBadge.scrollIntoViewIfNeeded()
+        if (process.env.SCREENSHOT_DIR) {
+          mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
+          await page.screenshot({
+            path: path.join(process.env.SCREENSHOT_DIR,
+              `attendance-cy-${browserName}-${width}-${colorScheme}.png`),
+          })
+        }
+        const bodyOverflow = await page.evaluate(() => ({
+          documentWidth: document.documentElement.scrollWidth,
+          viewportWidth: window.innerWidth,
+        }))
+        assert.ok(bodyOverflow.documentWidth <= bodyOverflow.viewportWidth + 1,
+          `${browserName} ${width}px ${colorScheme} page overflow: ${JSON.stringify(bodyOverflow)}`)
+        assert.equal(await ongoingBadge.isVisible(), true)
+      }
+    }
     await context.close()
   } finally {
     if (browser) await browser.close()
