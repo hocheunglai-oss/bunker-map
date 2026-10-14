@@ -134,7 +134,25 @@ async function backend() {
       }
       return query
     },
-    async rpc(name) {
+    async rpc(name, args) {
+      if (name === "attendance_source_revision") return { data: 0, error: null }
+      if (name === "save_attendance_monthly_confirmation_checked") {
+        try {
+          assert.equal(args.p_expected_revision, 0)
+          trace.push({ operation: "confirmation-rpc", table: "attendance_monthly_confirmations", args })
+          if (holdNext) { holdNext = false; await new Promise((resolve) => { release = resolve }); release = null }
+          if (failNext) { failNext = false; return { data: null, error: { message: "Synthetic storage outage" } } }
+          const result = await db.query(`insert into public.attendance_monthly_confirmations
+            (person_id,year,month,status,confirmed_at,confirmed_by,note,created_by,updated_by)
+            values ($1,$2,$3,$4,case when $4='confirmed' then now() else null end,
+              case when $4='confirmed' then $5 else null end,$6,$5,$5)
+            on conflict (person_id,year,month) do update set
+              status=excluded.status,confirmed_at=excluded.confirmed_at,
+              confirmed_by=excluded.confirmed_by,note=excluded.note,updated_by=excluded.updated_by
+            returning *`, [args.p_person_id, args.p_year, args.p_month, args.p_status, args.p_actor, args.p_note])
+          return { data: jsonRows(result.rows), error: null }
+        } catch (error) { return { data: null, error: { message: error.message, code: error.code } } }
+      }
       assert.equal(name, "list_attendance_available_years")
       return { data: [{ year: currentYear }, { year: closedYear }], error: null }
     },
@@ -297,7 +315,7 @@ async function main() {
     const attack = (confirmation, permission = "view") => fetch(`${base}/api/admin/attendance`, { method: "POST",
       headers: { "Content-Type": "application/json", "x-test-permission": permission },
       body: JSON.stringify({ action: "save-confirmation", confirmation }) })
-    const payload = { personId: ownId, year: app.closedYear, month: 4, status: "confirmed" }
+    const payload = { personId: ownId, year: app.closedYear, month: 4, status: "confirmed", sourceRevision: 0 }
     assert.equal((await attack({ ...payload, personId: otherId })).status, 403)
     assert.equal((await attack({ ...payload, status: "pending" })).status, 403)
     assert.equal((await attack({ ...payload, year: app.currentYear, month: app.currentMonth })).status, 400)
@@ -310,6 +328,23 @@ async function main() {
     assert.deepEqual(errors, []); assert.deepEqual(external, [])
     assert.ok(app.trace.filter((entry) => entry.operation === "select" && entry.table === "attendance_monthly_confirmations").length >= 3)
     console.log("PASS: actual server ownership/open-month/reset/no-access fences deny without writes; editor exception remains; no external requests")
+
+    const retrospectiveNote = "Retrospective system confirmation; no DingTalk verification or staff approval."
+    await app.db.query(`insert into public.attendance_monthly_confirmations
+      (person_id,year,month,status,confirmed_at,confirmed_by,note,created_by,updated_by)
+      values ($1,$2,5,'confirmed',now(),'system:attendance-retrospective-confirm',$3,
+        'system:attendance-retrospective-confirm','system:attendance-retrospective-confirm')`,
+    [otherId, app.closedYear, retrospectiveNote])
+    await page.reload()
+    await page.getByRole("button", { name: "MONTHLY STATEMENT", exact: true }).click()
+    await page.waitForFunction(() => !document.querySelector('[aria-label="Monthly attendance year"]').disabled)
+    await page.getByLabel("Monthly attendance year").selectOption(String(app.closedYear))
+    const retrospectiveBadge = rows("BT").nth(4).getByText("SYSTEM CONFIRMED", { exact: true })
+    await retrospectiveBadge.waitFor()
+    assert.match(await retrospectiveBadge.getAttribute("title"), /no DingTalk verification or staff approval/)
+    assert.match(await retrospectiveBadge.getAttribute("aria-label"), /no DingTalk verification or staff approval/)
+    assert.equal((await app.saved()).filter((row) => row.person_id === otherId && row.month === 5).length, 1)
+    console.log("PASS: a distinct audited retrospective actor displays SYSTEM CONFIRMED with its source caveat after reload")
     await context.close()
   } finally {
     if (browser) await browser.close()
