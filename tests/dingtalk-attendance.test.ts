@@ -155,3 +155,32 @@ test("upstream authentication failures never expose credentials or a token", asy
     },
   )
 })
+
+test("a successful HTTP response without a complete record array is rejected", async () => {
+  const client = new DingTalkAttendanceClient({
+    appKey: "client-id", appSecret: "client-secret", now: () => NOW,
+    fetchImpl: async (input) => String(input).includes("/accessToken")
+      ? Response.json({ accessToken: "token", expireIn: 7200 })
+      : Response.json({ errcode: 0, errmsg: "ok" }),
+  })
+  await assert.rejects(client.listRecords(VALID_QUERY), /invalid attendance records/)
+})
+
+test("an external deadline cancels an in-flight attendance request", async () => {
+  const controller = new AbortController()
+  const client = new DingTalkAttendanceClient({
+    appKey: "client-id", appSecret: "client-secret", now: () => NOW,
+    fetchImpl: async (input, init) => {
+      if (String(input).includes("/accessToken")) {
+        return Response.json({ accessToken: "token", expireIn: 7200 })
+      }
+      return new Promise<Response>((_, reject) => {
+        assert.ok(init?.signal)
+        init.signal.addEventListener("abort", () => reject(init.signal?.reason), { once: true })
+      })
+    },
+  })
+  const request = client.listRecords(VALID_QUERY, { signal: controller.signal })
+  setImmediate(() => controller.abort(new Error("requery time budget elapsed")))
+  await assert.rejects(request, /requery time budget elapsed/)
+})

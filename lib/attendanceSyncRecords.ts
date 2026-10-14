@@ -39,22 +39,12 @@ function cleanString(value: unknown, maxLength = 500) {
   return text ? text.slice(0, maxLength) : null
 }
 
-function makeRecordKey(record: DingTalkAttendanceRecord) {
-  const stableId = cleanString(record.id, 200)
-  const identity = stableId
-    ? {
-        source: "dingtalk-attendance",
-        id: stableId,
-        userId: cleanString(record.userId, 128),
-      }
-    : {
-        source: "dingtalk-attendance",
-        userId: cleanString(record.userId, 128),
-        userCheckTime: Number(record.userCheckTime),
-        checkType: cleanString(record.checkType, 32),
-        sourceType: cleanString(record.sourceType, 100),
-        deviceSN: cleanString(record.deviceSN, 200),
-      }
+function makeRecordKey(record: DingTalkAttendanceRecord, stableId: string) {
+  const identity = {
+    source: "dingtalk-attendance",
+    id: stableId,
+    userId: cleanString(record.userId, 128),
+  }
   return createHash("sha256").update(JSON.stringify(identity)).digest("hex")
 }
 
@@ -74,9 +64,11 @@ export function normalizeDingTalkPunch(
     record.invalidRecordMsg === "今日休息，打卡需申请"
   const checkType = restDayMachinePunch ? "Unclassified" : record.checkType
   const timestamp = Number(record.userCheckTime)
+  const sourceRecordId = cleanString(record.id, 200)
   if (
     !userId ||
     !person ||
+    !sourceRecordId ||
     (checkType !== "OnDuty" && checkType !== "OffDuty" && checkType !== "Unclassified") ||
     (checkType === "Unclassified" && !restDayMachinePunch) ||
     !Number.isFinite(timestamp) ||
@@ -88,7 +80,6 @@ export function normalizeDingTalkPunch(
   const punchTime = new Date(timestamp)
   if (!Number.isFinite(punchTime.getTime())) return null
 
-  const sourceRecordId = cleanString(record.id, 200)
   const sourceType = cleanString(record.sourceType, 100)
   const deviceSn = cleanString(record.deviceSN, 200)
   const timeResult = cleanString(record.timeResult, 100)
@@ -96,7 +87,7 @@ export function normalizeDingTalkPunch(
 
   return {
     person_id: person.id,
-    source_record_key: makeRecordKey(record),
+    source_record_key: makeRecordKey(record, sourceRecordId),
     source_record_id: sourceRecordId,
     dingtalk_user_id: userId,
     check_type: checkType,

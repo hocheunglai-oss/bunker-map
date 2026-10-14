@@ -141,6 +141,7 @@ export type ApiAttendanceCalendarDay = {
 
 export type ApiMonthlyResponse = {
   view: "monthly"
+  sourceRevision?: number
   year: number
   month: number
   periodClosed?: boolean
@@ -220,6 +221,7 @@ export type ApiAttendanceMonthlyAdjustment = {
 
 export type ApiSettingsResponse = {
   view: "settings"
+  sourceRevision?: number
   year: number
   people: ApiAttendancePerson[]
   schedules: ApiAttendanceSchedule[]
@@ -234,6 +236,7 @@ export type ApiSettingsResponse = {
 }
 
 export type AttendanceMonthData = {
+  sourceRevision?: number
   year: number
   month: number
   periodClosed?: boolean

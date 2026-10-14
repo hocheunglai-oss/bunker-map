@@ -155,10 +155,10 @@ test("only source-affected confirmation periods return to pending", () => {
   }
 })
 
-test("daily, monthly, and all-time calculations load effective group history", () => {
+test("daily, monthly, all-time, and reminder calculations load effective group history", () => {
   assert.equal(
     attendanceData.match(/from\("attendance_team_assignments"\)/g)?.length,
-    3,
+    5,
   )
   assert.match(attendanceData, /resolveAttendanceTeamForDate\(/)
   assert.match(attendanceData, /attendanceTeamAssignmentOverlapsPeriod\(/)

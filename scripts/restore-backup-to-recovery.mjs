@@ -19,7 +19,8 @@ if (
     [
       "REFUSED: backup format v2 contains the immutable Exchange truth ledger.",
       "A service-role REST upsert cannot reproduce that evidence exactly: the ledger,",
-      "snapshots, certification rows, sequence values, and trigger ordering require an",
+      "snapshots, certification rows, attendance discrepancy evidence, sequence values,",
+      "and trigger ordering require an",
       "owner-level whole-database restore (Supabase managed backup/PITR or pg_dump/psql).",
       "Validate the artifact with npm run backup:validate, then follow",
       "docs/backup-restore-runbook.md. No recovery-project writes were attempted.",

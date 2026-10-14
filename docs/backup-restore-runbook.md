@@ -41,6 +41,25 @@ external anchors below are part of the recovery contract.
 
 ## Daily off-site artifact
 
+### Attendance DingTalk discrepancy evidence (migration 20261014044009)
+
+The attendance import preserves corrected and missing DingTalk punch observations
+in four private, append-only tables: the correction and omission ledgers plus
+their separate resolution ledgers. From this migration head onward, a verified
+Drive JSON artifact must include all four sections, even when they are empty.
+The exporter reads them through a bounded service-only RPC. The backup mutation
+fence covers inserts into every ledger, so an observation or resolution arriving
+during export invalidates that attempt. The offline validator checks section
+hashes, references to raw punches and people, resolution links, and that an open
+discrepancy has no confirmed month.
+
+Before enabling attendance confirmation after a whole-database restore, check
+that all four private tables and their confirmation guard, source revision
+triggers, and RPC grants were restored. Match their row counts to the chosen
+validated artifact when one exists; review any unresolved discrepancy before
+confirming its affected month. The JSON REST restore remains disabled because
+it cannot recreate append-only evidence and transaction ordering safely.
+
 Vercel calls `/api/backups/bunker-map-drive` every day at `19:02` UTC
 (`03:02` the following day in Hong Kong), with retry opportunities at `20:02`
 and `21:02` UTC (`04:02` and `05:02` HKT). Cron attempts skip when a recent

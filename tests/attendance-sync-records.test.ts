@@ -72,6 +72,18 @@ test("rejects invalid or unmapped DingTalk punches", () => {
     ),
     null,
   )
+  assert.equal(
+    normalizeDingTalkPunch(
+      {
+        userId: "fictional-user-001",
+        userCheckTime: Date.now(),
+        checkType: "OnDuty",
+      },
+      people,
+    ),
+    null,
+    "an ID-less correction cannot be matched to its original raw punch",
+  )
 })
 
 test("internal DingTalk imports start cleanly on 13 August 2026 HKT", () => {

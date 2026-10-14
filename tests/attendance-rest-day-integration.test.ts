@@ -281,6 +281,43 @@ test("FCUNO holiday policy remains authoritative, including the AC no-holiday-cr
   assert.equal(build([], { holiday }).status, "holiday")
 })
 
+test("a future holiday nominee does not accrue attendance or holiday credit early", () => {
+  const futureDate = "2026-10-19"
+  const holiday: NonNullable<BuilderArguments[8]> = {
+    eventId: "fictional-future-holiday", title: "HOLIDAY ATTENDANCE",
+    name: "Fictional future holiday", attendeeStaffCodes: [person.staffCode],
+    people: [person.staffCode],
+  }
+  const record = build([], { workDate: futureDate, holiday })
+  assert.equal(record.holidayAttendance, false)
+  assert.equal(record.status, "holiday")
+  assert.equal(record.required, false)
+})
+
+test("holiday nominees outside employment or team assignment do not accrue credit", () => {
+  const holiday: NonNullable<BuilderArguments[8]> = {
+    eventId: "fictional-holiday", title: "HOLIDAY ATTENDANCE",
+    name: "Fictional holiday", attendeeStaffCodes: [person.staffCode],
+    people: [person.staffCode],
+  }
+  assert.equal(build([], { holiday }).holidayAttendance, true)
+  assert.equal(build([], {
+    person: { ...person, employmentStartDate: "2026-09-28" }, holiday,
+  }).holidayAttendance, false)
+  assert.equal(build([], {
+    person: { ...person, isActive: false, employmentEndDate: "2026-09-24" },
+    holiday,
+  }).holidayAttendance, false)
+  assert.equal(build([], {
+    holiday,
+    assignments: [{
+      id: "ended-assignment", personId: PERSON_ID, team: "BT",
+      effectiveFrom: "2026-01-01", effectiveTo: "2026-09-24",
+      sourceAdminUserId: null,
+    }],
+  }).holidayAttendance, false)
+})
+
 test("scans from other people or work dates cannot fill the current person's attendance", () => {
   const record = build([
     { ...punch("other-person", "09:00"), personId: "another-fictional-person" },

@@ -1,6 +1,8 @@
 import "server-only"
 
 import { randomUUID } from "node:crypto"
+import { DINGTALK_ATTENDANCE_MAX_USERS } from "@/lib/dingTalkAttendance"
+import { DINGTALK_ATTENDANCE_IMPORT_CUTOFF } from "@/lib/attendanceSyncRecords"
 import { inferUnclassifiedAttendanceDirections } from "@/lib/attendanceUnclassifiedPunches"
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import {
@@ -164,6 +166,37 @@ export type AttendanceMonthlyConfirmation = {
   note: string
   createdAt: string
   updatedAt: string
+}
+
+export class AttendanceSourceChangedError extends Error {
+  constructor() {
+    super("Attendance records changed while this statement was open. Reload and review the current record before confirming.")
+    this.name = "AttendanceSourceChangedError"
+  }
+}
+
+export class AttendanceAlreadyConfirmedError extends Error {
+  constructor() {
+    super("This attendance month was already confirmed. Reload and review the current confirmation.")
+    this.name = "AttendanceAlreadyConfirmedError"
+  }
+}
+
+export class AttendancePunchReviewRequiredError extends Error {
+  constructor() {
+    super("A DingTalk punch discrepancy needs administrator review before this month can be confirmed.")
+    this.name = "AttendancePunchReviewRequiredError"
+  }
+}
+
+export async function getAttendanceSourceRevision(client: SupabaseClient) {
+  const { data, error } = await client.rpc("attendance_source_revision")
+  throwIfError(error, "Could not read the attendance source revision.")
+  const revision = Number(data)
+  if (!Number.isSafeInteger(revision) || revision < 0) {
+    throw new Error("Attendance source revision is invalid.")
+  }
+  return revision
 }
 
 export type AttendanceSyncRun = {
@@ -760,6 +793,9 @@ export function buildAttendanceRecord(
   )
   const holidayAttendance = Boolean(
     attendanceHoliday &&
+      workDate <= today &&
+      isPersonEmployedOnDate(workDate, person) &&
+      (!hasTeamHistory || Boolean(datedAssignment)) &&
       team !== "AC" &&
       !fullDayAbsent &&
       (attendanceHoliday.attendeeStaffCodes.includes(person.staffCode.toUpperCase()) ||
@@ -1064,14 +1100,14 @@ function personOverlapsPeriod(
 
 function countsAsAttended(record: ReturnType<typeof buildAttendanceRecord>) {
   return Boolean(
-    record.holidayAttendance ||
-    (record.required &&
-      record.status !== "leave" &&
-      record.status !== "pending" &&
-      record.date <= hktDateFromTimestamp(new Date()) &&
-      (record.effectiveSignIn ||
-        record.workMode === "home-office" ||
-        record.workMode === "business-trip")),
+    record.date <= hktDateFromTimestamp(new Date()) &&
+      (record.holidayAttendance ||
+        (record.required &&
+          record.status !== "leave" &&
+          record.status !== "pending" &&
+          (record.effectiveSignIn ||
+            record.workMode === "home-office" ||
+            record.workMode === "business-trip"))),
   )
 }
 
@@ -2449,24 +2485,33 @@ export async function saveAttendanceMonthlyConfirmation(
       "Attendance can be confirmed only after the Hong Kong month has closed.",
     )
   }
-  const values = {
-    person_id: personId,
-    year,
-    month,
-    status: row.status,
-    confirmed_at: confirmed ? new Date().toISOString() : null,
-    confirmed_by: confirmed ? actor : null,
-    note: optionalText(row.note),
-    created_by: actor,
-    updated_by: actor,
+  const sourceRevision = Number(row.sourceRevision)
+  if (confirmed && (row.sourceRevision === null || row.sourceRevision === undefined ||
+      !Number.isSafeInteger(sourceRevision) || sourceRevision < 0)) {
+    throw new AttendanceValidationError("Reload the attendance statement before confirming it.")
   }
-  const { data, error } = await client
-    .from("attendance_monthly_confirmations")
-    .upsert(values, { onConflict: "person_id,year,month" })
-    .select("*")
-    .single()
-  throwIfError(error, "Could not save monthly confirmation.")
-  return mapConfirmation(data)
+  const { data, error } = await client.rpc("save_attendance_monthly_confirmation_checked", {
+    p_person_id: personId,
+    p_year: year,
+    p_month: month,
+    p_status: row.status,
+    p_note: optionalText(row.note),
+    p_actor: actor,
+    p_expected_revision: confirmed ? sourceRevision : null,
+  })
+  if (error?.message?.includes("ATTENDANCE_SOURCE_CHANGED:")) {
+    throw new AttendanceSourceChangedError()
+  }
+  if (error?.message?.includes("ATTENDANCE_ALREADY_CONFIRMED:")) {
+    throw new AttendanceAlreadyConfirmedError()
+  }
+  if (error?.message?.includes("ATTENDANCE_DINGTALK_ANOMALY_OPEN:")) {
+    throw new AttendancePunchReviewRequiredError()
+  }
+  throwIfError(error, confirmed ? "Could not save monthly confirmation." : "Could not reset monthly confirmation.")
+  const confirmation = Array.isArray(data) ? data[0] : data
+  if (!confirmation) throw new Error("Monthly confirmation did not return a record.")
+  return mapConfirmation(confirmation)
 }
 
 export async function attendancePersonBelongsToAdminUser(
@@ -2598,6 +2643,27 @@ export function buildAttendanceAnnualSummaryEmail(input: {
   }
 }
 
+export async function getOpenAnnualAttendancePunchAnomalyCount(
+  client: SupabaseClient,
+  personId: string,
+  year: number,
+) {
+  const counts = await Promise.all(
+    Array.from({ length: 12 }, async (_, index) => {
+      const { data, error } = await client.rpc(
+        "attendance_open_dingtalk_punch_anomaly_count",
+        { p_person_id: personId, p_year: year, p_month: index + 1 },
+      )
+      throwIfError(error, "Could not verify the annual DingTalk punch record.")
+      if (typeof data !== "number" || !Number.isSafeInteger(data) || data < 0) {
+        throw new Error("Annual DingTalk punch review count is invalid.")
+      }
+      return data
+    }),
+  )
+  return counts.reduce((total, count) => total + count, 0)
+}
+
 export async function sendAttendanceAnnualSummaryReminders(
   client: SupabaseClient,
   now = new Date(),
@@ -2608,13 +2674,17 @@ export async function sendAttendanceAnnualSummaryReminders(
   const today = hktDateFromTimestamp(now)
   const summaryYear = period.year - 1
   if (period.month !== 1 || hongKongWorkingDayNumber(now, holidayDates) !== 1) {
-    return { skipped: true, date: today, year: summaryYear, sent: 0, failed: 0, alreadySent: 0 }
+    return { skipped: true, date: today, year: summaryYear, sent: 0, failed: 0, alreadySent: 0, blocked: 0 }
   }
 
+  const sourceRevision = await getAttendanceSourceRevision(client)
   const [summary, managedUsers] = await Promise.all([
     getAllTimeAttendance(summaryYear),
     listManagedAdminUsers(),
   ])
+  if (await getAttendanceSourceRevision(client) !== sourceRevision) {
+    throw new AttendanceSourceChangedError()
+  }
   const usersById = new Map(managedUsers.map((user) => [user.id, user]))
   const annualByPerson = new Map(
     summary.annualSummaries.map((annual) => [annual.personId, annual]),
@@ -2627,8 +2697,19 @@ export async function sendAttendanceAnnualSummaryReminders(
     return [{ person, annual, displayName: user.displayName || person.displayName, email: emails[0] }]
   })
 
-  const results: Array<"sent" | "failed" | "already-sent"> = []
+  const results: Array<"sent" | "failed" | "already-sent" | "blocked"> = []
+  let expectedRevision = sourceRevision
   for (const target of targets) {
+    const openAnomalies = await getOpenAnnualAttendancePunchAnomalyCount(
+      client, target.person.id, summaryYear,
+    )
+    if (await getAttendanceSourceRevision(client) !== expectedRevision) {
+      throw new AttendanceSourceChangedError()
+    }
+    if (openAnomalies > 0) {
+      results.push("blocked")
+      continue
+    }
     const pending = await client.from("attendance_reminder_dispatches").insert({
       person_id: target.person.id,
       year: summaryYear,
@@ -2642,6 +2723,7 @@ export async function sendAttendanceAnnualSummaryReminders(
       continue
     }
     throwIfError(pending.error, "Could not record an annual attendance summary reminder.")
+    expectedRevision += 1
     const dispatchId = String(asRow(pending.data).id || "")
     const email = buildAttendanceAnnualSummaryEmail({
       displayName: target.displayName,
@@ -2663,6 +2745,7 @@ export async function sendAttendanceAnnualSummaryReminders(
         error_code: null,
       }).eq("id", dispatchId)
       throwIfError(error, "Could not audit the annual attendance summary reminder.")
+      expectedRevision += 1
       results.push("sent")
     } catch {
       const { error } = await client.from("attendance_reminder_dispatches").update({
@@ -2672,6 +2755,7 @@ export async function sendAttendanceAnnualSummaryReminders(
         error_code: "EMAIL_SEND_FAILED",
       }).eq("id", dispatchId)
       throwIfError(error, "Could not audit a failed annual attendance summary reminder.")
+      expectedRevision += 1
       results.push("failed")
     }
   }
@@ -2682,6 +2766,7 @@ export async function sendAttendanceAnnualSummaryReminders(
     sent: results.filter((value) => value === "sent").length,
     failed: results.filter((value) => value === "failed").length,
     alreadySent: results.filter((value) => value === "already-sent").length,
+    blocked: results.filter((value) => value === "blocked").length,
   }
 }
 
@@ -2697,19 +2782,17 @@ export async function sendAttendanceSecondReminders(
     return { skipped: true, date: today, ...period, sent: 0, failed: 0, alreadySent: 0, unavailable: 0 }
   }
 
-  const [{ data: peopleData, error: peopleError }, managedUsers] = await Promise.all([
-    client.from("attendance_people").select("id,admin_user_id,display_name").eq("is_active", true),
+  const [people, managedUsers] = await Promise.all([
+    loadAttendancePeopleForPeriod(client, period.year, period.month),
     listManagedAdminUsers(),
   ])
-  throwIfError(peopleError, "Could not load second-reminder recipients.")
   const usersById = new Map(managedUsers.map((user) => [user.id, user]))
-  const targets = (peopleData || []).flatMap((value) => {
-    const person = asRow(value)
-    const personId = String(person.id)
-    const user = usersById.get(String(person.admin_user_id || ""))
+  const targets = people.flatMap((person) => {
+    const personId = person.id
+    const user = usersById.get(person.adminUserId || "")
     const emails = normalizeEmailList(user?.username || "")
     if (!user?.isActive || emails.length !== 1) return []
-    return [{ personId, displayName: user.displayName || String(person.display_name || "Staff member"), email: emails[0] }]
+    return [{ personId, displayName: user.displayName || person.displayName, email: emails[0] }]
   })
 
   const results: Array<"sent" | "failed" | "already-sent"> = []
@@ -2745,49 +2828,305 @@ export async function sendAttendanceSecondReminders(
     sent: results.filter((value) => value === "sent").length,
     failed: results.filter((value) => value === "failed").length,
     alreadySent: results.filter((value) => value === "already-sent").length,
-    unavailable: Math.max(0, (peopleData || []).length - targets.length),
+    unavailable: Math.max(0, people.length - targets.length),
   }
+}
+
+export async function loadAttendancePeopleForPeriod(
+  client: SupabaseClient,
+  year: number,
+  month: number,
+) {
+  const range = dateRangeForMonth(year, month)
+  const [peopleResult, assignmentsResult] = await Promise.all([
+    client.from("attendance_people").select("*"),
+    // Include the full history: an active person may have a gap between two
+    // assignments, and a filtered result would mistake that gap for no history.
+    client.from("attendance_team_assignments").select("*"),
+  ])
+  throwIfError(peopleResult.error, "Could not load attendance reminder people.")
+  throwIfError(assignmentsResult.error, "Could not load attendance reminder team history.")
+  const assignments = (assignmentsResult.data || []).map(mapTeamAssignment)
+  return (peopleResult.data || [])
+    .map((value) => mapPerson(value))
+    .filter((person) => personOverlapsPeriod(person, range.start, range.end, assignments))
+}
+
+export function attendanceAutoConfirmCutoff(
+  now: Date,
+  holidayDates: ReadonlySet<string>,
+) {
+  const current = hktYearMonth(now)
+  const range = dateRangeForMonth(current.year, current.month)
+  const thirdWorkingDay = enumerateWeekdays(range.start, range.end)
+    ?.filter((date) => !holidayDates.has(date))[2]
+  return thirdWorkingDay
+    ? hktTimestampForDateAndTime(thirdWorkingDay, "18:00")
+    : null
+}
+
+async function requireFullMonthAttendanceSyncCoverage(
+  client: SupabaseClient,
+  period: { year: number; month: number },
+  targets: Array<{ personId: string; dingTalkUserId: string }>,
+  cutoff: Date,
+  now: Date,
+) {
+  if (!targets.length) return
+
+  const range = dateRangeForMonth(period.year, period.month)
+  const monthStart = hktTimestampForDateAndTime(range.start, "00:00")!
+  if (monthStart < DINGTALK_ATTENDANCE_IMPORT_CUTOFF) {
+    throw new Error("Attendance auto-confirm blocked: this month begins before the DingTalk import cutoff.")
+  }
+  const nextDay = formatIsoDate(new Date(parseIsoDate(range.end)!.date.getTime() + 24 * 60 * 60 * 1000))
+  const monthClosedAt = hktTimestampForDateAndTime(nextDay, "00:00")!
+  const pageSize = 1_000
+  const syncRuns: Row[] = []
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await client.from("attendance_sync_runs")
+      .select("id,status,started_at,window_from,window_to,completed_at,people_requested,batches_attempted,requested_people")
+      .gte("window_to", monthStart.toISOString())
+      .lte("window_from", monthClosedAt.toISOString())
+      .order("window_from")
+      .order("id")
+      .range(offset, offset + pageSize - 1)
+    throwIfError(error, "Could not verify full-month attendance synchronization.")
+    const page = (data || []).map(asRow)
+    syncRuns.push(...page)
+    if (page.length < pageSize) break
+  }
+
+  for (const target of targets) {
+    const usableRuns: Array<{ from: number; to: number; startedAt: number; completedAt: number }> = []
+    for (const run of syncRuns) {
+      if (run.status !== "succeeded") continue
+      const from = Date.parse(String(run.window_from || ""))
+      const to = Date.parse(String(run.window_to || ""))
+      const startedAt = Date.parse(String(run.started_at || ""))
+      const completedAt = Date.parse(String(run.completed_at || ""))
+      const requestedPeople = asRow(run.requested_people)
+      const requestedCount = Object.keys(requestedPeople).length
+      if (
+        !Number.isFinite(from) || !Number.isFinite(to) ||
+        !Number.isFinite(startedAt) || !Number.isFinite(completedAt) || from > to ||
+        startedAt < cutoff.getTime() ||
+        completedAt < Math.max(to, startedAt) || completedAt > now.getTime() ||
+        requestedCount === 0 ||
+        Number(run.people_requested) !== requestedCount ||
+        !Number.isInteger(Number(run.batches_attempted)) ||
+        Number(run.batches_attempted) < Math.ceil(requestedCount / DINGTALK_ATTENDANCE_MAX_USERS) ||
+        requestedPeople[target.personId] !== target.dingTalkUserId
+      ) continue
+      usableRuns.push({ from, to, startedAt, completedAt })
+    }
+
+    const covers = (start: number, end: number, startedAfter: number) => {
+      let coveredUntil = start
+      for (const run of usableRuns) {
+        if (run.startedAt <= startedAfter) continue
+        if (run.from <= coveredUntil && run.to > coveredUntil) coveredUntil = run.to
+        if (coveredUntil >= end) return true
+      }
+      return false
+    }
+    if (!covers(monthStart.getTime(), monthClosedAt.getTime(), Number.NEGATIVE_INFINITY)) {
+      throw new Error("Attendance auto-confirm blocked: a pending person's DingTalk attendance has incomplete full-month synchronization coverage.")
+    }
+
+    for (const run of syncRuns) {
+      if (run.status === "succeeded") continue
+      const from = Date.parse(String(run.window_from || ""))
+      const to = Date.parse(String(run.window_to || ""))
+      const startedAt = Date.parse(String(run.started_at || ""))
+      const completedAt = Date.parse(String(run.completed_at || ""))
+      const anomalyFrom = Math.max(monthStart.getTime(), from)
+      const anomalyTo = Math.min(monthClosedAt.getTime(), to)
+      if (anomalyFrom >= anomalyTo) continue
+      const observedAt = run.status === "running" ? startedAt : completedAt
+      if (
+        !Number.isFinite(anomalyFrom) || !Number.isFinite(anomalyTo) ||
+        !Number.isFinite(startedAt) || !Number.isFinite(observedAt) ||
+        observedAt < startedAt || observedAt > now.getTime() ||
+        !covers(anomalyFrom, anomalyTo, observedAt)
+      ) {
+        throw new Error("Attendance auto-confirm blocked: an incomplete attendance synchronization window has not been rechecked successfully.")
+      }
+    }
+  }
+}
+
+async function requireMatchingHistoricalDingTalkIdentity(
+  client: SupabaseClient,
+  period: { year: number; month: number },
+  targets: Array<{ personId: string; dingTalkUserId: string }>,
+) {
+  const range = dateRangeForMonth(period.year, period.month)
+  await Promise.all(targets.map(async (target) => {
+    const { data, error } = await client.from("attendance_raw_punches")
+      .select("id")
+      .eq("person_id", target.personId)
+      .neq("dingtalk_user_id", target.dingTalkUserId)
+      .gte("work_date", range.start)
+      .lte("work_date", range.end)
+      .limit(1)
+      .maybeSingle()
+    throwIfError(error, "Could not verify historical DingTalk identity.")
+    if (data) {
+      throw new Error("Attendance auto-confirm blocked: this month has punches from another DingTalk identity.")
+    }
+  }))
+}
+
+async function requireNoOpenDingTalkPunchAnomalies(
+  client: SupabaseClient,
+  period: { year: number; month: number },
+  targets: Array<{ personId: string }>,
+) {
+  await Promise.all(targets.map(async (target) => {
+    const { data, error } = await client.rpc("attendance_open_dingtalk_punch_anomaly_count", {
+      p_person_id: target.personId,
+      p_year: period.year,
+      p_month: period.month,
+    })
+    throwIfError(error, "Could not verify DingTalk punch corrections.")
+    if (typeof data !== "number" || !Number.isInteger(data) || data !== 0) {
+      throw new Error("Attendance auto-confirm blocked: a DingTalk punch correction requires review.")
+    }
+  }))
+}
+
+async function loadAutoConfirmSnapshot(
+  client: SupabaseClient,
+  period: { year: number; month: number },
+  now: Date,
+) {
+  const sourceRevision = await getAttendanceSourceRevision(client)
+  const [calendar, people, assignmentsResult, remindersResult, confirmationsResult] = await Promise.all([
+    loadAttendanceCalendarContext(client),
+    loadAttendancePeopleForPeriod(client, period.year, period.month),
+    client.from("attendance_team_assignments").select("*"),
+    client.from("attendance_reminder_dispatches").select("person_id")
+      .eq("year", period.year).eq("month", period.month)
+      .eq("dispatch_kind", "second_reminder").eq("status", "sent"),
+    client.from("attendance_monthly_confirmations").select("id,person_id,status,updated_at")
+      .eq("year", period.year).eq("month", period.month),
+  ])
+  throwIfError(assignmentsResult.error, "Could not load attendance team history for confirmation.")
+  throwIfError(remindersResult.error, "Could not load final attendance reminders.")
+  throwIfError(confirmationsResult.error, "Could not load pending attendance confirmations.")
+  if (await getAttendanceSourceRevision(client) !== sourceRevision) {
+    throw new AttendanceSourceChangedError()
+  }
+
+  const cutoff = attendanceAutoConfirmCutoff(now, new Set(calendar.holidaysByDate.keys()))
+  const reminders = (remindersResult.data || []).map(asRow)
+  const confirmations = (confirmationsResult.data || []).map(asRow)
+  const byPerson = new Map(confirmations.map((value) => [String(value.person_id), value]))
+  const eligiblePeople = new Map(people.map((person) => [person.id, person]))
+  const targets: Array<{ personId: string; dingTalkUserId: string }> = []
+  if (cutoff && now.getTime() >= cutoff.getTime()) {
+    const seen = new Set<string>()
+    for (const value of reminders) {
+      const personId = String(value.person_id)
+      const person = eligiblePeople.get(personId)
+      if (!person || seen.has(personId)) continue
+      seen.add(personId)
+      const existing = byPerson.get(personId)
+      const updatedAt = existing ? stringOrNull(existing.updated_at) : null
+      // A review reopened after the original deadline must stay open. The
+      // checked RPC also rejects a review reopened after this snapshot.
+      if (existing && (existing.status !== "pending" || !updatedAt ||
+          !Number.isFinite(Date.parse(updatedAt)) || Date.parse(updatedAt) >= cutoff.getTime())) continue
+      if (!person.dingTalkUserId?.trim()) {
+        throw new Error("Attendance auto-confirm blocked: a pending person has no DingTalk identity.")
+      }
+      targets.push({ personId, dingTalkUserId: person.dingTalkUserId.trim() })
+    }
+  }
+  targets.sort((left, right) => left.personId.localeCompare(right.personId))
+
+  const canonicalRows = (rows: Row[]) => rows
+    .map((row) => Object.fromEntries(Object.entries(row)
+      .sort(([left], [right]) => left.localeCompare(right))))
+    .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+  const fingerprint = JSON.stringify({
+    cutoff: cutoff?.toISOString() || null,
+    calendar: {
+      staffOrder: calendar.staffOrder,
+      holidays: [...calendar.holidaysByDate.entries()]
+        .sort(([left], [right]) => left.localeCompare(right)),
+    },
+    people: [...people].sort((left, right) => left.id.localeCompare(right.id)),
+    assignments: canonicalRows((assignmentsResult.data || []).map(asRow)),
+    reminders: canonicalRows(reminders),
+    confirmations: canonicalRows(confirmations),
+    targets,
+  })
+  return { sourceRevision, cutoff, targets, fingerprint }
 }
 
 export async function autoConfirmOverdueAttendance(
   client: SupabaseClient,
   now = new Date(),
+  beforeCoverageCheck?: (input: {
+    year: number
+    month: number
+    people: Array<{ id: string; dingTalkUserId: string }>
+  }) => Promise<void>,
 ) {
-  const calendar = await loadAttendanceCalendarContext(client)
-  const holidayDates = new Set(calendar.holidaysByDate.keys())
   const period = previousMonthPeriod(now)
-  const cutoff = hktTimestampForDateAndTime(hktDateFromTimestamp(now), "18:00")
-  if (
-    hongKongWorkingDayNumber(now, holidayDates) !== 3 ||
-    !cutoff || now.getTime() < cutoff.getTime()
-  ) {
+  const initial = await loadAutoConfirmSnapshot(client, period, now)
+  if (!initial.cutoff || now.getTime() < initial.cutoff.getTime()) {
     return { skipped: true, ...period, systemConfirmed: 0 }
   }
-  const [{ data: reminded, error: reminderError }, { data: confirmations, error: confirmationError }] = await Promise.all([
-    client.from("attendance_reminder_dispatches").select("person_id").eq("year", period.year).eq("month", period.month).eq("dispatch_kind", "second_reminder").eq("status", "sent"),
-    client.from("attendance_monthly_confirmations").select("id,person_id,status").eq("year", period.year).eq("month", period.month),
-  ])
-  throwIfError(reminderError, "Could not load final attendance reminders.")
-  throwIfError(confirmationError, "Could not load pending attendance confirmations.")
-  const byPerson = new Map((confirmations || []).map((value) => [String(asRow(value).person_id), asRow(value)]))
-  let systemConfirmed = 0
-  for (const value of reminded || []) {
-    const personId = String(asRow(value).person_id)
-    const existing = byPerson.get(personId)
-    if (existing?.status === "confirmed") continue
-    const values = {
-      person_id: personId, year: period.year, month: period.month, status: "confirmed",
-      confirmed_at: now.toISOString(), confirmed_by: "system:attendance-auto-confirm",
-      note: "System confirmed after the second reminder. The employee may dispute the record directly with an administrator.",
-      created_by: "system:attendance-auto-confirm", updated_by: "system:attendance-auto-confirm",
+  const { cutoff, targets } = initial
+  if (targets.length) {
+    const monthStart = hktTimestampForDateAndTime(dateRangeForMonth(period.year, period.month).start, "00:00")!
+    if (monthStart < DINGTALK_ATTENDANCE_IMPORT_CUTOFF) {
+      throw new Error("Attendance auto-confirm blocked: this month begins before the DingTalk import cutoff.")
     }
-    const query = existing
-      ? client.from("attendance_monthly_confirmations").update({ ...values, created_by: undefined }).eq("id", String(existing.id)).eq("status", "pending")
-      : client.from("attendance_monthly_confirmations").insert(values)
-    const { data, error } = await query.select("id")
+    await requireMatchingHistoricalDingTalkIdentity(client, period, targets)
+    if (await getAttendanceSourceRevision(client) !== initial.sourceRevision) {
+      throw new AttendanceSourceChangedError()
+    }
+    await beforeCoverageCheck?.({
+      ...period,
+      people: targets.map((target) => ({ id: target.personId, dingTalkUserId: target.dingTalkUserId })),
+    })
+  }
+  let verified = initial
+  if (beforeCoverageCheck && targets.length) {
+    verified = await loadAutoConfirmSnapshot(client, period, now)
+    if (verified.fingerprint !== initial.fingerprint) {
+      throw new AttendanceSourceChangedError()
+    }
+  }
+  const verifiedAt = new Date(Math.max(now.getTime(), Date.now()))
+  await requireMatchingHistoricalDingTalkIdentity(client, period, targets)
+  await requireFullMonthAttendanceSyncCoverage(client, period, targets, cutoff, verifiedAt)
+  await requireNoOpenDingTalkPunchAnomalies(client, period, targets)
+  if (await getAttendanceSourceRevision(client) !== verified.sourceRevision) {
+    throw new AttendanceSourceChangedError()
+  }
+  let systemConfirmed = 0
+  for (const { personId } of targets) {
+    const { data, error } = await client.rpc("save_attendance_monthly_confirmation_checked", {
+      p_person_id: personId,
+      p_year: period.year,
+      p_month: period.month,
+      p_status: "confirmed",
+      p_note: "System confirmed after the second reminder. The employee may dispute the record directly with an administrator.",
+      p_actor: "system:attendance-auto-confirm",
+      p_expected_revision: verified.sourceRevision,
+      p_auto_cutoff: cutoff.toISOString(),
+    })
     if (error?.code === "23505") continue
+    if (error?.message?.includes("ATTENDANCE_SOURCE_CHANGED:")) {
+      throw new AttendanceSourceChangedError()
+    }
     throwIfError(error, "Could not system-confirm attendance.")
-    if (data?.length) systemConfirmed += 1
+    if ((Array.isArray(data) ? data : data ? [data] : []).length) systemConfirmed += 1
   }
   return { skipped: false, ...period, systemConfirmed }
 }

@@ -179,6 +179,13 @@ function yearArray(value: unknown) {
   )).sort((left, right) => right - left)
 }
 
+function sourceRevision(value: unknown) {
+  const revision = Number(value)
+  return value !== null && value !== undefined && Number.isSafeInteger(revision) && revision >= 0
+    ? revision
+    : undefined
+}
+
 function parseHoliday(value: unknown): ApiAttendanceHoliday | null {
   if (!isObject(value)) return null
   const title = String(value.title || value.name || "Hong Kong holiday").trim()
@@ -320,6 +327,7 @@ function parseMonthlyResponse(value: unknown, fallbackYear: number, fallbackMont
   }
   return {
     view: "monthly",
+    sourceRevision: sourceRevision(source.sourceRevision),
     year: Number(source.year) || fallbackYear,
     month: Number(source.month) || fallbackMonth,
     periodClosed: source.periodClosed === true,
@@ -333,6 +341,7 @@ function parseMonthlyResponse(value: unknown, fallbackYear: number, fallbackMont
 
 function parseYearResponse(value: unknown, fallbackYear: number) {
   const source = responseSource(value)
+  const revision = sourceRevision(source.sourceRevision)
   const year = Number(source.year) || fallbackYear
   const staffOrder = stringArray(source.staffOrder ?? source.staff_order ?? source.peopleOrder)
   const availableYears = yearArray(source.availableYears ?? source.available_years)
@@ -347,6 +356,7 @@ function parseYearResponse(value: unknown, fallbackYear: number) {
       return [[
         month,
         {
+          sourceRevision: revision,
           year,
           month,
           periodClosed: rawMonth.periodClosed === true,
@@ -375,6 +385,7 @@ function parseSettingsResponse(value: unknown, year: number): ApiSettingsRespons
     .filter((item): item is ApiAttendanceMonthlyAdjustment => Boolean(item))
   return {
     view: "settings",
+    sourceRevision: sourceRevision(source.sourceRevision),
     year: Number(source.year) || year,
     people: arrayValue<ApiAttendancePerson>(source.people),
     schedules: arrayValue(source.schedules),
@@ -1403,18 +1414,25 @@ export default function AttendanceRecordClient() {
     setPendingAction(`save-confirmation:${personId}:${selectedSummaryYear}:${month}`)
     setNotice("")
     try {
+      const revision = yearData[month]?.sourceRevision
+      if (revision === undefined) throw new Error("Reload the attendance statement before confirming it.")
       const payload = await postAttendance("save-confirmation", {
         confirmation: {
           personId,
           year: selectedSummaryYear,
           month,
           status: "confirmed",
+          sourceRevision: revision,
         },
       })
       setNotice(getErrorMessage(payload, `${MONTH_NAMES[month - 1]} attendance confirmed.`))
       await loadSelectedYear()
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Attendance confirmation could not be saved.")
+      const message = error instanceof Error ? error.message : "Attendance confirmation could not be saved."
+      if (message.includes("Reload") || message.includes("changed while this statement was open")) {
+        await loadSelectedYear()
+      }
+      setNotice(message)
     } finally {
       confirmationPendingRef.current = false
       setPendingAction("")
@@ -1427,6 +1445,8 @@ export default function AttendanceRecordClient() {
     setPendingAction(`save-annual-confirmation:${personId}:${selectedAllTimeYear}`)
     setNotice("")
     try {
+      const revision = settings.sourceRevision
+      if (revision === undefined) throw new Error("Reload the attendance statement before confirming it.")
       const payload = await postAttendance("save-confirmation", {
         confirmation: {
           personId,
@@ -1434,12 +1454,17 @@ export default function AttendanceRecordClient() {
           month: 12,
           status: "confirmed",
           note: "annual-summary",
+          sourceRevision: revision,
         },
       })
       setNotice(getErrorMessage(payload, `${selectedAllTimeYear} year-end summary confirmed.`))
       await loadAllTime()
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Year-end summary confirmation could not be saved.")
+      const message = error instanceof Error ? error.message : "Year-end summary confirmation could not be saved."
+      if (message.includes("Reload") || message.includes("changed while this statement was open")) {
+        await loadAllTime()
+      }
+      setNotice(message)
     } finally {
       confirmationPendingRef.current = false
       setPendingAction("")

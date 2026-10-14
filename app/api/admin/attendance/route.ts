@@ -6,6 +6,9 @@ import {
 import { createAdminAuditContext, createAdminAuditedSupabaseClient } from "@/lib/adminAudit"
 import {
   AttendanceValidationError,
+  AttendanceAlreadyConfirmedError,
+  AttendancePunchReviewRequiredError,
+  AttendanceSourceChangedError,
   attendancePersonBelongsToAdminUser,
   deleteAttendanceLeave,
   deleteAttendanceMonthlyAdjustment,
@@ -13,6 +16,8 @@ import {
   getAttendanceLeave,
   getAllTimeAttendance,
   getAttendanceSettings,
+  getAttendanceServiceClient,
+  getAttendanceSourceRevision,
   getDailyAttendance,
   getMonthlyAttendance,
   saveAttendanceDayEdit,
@@ -49,8 +54,21 @@ function errorStatus(error: unknown) {
   if (!(error instanceof Error)) return 500
   if (error.message === "Unauthorized") return 401
   if (error.message === "Forbidden") return 403
+  if (error instanceof AttendanceSourceChangedError || error instanceof AttendanceAlreadyConfirmedError ||
+      error instanceof AttendancePunchReviewRequiredError) return 409
   if (error instanceof AttendanceValidationError) return 400
   return 500
+}
+
+async function loadAttendanceSnapshot<T extends object>(load: () => Promise<T>) {
+  const client = getAttendanceServiceClient()
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const before = await getAttendanceSourceRevision(client)
+    const response = await load()
+    const after = await getAttendanceSourceRevision(client)
+    if (before === after) return { ...response, sourceRevision: before }
+  }
+  throw new AttendanceSourceChangedError()
 }
 
 function publicError(error: unknown, fallback: string) {
@@ -84,17 +102,17 @@ export async function GET(request: Request) {
     const canEdit = hasAdminPagePermission(session, ATTENDANCE_PAGE_ID, "edit")
     let response: unknown
     if (view === "daily") {
-      response = await getDailyAttendance(
+      response = await loadAttendanceSnapshot(() => getDailyAttendance(
         url.searchParams.get("date") || hktDateFromTimestamp(new Date()),
-      )
+      ))
     } else if (view === "leave") {
-      response = await getAttendanceLeave(url.searchParams.get("year"))
+      response = await loadAttendanceSnapshot(() => getAttendanceLeave(url.searchParams.get("year")))
     } else if (view === "monthly") {
       const scope = url.searchParams.get("scope")
       if (scope && scope !== "year" && scope !== "month") {
         throw new AttendanceValidationError("Attendance scope is unsupported.")
       }
-      response = await getMonthlyAttendance(
+      response = await loadAttendanceSnapshot(() => getMonthlyAttendance(
         url.searchParams.get("year"),
         url.searchParams.get("month"),
         {
@@ -103,17 +121,17 @@ export async function GET(request: Request) {
           includeYearSummary: scope === "year",
           monthOnly: scope === "month",
         },
-      )
+      ))
     } else if (view === "all-time") {
-      response = await getAllTimeAttendance(url.searchParams.get("year"), {
+      response = await loadAttendanceSnapshot(() => getAllTimeAttendance(url.searchParams.get("year"), {
         includeAvailableUsers: canEdit,
         adminUserId: session.adminUserId,
         canEdit,
-      })
+      }))
     } else if (view === "settings") {
-      response = await getAttendanceSettings(url.searchParams.get("year"), {
+      response = await loadAttendanceSnapshot(() => getAttendanceSettings(url.searchParams.get("year"), {
         includeAvailableUsers: canEdit,
-      })
+      }))
     } else {
       throw new AttendanceValidationError("Attendance view is unsupported.")
     }

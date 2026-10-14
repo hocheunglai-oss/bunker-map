@@ -24,6 +24,7 @@ const SPC_DELIVERY_ROUTES_MIGRATION_HEAD = "20260819025850"
 const SPC_LOST_REASON_OPTIONS_MIGRATION_HEAD = "20260831101207"
 const FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD = "20260830182946"
 const PHONEBOOK_CARDDAV_RECONCILIATION_MIGRATION_HEAD = "20260930074908"
+const ATTENDANCE_DINGTALK_ANOMALY_MIGRATION_HEAD = "20261014044009"
 const BACKUP_INVENTORY_SCHEMA = "bunker-map.backup-inventory/v1"
 const OUTLOOK_TEMPLATE_RESOLUTION_SCHEMA =
   "fcuno.outlook-template-recipient-resolution/v1"
@@ -273,6 +274,13 @@ const TRUTH_SECTIONS = [
   },
 ]
 
+const PRIVATE_ATTENDANCE_SECTIONS = [
+  { key: "attendanceDingtalkPunchAnomalies", primaryKey: ["id"] },
+  { key: "attendanceDingtalkPunchAnomalyResolutions", primaryKey: ["anomaly_id"] },
+  { key: "attendanceDingtalkMissingPunchAnomalies", primaryKey: ["id"] },
+  { key: "attendanceDingtalkMissingPunchResolutions", primaryKey: ["anomaly_id"] },
+]
+
 const EXTERNAL_SECTIONS = [
   { key: "googleContacts", primaryKey: ["resourceName"] },
   { key: "googleCalendarEvents", primaryKey: ["id"] },
@@ -308,6 +316,8 @@ function getBackupContract(migrationHead, pricingSchemaVersion = "none") {
   ].sort()
   const sectionSpecs = [
     ...tableSections,
+    ...(migrationHead >= ATTENDANCE_DINGTALK_ANOMALY_MIGRATION_HEAD
+      ? PRIVATE_ATTENDANCE_SECTIONS : []),
     ...TRUTH_SECTIONS,
     ...EXTERNAL_SECTIONS,
   ]
@@ -1517,6 +1527,90 @@ function validatePriceSetterCreationReceipts(receipts, pricingSchemaVersion = "c
   return errors
 }
 
+function validateAttendanceDingtalkEvidence(data, migrationHead = "") {
+  if (String(migrationHead) < ATTENDANCE_DINGTALK_ANOMALY_MIGRATION_HEAD) return []
+  const errors = []
+  const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i
+  const sha256 = /^[0-9a-f]{64}$/
+  const date = /^\d{4}-\d{2}-\d{2}$/
+  const rawById = new Map(rows(data, "attendanceRawPunches").filter(isPlainObject).map((row) => [row.id, row]))
+  const personIds = idSet(data, "attendancePeople")
+  const changed = rows(data, "attendanceDingtalkPunchAnomalies")
+  const changedIds = new Set(changed.filter(isPlainObject).map((row) => row.id))
+  const changedResolutions = rows(data, "attendanceDingtalkPunchAnomalyResolutions")
+  const changedResolvedIds = new Set(changedResolutions.filter(isPlainObject).map((row) => row.anomaly_id))
+  const missing = rows(data, "attendanceDingtalkMissingPunchAnomalies")
+  const missingIds = new Set(missing.filter(isPlainObject).map((row) => row.id))
+  const missingResolutions = rows(data, "attendanceDingtalkMissingPunchResolutions")
+  const missingResolvedIds = new Set(missingResolutions.filter(isPlainObject).map((row) => row.anomaly_id))
+
+  for (const [index, row] of changed.entries()) {
+    const label = `attendanceDingtalkPunchAnomalies[${index}]`
+    if (!isPlainObject(row) || !uuid.test(String(row.id || "")) ||
+      !rawById.has(row.existing_raw_punch_id) ||
+      !["changed-fields", "changed-user"].includes(row.kind) ||
+      !sha256.test(String(row.incoming_source_record_key || "")) ||
+      row.incoming_source_record_id !== null &&
+        (typeof row.incoming_source_record_id !== "string" || !row.incoming_source_record_id.trim()) ||
+      !personIds.has(row.incoming_person_id) ||
+      typeof row.incoming_dingtalk_user_id !== "string" || !row.incoming_dingtalk_user_id.trim() ||
+      !["OnDuty", "OffDuty", "Unclassified"].includes(row.incoming_check_type) ||
+      !isValidTimestamp(row.incoming_punch_time) ||
+      !date.test(String(row.incoming_work_date || "")) ||
+      !isValidTimestamp(row.first_seen_at)) {
+      errors.push(`${label}: invalid or incomplete punch-correction evidence`)
+    }
+  }
+  for (const [index, row] of missing.entries()) {
+    const label = `attendanceDingtalkMissingPunchAnomalies[${index}]`
+    if (!isPlainObject(row) || !uuid.test(String(row.id || "")) ||
+      !rawById.has(row.existing_raw_punch_id) ||
+      !isValidTimestamp(row.observed_window_from) ||
+      !isValidTimestamp(row.observed_window_to) ||
+      Date.parse(row.observed_window_from) > Date.parse(row.observed_window_to) ||
+      !isValidTimestamp(row.first_seen_at)) {
+      errors.push(`${label}: invalid or incomplete missing-punch evidence`)
+    }
+  }
+  for (const [section, entries, parentIds] of [
+    ["attendanceDingtalkPunchAnomalyResolutions", changedResolutions, changedIds],
+    ["attendanceDingtalkMissingPunchResolutions", missingResolutions, missingIds],
+  ]) {
+    for (const [index, row] of entries.entries()) {
+      if (!isPlainObject(row) || !parentIds.has(row.anomaly_id) ||
+        !isValidTimestamp(row.resolved_at) ||
+        typeof row.resolved_by !== "string" || !row.resolved_by.trim() ||
+        typeof row.resolution_note !== "string" || !row.resolution_note.trim()) {
+        errors.push(`${section}[${index}]: invalid or orphaned resolution`)
+      }
+    }
+  }
+
+  const confirmed = new Set(rows(data, "attendanceMonthlyConfirmations")
+    .filter((row) => isPlainObject(row) && row.status === "confirmed")
+    .map((row) => `${row.person_id}:${row.year}:${row.month}`))
+  const isConfirmed = (personId, workDate) => date.test(String(workDate || "")) &&
+    confirmed.has(`${personId}:${Number(workDate.slice(0, 4))}:${Number(workDate.slice(5, 7))}`)
+  for (const row of changed) {
+    if (!isPlainObject(row) || changedResolvedIds.has(row.id)) continue
+    const raw = rawById.get(row.existing_raw_punch_id)
+    if (raw && (isConfirmed(raw.person_id, raw.work_date) ||
+      isConfirmed(row.incoming_person_id, row.incoming_work_date))) {
+      errors.push(`attendanceDingtalkPunchAnomalies: an open correction has a confirmed month`)
+      break
+    }
+  }
+  for (const row of missing) {
+    if (!isPlainObject(row) || missingResolvedIds.has(row.id)) continue
+    const raw = rawById.get(row.existing_raw_punch_id)
+    if (raw && isConfirmed(raw.person_id, raw.work_date)) {
+      errors.push(`attendanceDingtalkMissingPunchAnomalies: an open omission has a confirmed month`)
+      break
+    }
+  }
+  return errors
+}
+
 function validateSections(backup, errors, warnings) {
   const pricingSchemaVersion = pricingBackupSchemaVersion(pricingBackupSchemaFromArtifact(backup.databaseInventory))
   const contract = getBackupContract(String(backup.migrationHead || ""), pricingSchemaVersion)
@@ -1635,6 +1729,7 @@ function validateSections(backup, errors, warnings) {
   const whatsappConversationIds = idSet(data, "whatsappConversations")
   const attendancePersonIds = idSet(data, "attendancePeople")
   const attendanceRawPunchIds = idSet(data, "attendanceRawPunches")
+  for (const message of validateAttendanceDingtalkEvidence(data, backup.migrationHead)) addError(errors, message)
 
   checkReferences(
     rows(data, "fcunoIdentityAudit"),
