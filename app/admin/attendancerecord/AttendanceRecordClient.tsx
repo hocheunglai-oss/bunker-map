@@ -1813,8 +1813,15 @@ export default function AttendanceRecordClient() {
                   <tbody>
                     {filteredMonthSections.map((section) =>
                       section.rows.map((row, rowIndex) => {
-                        const confirmed = row.summary?.confirmation?.status === "confirmed"
-                        const systemConfirmed = confirmed && row.summary?.confirmation?.confirmedBy === "system:attendance-auto-confirm"
+                        const confirmation = row.summary?.confirmation
+                        const confirmed = confirmation?.status === "confirmed"
+                        const retrospectiveSystemConfirmed = confirmation?.confirmedBy === "system:attendance-retrospective-confirm"
+                        const systemConfirmed = confirmed && (
+                          confirmation?.confirmedBy === "system:attendance-auto-confirm" || retrospectiveSystemConfirmed
+                        )
+                        const confirmationTitle = retrospectiveSystemConfirmed
+                          ? [displayDateTime(confirmation?.confirmedAt || null), confirmation?.note].filter(Boolean).join(" · ")
+                          : displayDateTime(confirmation?.confirmedAt || null)
                         const open = !yearData[section.month]?.periodClosed
                         return (
                           <tr key={`${section.month}:${row.person.id}`}>
@@ -1844,7 +1851,11 @@ export default function AttendanceRecordClient() {
                             <td className={summaryNumberClass(row.lateDays, "late")}>{traceableNumber(row.lateDays, row.summary?.lateDates, `${row.person.staffCode} · ${section.label} ${selectedSummaryYear} · LATE`)}</td>
                             <td className={styles.confirmationCell}>
                               {confirmed ? (
-                                <span className={styles.confirmedBadge} title={displayDateTime(row.summary?.confirmation?.confirmedAt || null)}>
+                                <span
+                                  className={styles.confirmedBadge}
+                                  title={confirmationTitle}
+                                  aria-label={retrospectiveSystemConfirmed ? `System confirmed. ${confirmation?.note || ""}` : undefined}
+                                >
                                   {systemConfirmed ? "SYSTEM CONFIRMED" : "CONFIRMED"}
                                 </span>
                               ) : open ? (
