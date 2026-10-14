@@ -621,6 +621,8 @@ export default function EmailTemplatesAdminPage() {
   const pendingTemplatesRef = useRef<Map<string, EmailTemplate>>(new Map())
   const failedSavesRef = useRef<Set<string>>(new Set())
   const queuedSavePromisesRef = useRef<Map<string, Promise<void>>>(new Map())
+  const deletingTemplateIdsRef = useRef<Set<string>>(new Set())
+  const templateConflictVersionsRef = useRef<Map<string, number>>(new Map())
   const writeQueueRef = useRef<Promise<void>>(Promise.resolve())
   const detailPromisesRef = useRef<Map<string, Promise<EmailTemplate>>>(new Map())
   const templatesRef = useRef<EmailTemplate[]>(initialTemplates)
@@ -1015,6 +1017,10 @@ export default function EmailTemplatesAdminPage() {
   }
 
   async function reloadTemplateAfterConflict(templateId: string, conflictMessage: string) {
+    templateConflictVersionsRef.current.set(
+      templateId,
+      (templateConflictVersionsRef.current.get(templateId) || 0) + 1,
+    )
     clearAutosaveTimer(templateId)
     pendingTemplatesRef.current.delete(templateId)
     dirtyVersionsRef.current.delete(templateId)
@@ -1060,6 +1066,9 @@ export default function EmailTemplatesAdminPage() {
   }
 
   async function savePendingTemplateNow(templateId: string) {
+    // A confirmed deletion does not need to save the draft it will remove.
+    // Any request already in flight is awaited by the deletion handler.
+    if (deletingTemplateIdsRef.current.has(templateId)) return false
     const pendingTemplate = pendingTemplatesRef.current.get(templateId)
     if (!pendingTemplate) return false
 
@@ -1105,13 +1114,11 @@ export default function EmailTemplatesAdminPage() {
           revision: savedTemplate.revision,
         }
         pendingTemplatesRef.current.set(templateId, rebasedTemplate)
-        setTemplates((current) => {
-          const next = current.map((item) =>
-            item.id === templateId ? rebasedTemplate : item
-          )
-          templatesRef.current = next
-          return next
-        })
+        const next = templatesRef.current.map((item) =>
+          item.id === templateId ? rebasedTemplate : item
+        )
+        templatesRef.current = next
+        setTemplates(next)
         setLastUpdatedAt(data.lastUpdatedAt || savedTemplate.updatedAt)
         setTemplateSaveState(templateId, "dirty")
         return true
@@ -1120,13 +1127,13 @@ export default function EmailTemplatesAdminPage() {
       pendingTemplatesRef.current.delete(templateId)
       dirtyVersionsRef.current.delete(templateId)
       failedSavesRef.current.delete(templateId)
-      setTemplates((current) => {
-        const next = current.map((item) =>
-          item.id === savedTemplate.id ? { ...item, ...savedTemplate } : item
-        )
-        templatesRef.current = next
-        return next
-      })
+      // Publish the acknowledged revision synchronously to queued operations;
+      // a React render can occur after their promise continuation resumes.
+      const next = templatesRef.current.map((item) =>
+        item.id === savedTemplate.id ? { ...item, ...savedTemplate } : item
+      )
+      templatesRef.current = next
+      setTemplates(next)
       setLastUpdatedAt(data.lastUpdatedAt || savedTemplate.updatedAt || new Date().toISOString())
       setTemplateSaveState(templateId, "saved")
       return false
@@ -1141,6 +1148,7 @@ export default function EmailTemplatesAdminPage() {
   function queueTemplateSave(templateId: string) {
     const existing = queuedSavePromisesRef.current.get(templateId)
     if (existing) return existing
+    if (deletingTemplateIdsRef.current.has(templateId)) return Promise.resolve()
 
     const queued = writeQueueRef.current
       .catch(() => undefined)
@@ -1447,9 +1455,21 @@ export default function EmailTemplatesAdminPage() {
 
     if (libraryBusyRef.current) return
     setLibraryOperationBusy(true)
+    deletingTemplateIdsRef.current.add(templateId)
+    clearAutosaveTimer(templateId)
+    const conflictVersion = templateConflictVersionsRef.current.get(templateId) || 0
     setMessage("")
     try {
-      await flushPendingSaves()
+      // Unrelated unsaved templates must not block this independent deletion.
+      // Finish only this template's existing save, so its persisted revision is
+      // current and a late autosave cannot recreate it after deletion.
+      await queuedSavePromisesRef.current.get(templateId)
+      clearAutosaveTimer(templateId)
+      if ((templateConflictVersionsRef.current.get(templateId) || 0) !== conflictVersion) {
+        // The save reloaded a colleague's newer version. The original Delete
+        // confirmation does not authorize deleting that replacement version.
+        return
+      }
       const currentTemplate = templatesRef.current.find(
         (template) => template.id === templateId
       )
@@ -1479,6 +1499,7 @@ export default function EmailTemplatesAdminPage() {
       pendingTemplatesRef.current.delete(templateId)
       dirtyVersionsRef.current.delete(templateId)
       failedSavesRef.current.delete(templateId)
+      templateConflictVersionsRef.current.delete(templateId)
       setConflictAlert((current) =>
         current?.templateId === templateId ? null : current
       )
@@ -1503,6 +1524,7 @@ export default function EmailTemplatesAdminPage() {
         setMessage(error instanceof Error ? error.message : "Delete failed.")
       }
     } finally {
+      deletingTemplateIdsRef.current.delete(templateId)
       setLibraryOperationBusy(false)
     }
   }
@@ -1579,7 +1601,7 @@ export default function EmailTemplatesAdminPage() {
             paddingLeft: `${Math.min(node.depth * 13, 65)}px`,
             border: 0,
             borderRadius: "6px",
-            background: dropTargetFolder === node.path ? "#d6ecff" : active ? "var(--fc-row-active-bg)" : "#ffffff",
+            background: dropTargetFolder === node.path || active ? "var(--fc-row-active-bg)" : "var(--fc-admin-panel-bg)",
             outline: dropTargetFolder === node.path ? "2px solid var(--fc-accent)" : "none",
             outlineOffset: "-2px",
             color: active ? "var(--fc-row-active-text)" : "var(--fc-text)",
@@ -1627,7 +1649,7 @@ export default function EmailTemplatesAdminPage() {
             paddingLeft: `${Math.min(node.depth * 13, 65)}px`,
             border: 0,
             borderRadius: "6px",
-            background: active ? "var(--fc-row-active-bg)" : "#ffffff",
+            background: active ? "var(--fc-row-active-bg)" : "var(--fc-admin-panel-bg)",
             color: active ? "var(--fc-row-active-text)" : "var(--fc-text)",
             cursor: "pointer",
             textAlign: "left",
