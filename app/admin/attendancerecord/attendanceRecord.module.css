@@ -165,10 +165,6 @@
   overflow: auto;
 }
 
-.yearSummaryTable {
-  min-width: 1180px;
-}
-
 .monthRecordTable,
 .yearSummaryTable {
   width: 100%;
@@ -373,7 +369,7 @@
 }
 
 .yearSummaryTable {
-  min-width: 0;
+  min-width: 1180px;
   width: 100%;
 }
 
@@ -1348,6 +1344,16 @@
 }
 
 @media (max-width: 760px) {
+  .yearSummaryTable thead th:nth-child(1),
+  .yearSummaryTable .monthCell {
+    width: 60px;
+  }
+
+  .yearSummaryTable thead th:nth-child(2),
+  .yearSummaryTable .summaryStaffCell {
+    left: 60px;
+  }
+
   .page {
     padding: 12px;
   }

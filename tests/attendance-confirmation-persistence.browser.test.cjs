@@ -387,6 +387,16 @@ async function main() {
           documentWidth: document.documentElement.scrollWidth,
           viewportWidth: window.innerWidth,
         }))
+        const tableWidth = await page.locator("table").first().evaluate((table) =>
+          table.getBoundingClientRect().width)
+        assert.ok(tableWidth >= 1180, `${browserName} ${width}px ${colorScheme} monthly table is compressed`)
+        if (width <= 390) {
+          const stickyHeaders = await page.locator("table tbody tr").first().locator("th").evaluateAll((headers) =>
+            headers.map((header) => ({ left: header.getBoundingClientRect().left,
+              right: header.getBoundingClientRect().right })))
+          assert.ok(stickyHeaders[1].left >= stickyHeaders[0].right - 4,
+            `${browserName} ${width}px ${colorScheme} sticky month and staff columns overlap: ${JSON.stringify(stickyHeaders)}`)
+        }
         assert.ok(bodyOverflow.documentWidth <= bodyOverflow.viewportWidth + 1,
           `${browserName} ${width}px ${colorScheme} page overflow: ${JSON.stringify(bodyOverflow)}`)
         assert.equal(await ongoingBadge.isVisible(), true)
