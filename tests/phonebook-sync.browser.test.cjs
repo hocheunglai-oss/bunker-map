@@ -7,6 +7,7 @@ const assert = require("node:assert/strict")
 const http = require("node:http")
 const path = require("node:path")
 const { build } = require("esbuild")
+const { readFileSync } = require("node:fs")
 
 const root = path.resolve(__dirname, "..")
 const RETRY_KEY = "phonebook_carddav_pending:v2"
@@ -30,10 +31,13 @@ async function main() {
   })
   const assets = new Map(bundle.outputFiles.map((file) => [`/${path.basename(file.path)}`, file.contents]))
   const script = [...assets.keys()].find((name) => name.endsWith(".js"))
+  const adminTheme = readFileSync(path.join(root, "app/globals.css"), "utf8").match(/\.fc-admin-scope\s*\{[\s\S]*?\}/)?.[0]
+  assert.ok(adminTheme, "Use the real admin theme variables for visual verification")
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Local Phonebook sync regression</title><style>
   :root { --fc-admin-page-bg:#f4f5f8; --fc-admin-font:Arial,sans-serif; --fc-admin-panel-text:#20232a; --fc-admin-heading:#20232a; --fc-admin-panel-bg:#fff; --fc-admin-panel-soft-bg:#f8f9fc; --fc-admin-border:#ccd0d8; --fc-admin-border-soft:#dfe2e8; --fc-admin-muted:#69707d; --fc-admin-button-bg:#f4f5f8; --fc-admin-button-text:#20232a; --fc-admin-button-border:#ccd0d8; --fc-admin-primary-button-bg:#0672ed; --fc-admin-primary-button-text:#fff; --fc-admin-selected-bg:#e7f2ff; --fc-admin-selected-border:#0672ed; --fc-admin-success-bg:#218838; --fc-admin-success-text:#218838; --fc-admin-success-border:#218838; --fc-admin-danger-bg:#dc001b; --fc-admin-danger-text:#dc001b; --fc-admin-danger-border:#dc001b; --fc-admin-warning-bg:#fff3bf; --fc-admin-warning-text:#704b00; --fc-admin-warning-border:#e9be38; --fc-admin-link:#0672ed; --fc-input-border:#ccd0d8; --fc-tool-input-bg:#fff; --fc-tool-input-text:#20232a; }
   * { box-sizing:border-box; } body { margin:0; font-family:Arial,sans-serif; } button,input,select { font:inherit; } button:disabled { opacity:.55; cursor:default!important; }
-  </style></head><body><div id="root"></div><script src="${script}"></script></body></html>`
+  ${adminTheme}
+  </style></head><body><div id="root" class="fc-admin-scope"></div><script src="${script}"></script></body></html>`
   const server = http.createServer((request, response) => {
     if (request.method !== "GET") { response.writeHead(405); response.end("Read-only fixture server"); return }
     const asset = assets.get(new URL(request.url, "http://127.0.0.1").pathname)
@@ -52,15 +56,16 @@ async function main() {
       })
       return
     }
-    const { chromium } = require("playwright")
-    browser = await chromium.launch({ headless: true, ...(process.env.CHROME_EXECUTABLE_PATH ? { executablePath: process.env.CHROME_EXECUTABLE_PATH } : {}) })
+    const engine = process.env.BROWSER_ENGINE || "chromium"
+    const browserType = require("playwright")[engine]
+    browser = await browserType.launch({ headless: true, ...(engine === "chromium" && process.env.CHROME_EXECUTABLE_PATH ? { executablePath: process.env.CHROME_EXECUTABLE_PATH } : {}) })
     const errors = []
     const blockedRequests = []
     let context
     let page
     async function reset() {
       if (context) await context.close()
-      context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+      context = await browser.newContext({ viewport: { width: Number(process.env.PHONEBOOK_TEST_WIDTH || 1440), height: 1000 }, colorScheme: process.env.PHONEBOOK_TEST_SCHEME || "light" })
       await context.route("**/*", (route) => {
         if (new URL(route.request().url()).origin === baseUrl) return route.continue()
         blockedRequests.push(route.request().url())
@@ -89,6 +94,60 @@ async function main() {
       await button(page, "Sync selected company").waitFor()
       await settle(page)
     }
+
+    await reset()
+    await company(page).dblclick()
+    let saveDialog = page.getByRole("dialog", { name: "Company details" })
+    await saveDialog.getByRole("button", { name: "Save", exact: true }).waitFor()
+    await saveDialog.getByText("Company Name", { exact: true }).locator("..").locator("input").fill("RENAMED SHIPPING")
+    await saveDialog.getByRole("button", { name: "Save", exact: true }).click()
+    await company(page, "RENAMED SHIPPING").waitFor()
+    await page.waitForFunction(() => window.__phonebookSyncHarness.activeSyncs === 0)
+    assert.equal(await page.evaluate(() => window.__phonebookSyncHarness.requests.filter((r) => r.url === "/api/phonebook/company" && r.method === "POST").length), 1)
+    assert.deepEqual(await page.evaluate(() => window.__phonebookSyncHarness.operations.filter((op) => op.method === "PATCH")), [], "company rename must not issue a browser-dependent company/contact write cascade")
+    assert.equal(await page.evaluate(() => window.__phonebookSyncHarness.contacts.filter((row) => row.company === "RENAMED SHIPPING").length), 3)
+    assert.equal(await page.evaluate(() => window.__phonebookSyncHarness.companies[0].tel_no_1), "22334455")
+    await reset()
+    await company(page).dblclick()
+    saveDialog = page.getByRole("dialog", { name: "Company details" })
+    await saveDialog.getByText("Company Name", { exact: true }).locator("..").locator("input").fill("UNSAVED COMPANY DRAFT")
+    await page.evaluate(() => { window.__phonebookSyncHarness.companySaveStatus = 409 })
+    await saveDialog.getByRole("button", { name: "Save", exact: true }).click()
+    await page.getByText("This company changed or was removed. Your edits are still here; reopen it before saving again.", { exact: true }).waitFor()
+    assert.equal(await saveDialog.getByText("Company Name", { exact: true }).locator("..").locator("input").inputValue(), "UNSAVED COMPANY DRAFT")
+    assert.equal(await saveDialog.getByRole("button", { name: "Save", exact: true }).isEnabled(), true)
+    assert.equal(await page.evaluate(() => window.__phonebookSyncHarness.companies[0].name), "ALPHA SHIPPING")
+    if (process.env.PHONEBOOK_SCREENSHOT) await page.screenshot({ path: process.env.PHONEBOOK_SCREENSHOT, fullPage: true })
+    assert.deepEqual(errors, [], "no browser errors in atomic company save")
+    await reset()
+    await company(page).dblclick()
+    saveDialog = page.getByRole("dialog", { name: "Company details" })
+    await saveDialog.getByText("Company Name", { exact: true }).locator("..").locator("input").fill("HELD COMPANY SAVE")
+    await page.evaluate(() => { window.__phonebookSyncHarness.deferCompanySave = true })
+    await saveDialog.getByRole("button", { name: "Save", exact: true }).click()
+    await page.waitForFunction(() => Boolean(window.__phonebookSyncHarness.releaseCompanySave))
+    assert.equal(await saveDialog.getByRole("button", { name: "Close", exact: true }).isDisabled(), true)
+    assert.equal(await saveDialog.getByRole("button", { name: "Delete", exact: true }).isDisabled(), true)
+    assert.equal(await saveDialog.getByText("Company Name", { exact: true }).locator("..").locator("input").isDisabled(), true)
+    await saveDialog.getByRole("button", { name: "Close", exact: true }).evaluate((node) => node.click())
+    assert.equal(await saveDialog.isVisible(), true, "a pending company save cannot close and replace the active draft")
+    await page.evaluate(() => window.__phonebookSyncHarness.releaseCompanySave())
+    await company(page, "HELD COMPANY SAVE").waitFor()
+    await reset()
+    await page.evaluate(() => { window.__phonebookSyncHarness.companyReadPlan = [true, true] })
+    await company(page).dblclick()
+    saveDialog = page.getByRole("dialog", { name: "Company details" })
+    await page.waitForFunction(() => window.__phonebookSyncHarness.releaseCompanyReads?.length === 1)
+    await saveDialog.getByRole("button", { name: "Close", exact: true }).click()
+    await company(page).dblclick()
+    await page.waitForFunction(() => window.__phonebookSyncHarness.releaseCompanyReads?.length === 2)
+    await page.evaluate(() => window.__phonebookSyncHarness.releaseCompanyReads[1]())
+    await saveDialog.getByText("Company Name", { exact: true }).locator("..").locator("input").fill("NEWER LOCAL COMPANY DRAFT")
+    await page.evaluate(() => window.__phonebookSyncHarness.releaseCompanyReads[0]())
+    await settle(page)
+    assert.equal(await saveDialog.getByText("Company Name", { exact: true }).locator("..").locator("input").inputValue(), "NEWER LOCAL COMPANY DRAFT", "an older load for the same company cannot replace a reopened newer draft")
+    console.log(`PASS: atomic company save and stale draft retention (${engine}, ${process.env.PHONEBOOK_TEST_WIDTH || 1440}px, ${process.env.PHONEBOOK_TEST_SCHEME || "light"})`)
+    if (process.argv.includes("--company-only")) return
 
     await reset()
     assert.equal(await button(page, "Sync selected company").count(), 1)

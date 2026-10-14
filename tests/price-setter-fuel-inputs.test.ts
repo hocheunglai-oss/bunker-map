@@ -62,16 +62,20 @@ test("direct-only rows do not acquire a new formula workflow or silently clear t
 
 test("Taiwan defaults use the report's shared basis; a direct/blank edit cannot silently save an ignored quote", () => {
   for (const name of ["Keelung", "Suao", "Hualien"]) {
-    const row = { ...port, name, vlsfo_formula: null }
-    assert.deepEqual(priceSetterFuelInput(row, "vlsfo"), { isFormula: true, value: "taichung + 0" })
-    assert.equal(buildPriceSetterFuelChanges(row).vlsfo_formula, "taichung + 0")
-    for (const value of ["0", "123", "", " "]) {
-      const edited = { ...row, ...priceSetterFuelEdit("vlsfo", value) }
-      assert.equal(priceSetterFuelInput(edited, "vlsfo", value).value, value)
-      assert.throws(() => buildPriceSetterFuelChanges(edited, { vlsfo: value }), /uses a formula/)
+    for (const label of [name, name.toUpperCase(), ` ${name} `]) {
+      const row = { ...port, name: label, vlsfo_formula: null }
+      for (const fuel of ["vlsfo", "mgo"] as const) {
+        assert.deepEqual(priceSetterFuelInput(row, fuel), { isFormula: true, value: "taichung + 0" })
+        assert.equal(buildPriceSetterFuelChanges(row)[`${fuel}_formula`], "taichung + 0")
+        for (const value of ["0", "123", "", " "]) {
+          const edited = { ...row, ...priceSetterFuelEdit(fuel, value) }
+          assert.deepEqual(priceSetterFuelInput(edited, fuel, value), { isFormula: true, value })
+          assert.throws(() => buildPriceSetterFuelChanges(edited, { [fuel]: value }), /uses a formula/)
+        }
+        const edited = { ...row, ...priceSetterFuelEdit(fuel, "Taichung + 10") }
+        assert.equal(buildPriceSetterFuelChanges(edited, { [fuel]: "Taichung + 10" })[`${fuel}_formula`], "Taichung + 10")
+      }
+      assert.equal(priceSetterFuelInput(row, "hsfo").value, 100)
     }
-    const edited = { ...row, ...priceSetterFuelEdit("vlsfo", "Taichung + 10") }
-    assert.equal(buildPriceSetterFuelChanges(edited, { vlsfo: "Taichung + 10" }).vlsfo_formula, "Taichung + 10")
-    assert.equal(priceSetterFuelInput(row, "hsfo").value, 100)
   }
 })

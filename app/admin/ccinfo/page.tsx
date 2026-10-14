@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -53,6 +53,20 @@ type EntryFolderRecord = {
   id: string
   folder_path: string
   name: string
+  updated_at?: string
+  implicit?: boolean
+}
+
+type FilePanelData = {
+  files: Array<CompanyFileRecord | EntryFileRecord>
+  deletedFiles: Array<CompanyFileRecord | EntryFileRecord>
+  folders: EntryFolderRecord[]
+}
+type FolderRelocation = {
+  entryKind: string; entryId: string; previousPath: string; folderPath: string
+  folders: EntryFolderRecord[]
+  entryFiles: Array<{ id: string; folder_path: string; original_path: string }>
+  companyFiles: Array<{ id: string; folder_path: string; original_path: string }>
 }
 
 type FilePanelEditTarget =
@@ -600,14 +614,6 @@ function folderDepth(folderPath: string) {
   return folderPath.split("/").filter(Boolean).length
 }
 
-function rebaseFolderPath(currentPath: string, sourcePath: string, targetParentPath: string) {
-  const folderName = sourcePath.split("/").filter(Boolean).pop() || sourcePath
-  const nextRoot = [targetParentPath, folderName].filter(Boolean).join("/")
-  if (currentPath === sourcePath) return nextRoot
-  if (currentPath.startsWith(`${sourcePath}/`)) return `${nextRoot}${currentPath.slice(sourcePath.length)}`
-  return currentPath
-}
-
 function canMoveFolderToPath(sourcePath: string, targetParentPath: string) {
   const currentParentPath = sourcePath.split("/").filter(Boolean).slice(0, -1).join("/")
   if (!sourcePath || currentParentPath === targetParentPath) return false
@@ -624,7 +630,7 @@ function deriveFolderPathFromOriginalPath(originalPath?: string | null) {
     const segments = relative.split("/").filter(Boolean)
     return segments.slice(0, -1).join("/")
   }
-  const genericMatch = normalized.match(/company\/[^/]+\/(.+)$/)
+  const genericMatch = normalized.match(/company\/[^/]+\/(.+)$/i)
   if (genericMatch?.[1]) {
     const relative = genericMatch[1]
     const segments = relative.split("/").filter(Boolean)
@@ -633,7 +639,7 @@ function deriveFolderPathFromOriginalPath(originalPath?: string | null) {
   return ""
 }
 
-function deriveVirtualFoldersFromFiles(files: Array<CompanyFileRecord | EntryFileRecord>) {
+function deriveVirtualFoldersFromFiles(files: Array<{ folder_path?: string | null }>) {
   const seen = new Map<string, EntryFolderRecord>()
   for (const file of files) {
     const folderPath = (file.folder_path || "").trim()
@@ -652,7 +658,7 @@ function deriveVirtualFoldersFromFiles(files: Array<CompanyFileRecord | EntryFil
 }
 
 function mergeFolderRecords(realFolders: EntryFolderRecord[], files: Array<CompanyFileRecord | EntryFileRecord>) {
-  const virtualFolders = deriveVirtualFoldersFromFiles(files)
+  const virtualFolders = deriveVirtualFoldersFromFiles([...files, ...realFolders.map((folder) => ({ folder_path: folder.folder_path }))])
   const seen = new Set<string>()
   const merged: EntryFolderRecord[] = []
   for (const folder of [...realFolders, ...virtualFolders]) {
@@ -1090,7 +1096,7 @@ function BlockTextBlock({
   )
 }
 
-async function fetchEntryFiles(kind: RecordKind, id: string) {
+async function fetchEntryFiles(kind: RecordKind, id: string, strict = false) {
   const withFolderPath = await supabase
     .from("cc_entry_files")
     .select("id,file_name,file_type,drive_url,drive_file_id,folder_path,deleted_at")
@@ -1107,6 +1113,7 @@ async function fetchEntryFiles(kind: RecordKind, id: string) {
       source: "entry" as const,
     })))
   }
+  if (strict) throw withFolderPath.error
 
   const legacy = await supabase
     .from("cc_entry_files")
@@ -1123,13 +1130,15 @@ async function fetchEntryFiles(kind: RecordKind, id: string) {
   })))
 }
 
-async function fetchCompanyFiles(id: string) {
+async function fetchCompanyFiles(id: string, strict = false) {
   const legacy = await supabase
     .from("cc_company_files")
     .select("id,file_name,file_type,drive_url,drive_file_id,original_path,deleted_at")
     .eq("company_id", id)
     .is("deleted_at", null)
     .order("file_name", { ascending: true })
+
+  if (strict && legacy.error) throw legacy.error
 
   return (((legacy.data as CompanyFileRecord[]) || []).map((file) => ({
     ...file,
@@ -1138,7 +1147,7 @@ async function fetchCompanyFiles(id: string) {
   })))
 }
 
-async function fetchDeletedEntryFiles(kind: RecordKind, id: string) {
+async function fetchDeletedEntryFiles(kind: RecordKind, id: string, strict = false) {
   const result = await supabase
     .from("cc_entry_files")
     .select("id,file_name,file_type,drive_url,drive_file_id,folder_path,deleted_at")
@@ -1147,6 +1156,8 @@ async function fetchDeletedEntryFiles(kind: RecordKind, id: string) {
     .not("deleted_at", "is", null)
     .order("deleted_at", { ascending: false })
 
+  if (strict && result.error) throw result.error
+
   return (((result.data as EntryFileRecord[]) || []).map((file) => ({
     ...file,
     folder_path: file.folder_path || "",
@@ -1154,13 +1165,15 @@ async function fetchDeletedEntryFiles(kind: RecordKind, id: string) {
   })))
 }
 
-async function fetchDeletedCompanyFiles(id: string) {
+async function fetchDeletedCompanyFiles(id: string, strict = false) {
   const result = await supabase
     .from("cc_company_files")
     .select("id,file_name,file_type,drive_url,drive_file_id,original_path,deleted_at")
     .eq("company_id", id)
     .not("deleted_at", "is", null)
     .order("deleted_at", { ascending: false })
+
+  if (strict && result.error) throw result.error
 
   return (((result.data as CompanyFileRecord[]) || []).map((file) => ({
     ...file,
@@ -1169,16 +1182,16 @@ async function fetchDeletedCompanyFiles(id: string) {
   })))
 }
 
-async function fetchFolders(kind: RecordKind, id: string) {
+async function fetchFolders(kind: RecordKind, id: string, strict = false) {
   const result = await supabase
     .from("cc_entry_folders")
-    .select("id,folder_path,name")
+    .select("id,folder_path,name,updated_at,implicit")
     .eq("entry_kind", kind)
     .eq("entry_id", id)
     .order("folder_path", { ascending: true })
     .order("name", { ascending: true })
 
-  if (result.error) return []
+  if (result.error) { if (strict) throw result.error; return [] }
   return (result.data as EntryFolderRecord[]) || []
 }
 
@@ -1255,9 +1268,11 @@ export default function CountryCompanyInfoPage() {
   const menuCloseTimerRef = useRef<number | null>(null)
   const [newEntityMenuOpen, setNewEntityMenuOpen] = useState(false)
   const newEntityMenuCloseTimerRef = useRef<number | null>(null)
-  const [files, setFiles] = useState<Array<CompanyFileRecord | EntryFileRecord>>([])
-  const [deletedFiles, setDeletedFiles] = useState<Array<CompanyFileRecord | EntryFileRecord>>([])
-  const [folders, setFolders] = useState<EntryFolderRecord[]>([])
+  const [filePanelData, setFilePanelData] = useState<FilePanelData>({ files: [], deletedFiles: [], folders: [] })
+  const { files, deletedFiles, folders } = filePanelData
+  const setFiles = (value: SetStateAction<FilePanelData["files"]>) => setFilePanelData((previous) => ({ ...previous, files: typeof value === "function" ? value(previous.files) : value }))
+  const setDeletedFiles = (value: SetStateAction<FilePanelData["deletedFiles"]>) => setFilePanelData((previous) => ({ ...previous, deletedFiles: typeof value === "function" ? value(previous.deletedFiles) : value }))
+  const setFolders = (value: SetStateAction<FilePanelData["folders"]>) => setFilePanelData((previous) => ({ ...previous, folders: typeof value === "function" ? value(previous.folders) : value }))
   const [currentFolderPath, setCurrentFolderPath] = useState("")
   const [draggingFileId, setDraggingFileId] = useState("")
   const [draggingFolderPath, setDraggingFolderPath] = useState("")
@@ -1309,6 +1324,8 @@ export default function CountryCompanyInfoPage() {
   const mainSectionEditStartRef = useRef<Record<number, HighlightCard>>({})
   const nestedSectionEditStartRef = useRef<Record<string, HighlightCard>>({})
   const recordRenamePendingRef = useRef(false)
+  const fileMutationLocksRef = useRef(new Set<string>())
+  const filePanelRefreshGenerationRef = useRef(0)
   const recordOwnerRef = useRef(0)
   const [renderOwner, setRenderOwner] = useState(0)
   const setMessage = (value: string) => { if (recordOwnerRef.current === renderOwner) setPageMessage(value) }
@@ -2118,6 +2135,7 @@ export default function CountryCompanyInfoPage() {
     setRenderOwner(recordOwnerRef.current)
     setPageSaving(false)
     setSectionSaving(false)
+    setUploadingFile(false)
     setSelectedId("")
     setSelectedKind("")
     setCurrentRecord({ id: "", name: "", summary: "", notes: "" })
@@ -2322,6 +2340,7 @@ export default function CountryCompanyInfoPage() {
     setPageMessage("")
     setPageSaving(false)
     setSectionSaving(false)
+    setUploadingFile(false)
     setSectionSaveState("saved")
     setMenuOpen(false)
     try {
@@ -2721,20 +2740,78 @@ export default function CountryCompanyInfoPage() {
     }
   }
 
-  async function refreshFiles(kind: RecordKind, id: string) {
-    if (kind === "company") {
-      const [legacyFiles, manualFiles] = await Promise.all([fetchCompanyFiles(id), fetchEntryFiles("company", id)])
-      return [...legacyFiles, ...manualFiles]
+  function beginFileMutation() {
+    if (!selectedKind || !selectedId || recordLoading || recordOwnerRef.current !== renderOwner) return null
+    const key = `${selectedKind}:${selectedId}`
+    if (fileMutationLocksRef.current.has(key)) {
+      setMessage("Please wait for the current file change to finish before starting another one. You can keep browsing other entries.")
+      return null
     }
-    return fetchEntryFiles(kind, id)
+    fileMutationLocksRef.current.add(key)
+    ++filePanelRefreshGenerationRef.current
+    return { owner: recordOwnerRef.current, release: () => { fileMutationLocksRef.current.delete(key) } }
   }
 
-  async function refreshDeletedFiles(kind: RecordKind, id: string) {
+  function targetFolderId(path: string) {
+    const folder = folders.find((item) => joinFolderPath(item.folder_path, item.name) === path)
+    return folder && !folder.id.startsWith("virtual:") ? folder.id : null
+  }
+
+  async function refreshFilePanel(owner: number, kind: RecordKind, id: string) {
+    if (recordOwnerRef.current !== owner) return false
+    const generation = ++filePanelRefreshGenerationRef.current
+    try {
+      const [nextFiles, nextDeletedFiles, nextFolders] = await Promise.all([
+        refreshFiles(kind, id, true), refreshDeletedFiles(kind, id, true), fetchFolders(kind, id, true),
+      ])
+      if (recordOwnerRef.current !== owner || filePanelRefreshGenerationRef.current !== generation) return false
+      setFilePanelData({ files: nextFiles, deletedFiles: nextDeletedFiles, folders: mergeFolderRecords(nextFolders, nextFiles) })
+      setSelectedPreviewFile((previous) => previous ? nextFiles.find((file) => file.id === previous.id && file.source === previous.source) || null : null)
+      return true
+    } catch {
+      if (recordOwnerRef.current !== owner || filePanelRefreshGenerationRef.current !== generation) return false
+      throw new Error("The change was saved, but the file list could not refresh. Reopen this entry to see the latest files.")
+    }
+  }
+
+  function applyFolderRelocation(value: unknown, owner: number, previousPath: string, nextPath: string) {
+    if (recordOwnerRef.current !== owner) return false
+    const relocated = value as FolderRelocation
+    if (relocated?.entryKind !== selectedKind || relocated.entryId !== selectedId || relocated.previousPath !== previousPath || relocated.folderPath !== nextPath
+      || !Array.isArray(relocated.folders) || !Array.isArray(relocated.entryFiles) || !Array.isArray(relocated.companyFiles)) {
+      throw new Error("The folder change could not be confirmed. Reopen the entry to check its saved folder before retrying.")
+    }
+    ++filePanelRefreshGenerationRef.current
+    const applyFileChanges = (items: FilePanelData["files"]) => items.map((item) => {
+      const changed = (item.source === "company" ? relocated.companyFiles : relocated.entryFiles).find((candidate) => candidate.id === item.id)
+      return changed ? { ...item, ...changed } : item
+    })
+    // Read current state inside one updater: a delayed response cannot drop a
+    // newly uploaded file, resurrect a deleted file or rebuild stale folders.
+    setFilePanelData((previous) => {
+      const nextFiles = applyFileChanges(previous.files)
+      const nextFolders = previous.folders.filter((item) => !item.id.startsWith("virtual:")).map((item) => relocated.folders.find((candidate) => candidate.id === item.id) || item)
+      return { files: nextFiles, deletedFiles: applyFileChanges(previous.deletedFiles), folders: mergeFolderRecords(nextFolders, nextFiles) }
+    })
+    setCurrentFolderPath((previous) => previous === previousPath || previous.startsWith(`${previousPath}/`) ? `${nextPath}${previous.slice(previousPath.length)}` : previous)
+    setSelectedPreviewFile((previous) => previous ? applyFileChanges([previous])[0] : null)
+    return true
+  }
+
+  async function refreshFiles(kind: RecordKind, id: string, strict = false) {
     if (kind === "company") {
-      const [legacyFiles, manualFiles] = await Promise.all([fetchDeletedCompanyFiles(id), fetchDeletedEntryFiles("company", id)])
+      const [legacyFiles, manualFiles] = await Promise.all([fetchCompanyFiles(id, strict), fetchEntryFiles("company", id, strict)])
+      return [...legacyFiles, ...manualFiles]
+    }
+    return fetchEntryFiles(kind, id, strict)
+  }
+
+  async function refreshDeletedFiles(kind: RecordKind, id: string, strict = false) {
+    if (kind === "company") {
+      const [legacyFiles, manualFiles] = await Promise.all([fetchDeletedCompanyFiles(id, strict), fetchDeletedEntryFiles("company", id, strict)])
       return [...legacyFiles, ...manualFiles].sort((a, b) => (b.deleted_at || "").localeCompare(a.deleted_at || ""))
     }
-    return fetchDeletedEntryFiles(kind, id)
+    return fetchDeletedEntryFiles(kind, id, strict)
   }
 
   async function uploadSmallFile(file: File, targetFolderPath: string) {
@@ -2743,6 +2820,7 @@ export default function CountryCompanyInfoPage() {
     form.append("entryId", selectedId)
     form.append("entryName", currentRecord.name || "Untitled")
     form.append("folderPath", targetFolderPath)
+    form.append("folderId", targetFolderId(targetFolderPath) || "")
     form.append("file", file)
     const response = await fetch("/api/ccinfo/upload", { method: "POST", body: form })
     const data = await response.json()
@@ -2759,6 +2837,7 @@ export default function CountryCompanyInfoPage() {
         entryId: selectedId,
         entryName: currentRecord.name || "Untitled",
         folderPath: targetFolderPath,
+        folderId: targetFolderId(targetFolderPath),
         fileName: file.name,
         fileSize: file.size,
         mimeType: file.type || null,
@@ -2811,7 +2890,8 @@ export default function CountryCompanyInfoPage() {
         entryKind: selectedKind,
         entryId: selectedId,
         entryName: currentRecord.name || "Untitled",
-        folderPath: targetFolderPath,
+        folderPath: typeof session.folderPath === "string" ? session.folderPath : targetFolderPath,
+        folderId: typeof session.folderId === "string" ? session.folderId : null,
         fileName: file.name,
         driveFileId: driveFile.id,
       }),
@@ -2830,6 +2910,9 @@ export default function CountryCompanyInfoPage() {
       setFilePanelDropPath(null)
       return
     }
+    const mutation = beginFileMutation()
+    if (!mutation) return
+    const owner = mutation.owner
     setUploadingFile(true)
     setMessage("")
     try {
@@ -2842,19 +2925,18 @@ export default function CountryCompanyInfoPage() {
         if (data.warning) warnings.push(String(data.warning))
         uploaded.push(data.file as EntryFileRecord)
       }
-      const refreshedFiles = await refreshFiles(selectedKind, selectedId)
-      setFiles(refreshedFiles)
-      setFolders((prev) => mergeFolderRecords(prev.filter((folder) => !folder.id.startsWith("virtual:")), refreshedFiles))
-      const targetFile = refreshedFiles.find((file) => file.file_name === uploaded[uploaded.length - 1]?.file_name && (file.folder_path || "") === targetFolderPath)
-      setSelectedPreviewFile(targetFile || refreshedFiles[0] || uploaded[0] || null)
+      if (recordOwnerRef.current !== owner) return
+      await refreshFilePanel(owner, selectedKind, selectedId)
+      if (recordOwnerRef.current !== owner) return
+      setSelectedPreviewFile((previous) => previous || uploaded[uploaded.length - 1] || null)
       addSimpleChangeLog(`${changeLogSubject(selectedKind, currentRecord.name)} File Uploaded`)
       void loadRecentAuditLogs()
       setMessage(warnings[0] || `Uploaded ${picked.length} file${picked.length > 1 ? "s" : ""}.`)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to upload file.")
+      if (recordOwnerRef.current === owner) setMessage(error instanceof Error ? error.message : "Unable to upload file.")
     } finally {
-      setUploadingFile(false)
-      setFilePanelDropPath(null)
+      mutation.release()
+      if (recordOwnerRef.current === owner) { setUploadingFile(false); setFilePanelDropPath(null) }
     }
   }
 
@@ -2862,6 +2944,9 @@ export default function CountryCompanyInfoPage() {
     if (!selectedId || !selectedKind) return
     const name = window.prompt("New folder name")
     if (!name?.trim()) return
+    const mutation = beginFileMutation()
+    if (!mutation) return
+    const owner = mutation.owner
     try {
       const response = await fetch("/api/ccinfo/files", {
         method: "POST",
@@ -2874,14 +2959,17 @@ export default function CountryCompanyInfoPage() {
         }),
       })
       const data = await response.json()
+      if (recordOwnerRef.current !== owner) return
       if (!response.ok) throw new Error(data.message || "Unable to create folder.")
       const nextFolder = data.folder as EntryFolderRecord
-      setFolders((prev) => mergeFolderRecords([...prev.filter((folder) => !folder.id.startsWith("virtual:")), nextFolder], files))
+      setFilePanelData((previous) => ({ ...previous, folders: mergeFolderRecords([...previous.folders.filter((folder) => !folder.id.startsWith("virtual:")), nextFolder], previous.files) }))
       setCurrentFolderPath(joinFolderPath(nextFolder.folder_path, nextFolder.name))
       void loadRecentAuditLogs()
       setMessage("Folder created.")
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to create folder.")
+      if (recordOwnerRef.current === owner) setMessage(error instanceof Error ? error.message : "Unable to create folder.")
+    } finally {
+      mutation.release()
     }
   }
 
@@ -2893,6 +2981,9 @@ export default function CountryCompanyInfoPage() {
   async function renameFile(file: CompanyFileRecord | EntryFileRecord, nextNameInput?: string) {
     const nextName = (nextNameInput ?? window.prompt("File name", file.file_name) ?? "").trim()
     if (!nextName || nextName === file.file_name) return
+    const mutation = beginFileMutation()
+    if (!mutation) return
+    const owner = mutation.owner
     try {
       const response = await fetch("/api/ccinfo/files", {
         method: "PATCH",
@@ -2908,21 +2999,19 @@ export default function CountryCompanyInfoPage() {
         }),
       })
       const data = await response.json()
+      if (recordOwnerRef.current !== owner) return
       if (!response.ok) throw new Error(data.message || "Unable to rename file.")
       if (selectedId && selectedKind) {
-        const refreshedFiles = await refreshFiles(selectedKind, selectedId)
-        setFiles(refreshedFiles)
-        setFolders((prev) => mergeFolderRecords(prev.filter((item) => !item.id.startsWith("virtual:")), refreshedFiles))
-        setSelectedPreviewFile((current) => {
-          if (current?.id !== file.id) return current
-          return refreshedFiles.find((item) => item.id === file.id) || null
-        })
+        await refreshFilePanel(owner, selectedKind, selectedId)
       }
+      if (recordOwnerRef.current !== owner) return
       setFilePanelEditTarget(null)
       void loadRecentAuditLogs()
       setMessage("File renamed.")
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to rename file.")
+      if (recordOwnerRef.current === owner) setMessage(error instanceof Error ? error.message : "Unable to rename file.")
+    } finally {
+      mutation.release()
     }
   }
 
@@ -2930,6 +3019,9 @@ export default function CountryCompanyInfoPage() {
     const nextName = (nextNameInput ?? window.prompt("Folder name", folder.name) ?? "").trim()
     if (!nextName || nextName === folder.name) return
     const folderPath = joinFolderPath(folder.folder_path, folder.name)
+    const mutation = beginFileMutation()
+    if (!mutation) return
+    const owner = mutation.owner
     try {
       const response = await fetch("/api/ccinfo/files", {
         method: "PATCH",
@@ -2943,85 +3035,73 @@ export default function CountryCompanyInfoPage() {
           entryKind: selectedKind,
           entryId: selectedId,
           entryName: currentRecord.name || "Untitled",
+          expectedUpdatedAt: folder.updated_at || null,
         }),
       })
       const data = await response.json()
+      if (recordOwnerRef.current !== owner) return
       if (!response.ok) throw new Error(data.message || "Unable to rename folder.")
-      const refreshedFiles = selectedId && selectedKind ? await refreshFiles(selectedKind, selectedId) : files
-      setFiles(refreshedFiles)
-      setFolders((prev) => mergeFolderRecords(prev.filter((item) => !item.id.startsWith("virtual:")).map((item) => item.id === folder.id ? { ...item, name: nextName } : item), refreshedFiles))
       const nextPath = joinFolderPath(folder.folder_path, nextName)
-      if (currentFolderPath === folderPath) setCurrentFolderPath(nextPath)
+      if (!applyFolderRelocation(data.rename, owner, folderPath, nextPath)) return
       setFilePanelEditTarget(null)
       void loadRecentAuditLogs()
       setMessage("Folder renamed.")
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to rename folder.")
+      if (recordOwnerRef.current === owner) setMessage(error instanceof Error ? error.message : "Unable to rename folder.")
+    } finally {
+      mutation.release()
     }
   }
 
   async function deleteFolder(folder: EntryFolderRecord) {
     const folderPath = joinFolderPath(folder.folder_path, folder.name)
-    if (folder.id.startsWith("virtual:")) {
-      if (!confirm(`Move all files inside ${folder.name} to Recently Deleted?`)) return
-      try {
-        const response = await fetch("/api/ccinfo/files", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "deleteFolderContents",
-            source: "company",
-            entryKind: selectedKind,
-            entryId: selectedId,
-            folderPath,
-          }),
-        })
-        const data = await response.json()
-        if (!response.ok) throw new Error(data.message || "Unable to delete folder contents.")
-        if (selectedId && selectedKind) {
-          const refreshedFiles = await refreshFiles(selectedKind, selectedId)
-          setFiles(refreshedFiles)
-          setFolders((prev) => mergeFolderRecords(prev.filter((item) => !item.id.startsWith("virtual:")), refreshedFiles))
-          setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
-        }
-        if (currentFolderPath === folderPath || currentFolderPath.startsWith(`${folderPath}/`)) {
-          setCurrentFolderPath(folder.folder_path || "")
-        }
-        setFilePanelEditTarget(null)
-        void loadRecentAuditLogs()
-        setMessage("Folder contents moved to Recently Deleted.")
-      } catch (error) {
-        setMessage(error instanceof Error ? error.message : "Unable to delete folder contents.")
-      }
-      return
-    }
-
-    const hasNestedFolders = folders.some((item) => joinFolderPath(item.folder_path, item.name).startsWith(`${folderPath}/`))
-    const hasNestedFiles = files.some((item) => (item.folder_path || "").startsWith(folderPath))
-    if (hasNestedFolders || hasNestedFiles) {
+    const virtual = folder.id.startsWith("virtual:") || folder.implicit === true
+    const hasNestedFolders = folders.some((item) => !item.id.startsWith("virtual:") && (!virtual || !item.implicit) && (item.folder_path === folderPath || item.folder_path.startsWith(`${folderPath}/`)))
+    const hasNestedFiles = files.some((item) => item.folder_path === folderPath || (item.folder_path || "").startsWith(`${folderPath}/`))
+    if (hasNestedFolders || (!virtual && hasNestedFiles)) {
       setMessage("Move or delete files and subfolders inside this folder first.")
       return
     }
-    if (!confirm(`Delete folder ${folder.name}?`)) return
+    if (!confirm(virtual ? `Move all files inside ${folder.name} to Recently Deleted?` : `Delete folder ${folder.name}?`)) return
+    const mutation = beginFileMutation()
+    if (!mutation) return
+    const owner = mutation.owner
     try {
-      const params = new URLSearchParams({ folderId: folder.id })
-      const response = await fetch(`/api/ccinfo/files?${params.toString()}`, { method: "DELETE" })
+      const params = new URLSearchParams({ folderId: folder.id, entryKind: selectedKind, entryId: selectedId, folderPath, expectedUpdatedAt: folder.updated_at || "" })
+      const response = virtual
+        ? await fetch("/api/ccinfo/files", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "deleteFolderContents", folderId: folder.id, entryKind: selectedKind, entryId: selectedId, folderPath, expectedUpdatedAt: folder.updated_at || null }) })
+        : await fetch(`/api/ccinfo/files?${params.toString()}`, { method: "DELETE" })
       const data = await response.json()
+      if (recordOwnerRef.current !== owner) return
       if (!response.ok) throw new Error(data.message || "Unable to delete folder.")
-      setFolders((prev) => prev.filter((item) => item.id !== folder.id))
-      if (currentFolderPath === folderPath) {
-        setCurrentFolderPath(folder.folder_path || "")
-      }
+      const deletion = data.deletion as { entryKind: string; entryId: string; folderPath: string; folderIds: string[]; entryFileIds: string[]; companyFileIds: string[]; deletedAt: string }
+      if (deletion?.entryKind !== selectedKind || deletion.entryId !== selectedId || deletion.folderPath !== folderPath
+        || !Array.isArray(deletion.folderIds) || !Array.isArray(deletion.entryFileIds) || !Array.isArray(deletion.companyFileIds) || !Number.isFinite(Date.parse(deletion.deletedAt))) throw new Error("The folder deletion could not be confirmed. Reopen the entry before trying again.")
+      const wasDeleted = (file: CompanyFileRecord | EntryFileRecord) => (file.source === "company" ? deletion.companyFileIds : deletion.entryFileIds).includes(file.id)
+      setFilePanelData((previous) => {
+        const nextFiles = previous.files.filter((file) => !wasDeleted(file))
+        const movedFiles = previous.files.filter(wasDeleted).map((file) => ({ ...file, deleted_at: deletion.deletedAt }))
+        return { files: nextFiles, deletedFiles: [...movedFiles, ...previous.deletedFiles.filter((file) => !wasDeleted(file))], folders: mergeFolderRecords(previous.folders.filter((item) => !item.id.startsWith("virtual:") && !deletion.folderIds.includes(item.id)), nextFiles) }
+      })
+      setCurrentFolderPath((previous) => previous === folderPath || previous.startsWith(`${folderPath}/`) ? folder.folder_path || "" : previous)
+      setSelectedPreviewFile((previous) => previous && wasDeleted(previous) ? null : previous)
       setFilePanelEditTarget(null)
+      if (selectedKind) await refreshFilePanel(owner, selectedKind, selectedId)
+      if (recordOwnerRef.current !== owner) return
       void loadRecentAuditLogs()
-      setMessage("Folder deleted.")
+      setMessage(virtual ? "Folder contents moved to Recently Deleted." : "Folder deleted.")
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to delete folder.")
+      if (recordOwnerRef.current === owner) setMessage(error instanceof Error ? error.message : "Unable to delete folder.")
+    } finally {
+      mutation.release()
     }
   }
 
   async function deleteFile(file: CompanyFileRecord | EntryFileRecord) {
     if (!confirm(`Delete ${file.file_name}?`)) return
+    const mutation = beginFileMutation()
+    if (!mutation) return
+    const owner = mutation.owner
     try {
       const params = new URLSearchParams({
         fileId: file.id,
@@ -3029,20 +3109,21 @@ export default function CountryCompanyInfoPage() {
       })
       const response = await fetch(`/api/ccinfo/files?${params.toString()}`, { method: "DELETE" })
       const data = await response.json()
+      if (recordOwnerRef.current !== owner) return
       if (!response.ok) throw new Error(data.message || "Unable to delete file.")
       setFiles((prev) => prev.filter((item) => item.id !== file.id))
       if (selectedId && selectedKind) {
-        setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
+        await refreshFilePanel(owner, selectedKind, selectedId)
       }
-      if (selectedPreviewFile?.id === file.id) {
-        setSelectedPreviewFile(null)
-        setPreviewModalOpen(false)
-      }
+      if (recordOwnerRef.current !== owner) return
+      setSelectedPreviewFile((previous) => previous?.id === file.id && previous.source === file.source ? null : previous)
       setFilePanelEditTarget(null)
       void loadRecentAuditLogs()
       setMessage("File moved to Recently Deleted.")
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to delete file.")
+      if (recordOwnerRef.current === owner) setMessage(error instanceof Error ? error.message : "Unable to delete file.")
+    } finally {
+      mutation.release()
     }
   }
 
@@ -3065,6 +3146,9 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function restoreFile(file: CompanyFileRecord | EntryFileRecord) {
+    const mutation = beginFileMutation()
+    if (!mutation) return
+    const owner = mutation.owner
     try {
       const response = await fetch("/api/ccinfo/files", {
         method: "PATCH",
@@ -3076,83 +3160,56 @@ export default function CountryCompanyInfoPage() {
         }),
       })
       const data = await response.json()
+      if (recordOwnerRef.current !== owner) return
       if (!response.ok) throw new Error(data.message || "Unable to restore file.")
       if (selectedId && selectedKind) {
-        const refreshedFiles = await refreshFiles(selectedKind, selectedId)
-        setFiles(refreshedFiles)
-        setFolders((prev) => mergeFolderRecords(prev.filter((folder) => !folder.id.startsWith("virtual:")), refreshedFiles))
-        setDeletedFiles(await refreshDeletedFiles(selectedKind, selectedId))
+        await refreshFilePanel(owner, selectedKind, selectedId)
       }
+      if (recordOwnerRef.current !== owner) return
       void loadRecentAuditLogs()
       setMessage("File restored.")
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to restore file.")
+      if (recordOwnerRef.current === owner) setMessage(error instanceof Error ? error.message : "Unable to restore file.")
+    } finally {
+      mutation.release()
     }
   }
 
   async function undoDeletedFile(file: CompanyFileRecord | EntryFileRecord) {
+    const owner = recordOwnerRef.current
     const actionId = `deleted-file:${file.id}`
     setAuditActionId(actionId)
     try {
       await restoreFile(file)
     } finally {
-      setAuditActionId("")
+      if (recordOwnerRef.current === owner) setAuditActionId("")
     }
-  }
-
-  function folderHasFileSource(folderPath: string, source: "company" | "entry") {
-    return files.some((file) => {
-      const fileFolderPath = file.folder_path || ""
-      return file.source === source && (fileFolderPath === folderPath || fileFolderPath.startsWith(`${folderPath}/`))
-    })
-  }
-
-  function folderMoveSources(folder: EntryFolderRecord) {
-    const folderPath = joinFolderPath(folder.folder_path, folder.name)
-    const sources: Array<"company" | "entry"> = []
-    if (selectedKind === "company" && folderHasFileSource(folderPath, "company")) sources.push("company")
-    if (!folder.id.startsWith("virtual:") || folderHasFileSource(folderPath, "entry")) sources.push("entry")
-    return sources
   }
 
   async function moveFolderToPath(folder: EntryFolderRecord, targetFolderPath: string) {
     if (!selectedId || !selectedKind) return
     const folderPath = joinFolderPath(folder.folder_path, folder.name)
     if (!canMoveFolderToPath(folderPath, targetFolderPath)) return
+    const mutation = beginFileMutation()
+    if (!mutation) return
+    const owner = mutation.owner
     try {
-      const sources = folderMoveSources(folder)
-      for (const source of sources) {
-        const response = await fetch("/api/ccinfo/files", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "moveFolder",
-            folderId: folder.id,
-            source,
-            entryKind: selectedKind,
-            entryId: selectedId,
-            entryName: currentRecord.name || "Untitled",
-            folderPath,
-            targetFolderPath,
-          }),
-        })
-        const data = await response.json()
-        if (!response.ok) throw new Error(data.message || "Unable to move folder.")
-      }
-      const refreshedFiles = await refreshFiles(selectedKind, selectedId)
-      const refreshedFolders = mergeFolderRecords((await fetchFolders(selectedKind, selectedId)).filter((item) => !item.id.startsWith("virtual:")), refreshedFiles)
-      setFiles(refreshedFiles)
-      setFolders(refreshedFolders)
-      if (currentFolderPath === folderPath || currentFolderPath.startsWith(`${folderPath}/`)) {
-        setCurrentFolderPath(rebaseFolderPath(currentFolderPath, folderPath, targetFolderPath))
-      }
+      const response = await fetch("/api/ccinfo/files", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "moveFolder", folderId: folder.id, entryKind: selectedKind, entryId: selectedId,
+          folderPath, targetFolderPath, expectedUpdatedAt: folder.updated_at || null }),
+      })
+      const data = await response.json()
+      if (recordOwnerRef.current !== owner) return
+      if (!response.ok) throw new Error(data.message || "Unable to move folder.")
+      if (!applyFolderRelocation(data.move, owner, folderPath, joinFolderPath(targetFolderPath, folder.name))) return
       void loadRecentAuditLogs()
       setMessage("Folder moved.")
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to move folder.")
+      if (recordOwnerRef.current === owner) setMessage(error instanceof Error ? error.message : "Unable to move folder.")
     } finally {
-      setDraggingFolderPath("")
-      setDropFolderPath(null)
+      mutation.release()
+      if (recordOwnerRef.current === owner) { setDraggingFolderPath(""); setDropFolderPath(null) }
     }
   }
 
@@ -3164,17 +3221,9 @@ export default function CountryCompanyInfoPage() {
       setFilePanelDropPath(null)
       return
     }
-    const previousFiles = files
-    const previousFolders = folders
-    const previousPreviewFile = selectedPreviewFile
-    const optimisticFiles = files.map((item) =>
-      item.id === file.id ? { ...item, folder_path: targetFolderPath } : item
-    )
-    setFiles(optimisticFiles)
-    setFolders((prev) => mergeFolderRecords(prev.filter((folder) => !folder.id.startsWith("virtual:")), optimisticFiles))
-    if (selectedPreviewFile?.id === file.id) {
-      setSelectedPreviewFile({ ...selectedPreviewFile, folder_path: targetFolderPath })
-    }
+    const mutation = beginFileMutation()
+    if (!mutation) return
+    const owner = mutation.owner
     setDraggingFileId("")
     setDropFolderPath(null)
     setFilePanelDropPath(null)
@@ -3190,24 +3239,22 @@ export default function CountryCompanyInfoPage() {
           entryId: selectedId,
           entryName: currentRecord.name || "Untitled",
           folderPath: targetFolderPath,
+          folderId: targetFolderId(targetFolderPath),
         }),
       })
       const data = await response.json()
+      if (recordOwnerRef.current !== owner) return
       if (!response.ok) throw new Error(data.message || "Unable to move file.")
-      const refreshedFiles = await refreshFiles(selectedKind, selectedId)
-      setFiles(refreshedFiles)
-      setFolders((prev) => mergeFolderRecords(prev.filter((folder) => !folder.id.startsWith("virtual:")), refreshedFiles))
+      if (data.file?.id !== file.id || data.file?.source !== (file.source || "entry")) throw new Error("The file move could not be confirmed. Reopen this entry before trying again.")
+      await refreshFilePanel(owner, selectedKind, selectedId)
+      if (recordOwnerRef.current !== owner) return
       void loadRecentAuditLogs()
       setMessage("File moved.")
     } catch (error) {
-      setFiles(previousFiles)
-      setFolders(previousFolders)
-      setSelectedPreviewFile(previousPreviewFile)
-      setMessage(error instanceof Error ? error.message : "Unable to move file.")
+      if (recordOwnerRef.current === owner) setMessage(error instanceof Error ? error.message : "Unable to move file.")
     } finally {
-      setDraggingFileId("")
-      setDropFolderPath(null)
-      setFilePanelDropPath(null)
+      mutation.release()
+      if (recordOwnerRef.current === owner) { setDraggingFileId(""); setDropFolderPath(null); setFilePanelDropPath(null) }
     }
   }
 

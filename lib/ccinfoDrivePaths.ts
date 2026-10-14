@@ -11,6 +11,35 @@ type SupabaseLike = {
   from: (table: string) => any
 }
 
+type FileTargetClient = {
+  rpc: (name: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: { code?: string; message?: string } | null }>
+}
+
+export type CcinfoFileTarget = { entryKind: string; entryId: string; entryName: string; folderId: string | null; folderPath: string }
+
+export async function prepareCcinfoFileTarget(supabase: FileTargetClient, entryKind: string, entryId: string, folderPath: string, folderId: string | null = null): Promise<CcinfoFileTarget> {
+  const { data, error } = await supabase.rpc("prepare_ccinfo_file_target", {
+    p_entry_kind: entryKind, p_entry_id: entryId, p_folder_id: folderId, p_folder_path: folderPath,
+  })
+  if (error) throw new Error("The destination folder changed or could not be checked. Reopen the entry before uploading or moving this file.")
+  const target = data as CcinfoFileTarget
+  if (!target || target.entryKind !== entryKind || target.entryId !== entryId || typeof target.entryName !== "string"
+    || typeof target.folderPath !== "string" || (target.folderId !== null && typeof target.folderId !== "string")
+    || (target.folderPath !== "" && !target.folderId)) throw new Error("The destination folder could not be confirmed. Reopen the entry before trying again.")
+  return target
+}
+
+export async function registerCcinfoUploadedFile(supabase: FileTargetClient, target: CcinfoFileTarget, file: { name: string; type: string; driveId: string; url: string }) {
+  const { data, error } = await supabase.rpc("register_ccinfo_file", {
+    p_entry_kind: target.entryKind, p_entry_id: target.entryId, p_folder_id: target.folderId,
+    p_file_name: file.name, p_file_type: file.type, p_drive_file_id: file.driveId, p_drive_url: file.url,
+  })
+  if (error || !data || typeof data !== "object" || !("id" in data) || !("drive_file_id" in data) || data.drive_file_id !== file.driveId) {
+    throw new Error("The file reached Google Drive, but its CCINFO folder could not be saved. Reopen the entry before retrying; the uploaded Drive file has been preserved.")
+  }
+  return data as { id: string; folder_path: string; file_name: string; file_type: string; drive_file_id: string; drive_url: string; source: "entry" }
+}
+
 export function cleanDriveSegment(value: string | null | undefined, fallback = "Untitled") {
   const cleaned = String(value || "")
     .replace(/[\u0000-\u001f]/g, " ")

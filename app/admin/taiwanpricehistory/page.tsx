@@ -27,6 +27,7 @@ function average(values: Array<number | null>) {
 
 const pageShellStyle: React.CSSProperties = {
   minHeight: "100vh",
+  minWidth: 0,
   background: "var(--fc-admin-page-bg)",
   padding: "24px",
   fontFamily: "var(--fc-admin-font)",
@@ -35,6 +36,7 @@ const pageShellStyle: React.CSSProperties = {
 
 const outerPanelStyle: React.CSSProperties = {
   maxWidth: "1220px",
+  minWidth: 0,
   margin: "0 auto",
   background: "var(--fc-admin-panel-bg)",
   border: "1px solid var(--fc-admin-border)",
@@ -75,7 +77,7 @@ const secondaryButtonStyle: React.CSSProperties = {
   boxShadow: "none",
 }
 
-const taiwanEntryGridColumns = "220px 120px repeat(4, 128px) minmax(196px, 1fr)"
+const taiwanEntryGridColumns = "220px 120px repeat(4, 128px) minmax(160px, 1fr)"
 
 export default function TaiwanPriceHistoryPage() {
   const { loading: adminLoading, authenticated, role, permissions } = useSimpleAdminAuth()
@@ -368,8 +370,9 @@ export default function TaiwanPriceHistoryPage() {
           </div>
         </div>
 
-        <fieldset disabled={!canEdit || busy || !history.ready} style={{ ...sectionCardStyle, margin: "0 0 14px", minWidth: 0, padding: "10px 16px 12px", overflowX: "auto" }}>
-          <div style={{ display: "grid", gap: "2px" }}>
+        <fieldset disabled={!canEdit || busy || !history.ready} aria-label="Taiwan history price entry" style={{ ...sectionCardStyle, margin: "0 0 14px", minWidth: 0, padding: "10px 16px 12px" }}>
+          <div role="region" aria-label="Taiwan history price entry fields" tabIndex={0} style={{ overflowX: "auto", maxWidth: "100%", overscrollBehaviorX: "contain", WebkitOverflowScrolling: "touch", outlineOffset: "-2px" }}>
+          <div style={{ display: "grid", gap: "2px", minWidth: "1060px" }}>
             <div
               style={{
                 display: "grid",
@@ -512,14 +515,21 @@ export default function TaiwanPriceHistoryPage() {
             </div>
           </div>
           </div>
+          </div>
         </fieldset>
 
         <div style={{ ...sectionCardStyle, overflow: "hidden" }}>
           {history.needsReload ? <p role="status" style={{ padding: "14px" }}>History is not verified. Reload saved history before making changes.</p> : loading ? (
             <p style={{ margin: 0, padding: "14px", color: "var(--fc-admin-panel-text)" }}>Loading history...</p>
           ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+            <div role="region" aria-label="Taiwan price history table" tabIndex={0} style={{ overflowX: "auto", maxWidth: "100%", overscrollBehaviorX: "contain", WebkitOverflowScrolling: "touch", outlineOffset: "-2px" }}>
+              <table aria-label="Taiwan price history" style={{ width: "100%", minWidth: showDeleteButtons ? "868px" : "756px", borderCollapse: "collapse", tableLayout: "fixed", overflowWrap: "anywhere" }}>
+                <colgroup>
+                  <col style={{ width: "144px" }} />
+                  <col style={{ width: "100px" }} />
+                  {Array.from({ length: 4 }, (_, index) => <col key={index} style={{ width: "128px" }} />)}
+                  {showDeleteButtons && <col style={{ width: "112px" }} />}
+                </colgroup>
                 <thead>
                   <tr style={{ background: "var(--fc-table-head-bg)", color: "var(--fc-admin-panel-text)" }}>
                     <th

@@ -66,8 +66,10 @@ export function combineTaiwanPriceHistory(rows: StoredPriceHistoryRecord[], kaoh
     return {
       dateKey, ...value, hsfo: khh?.hsfo ?? null,
       vlsfoKaohsiung: khh?.vlsfo ?? null, mgoKaohsiung: khh?.mgo ?? null,
-      vlsfoTaichung: txg?.vlsfo ?? (beforeSplit ? khh?.vlsfo ?? null : null),
-      mgoTaichung: txg?.mgo ?? (beforeSplit ? khh?.mgo ?? null : null),
+      // Before the split, a missing Taichung record shares the legacy basis.
+      // A present record still owns its explicit unavailable (NULL) quotes.
+      vlsfoTaichung: txg ? txg.vlsfo : beforeSplit ? khh?.vlsfo ?? null : null,
+      mgoTaichung: txg ? txg.mgo : beforeSplit ? khh?.mgo ?? null : null,
     }
   })
 }

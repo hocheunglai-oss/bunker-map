@@ -65,7 +65,7 @@ async function main() {
       }))
     }}],
   })
-  const html='<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;font-family:Arial}button,input,select{font:inherit}</style></head><body><div id="root"></div><script src="/fixture.js"></script></body></html>'
+  const html='<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}body{margin:0;font-family:Arial}button,input,select{font:inherit}</style></head><body><div id="root"></div><script src="/fixture.js"></script></body></html>'
   const server=http.createServer((request,response)=>{
     response.setHeader("Content-Type",request.url==="/fixture.js"?"text/javascript":"text/html")
     response.end(request.url==="/fixture.js"?bundle.outputFiles[0].contents:html)
@@ -104,6 +104,36 @@ async function main() {
         assert.deepEqual(state.writes,[])
         assert.ok(state.reads.includes("ports")&&state.reads.includes("price_history"))
         console.log(`${baseline?"REPRODUCED":"PASS"}: ${market} in ${timezoneId}: date ${initial[0][0]}, first price ${initial[0][1]}, October rows ${filtered.length}, correct ${baseline?"defect baseline":"monthly average"}`)
+        if(!baseline)for(const width of [320,390]){
+          await page.setViewportSize({width,height:950})
+          const label=market==="taiwan"?"Taiwan":"Hong Kong"
+          const region=page.getByRole("region",{name:`${label} price history table`,exact:true})
+          assert.equal(await region.getAttribute("tabindex"),"0")
+          const layout=await region.evaluate(element=>{
+            const cells=[...element.querySelector("tbody tr").querySelectorAll("td")].map(cell=>{
+              const box=cell.getBoundingClientRect();return {left:box.left,right:box.right,width:box.width}
+            })
+            return {page:document.documentElement.scrollWidth,viewport:innerWidth,width:element.clientWidth,scroll:element.scrollWidth,cells}
+          })
+          assert.ok(layout.page<=layout.viewport,`${market} must contain mobile horizontal overflow`)
+          assert.ok(layout.scroll>layout.width,`${market} must scroll rather than compress its columns`)
+          assert.ok(layout.cells[0].width>=140,`${market} date must remain readable`)
+          for(let index=1;index<layout.cells.length;index++)assert.ok(layout.cells[index].left>=layout.cells[index-1].right-1)
+          await region.evaluate(element=>{element.scrollLeft=0})
+          await region.focus();await page.keyboard.press("ArrowRight")
+          await page.waitForFunction(name=>document.querySelector(`[aria-label="${name} price history table"]`).scrollLeft>0,label)
+          if(market==="taiwan"){
+            const entry=page.getByRole("region",{name:"Taiwan history price entry fields",exact:true})
+            await entry.evaluate(element=>{element.scrollLeft=element.scrollWidth})
+            const reachable=await entry.evaluate(element=>{
+              const region=element.getBoundingClientRect(),button=[...element.querySelectorAll("button")].find(item=>item.textContent==="Add As Latest").getBoundingClientRect()
+              return {scrolled:element.scrollLeft>0,visible:button.left>=region.left&&button.right<=region.right+1}
+            })
+            assert.deepEqual(reachable,{scrolled:true,visible:true},"Taiwan entry action must be reachable at the scroll end")
+          }
+          console.log(`PASS: ${market} ${width}px contained readable table, keyboard scrolling and reachable entry actions`)
+        }
+        await page.setViewportSize({width:1400,height:950})
       }
       assert.deepEqual(errors,[]);assert.deepEqual(blocked,[])
       await context.close()

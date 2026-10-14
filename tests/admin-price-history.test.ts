@@ -45,3 +45,33 @@ test("Taiwan historical split defaults do not leak into newer days or unrelated/
   assert.equal(result[0].vlsfoTaichung, null); assert.equal(result[0].mgoTaichung, null)
   assert.equal(result[1].vlsfoTaichung, 0); assert.equal(result[1].mgoTaichung, 0)
 })
+
+test("an explicit unavailable Taichung quote is preserved before and after the historical split", () => {
+  for (const day of ["2026-04-20", "2026-04-21"]) {
+    const khh = { ...row("K", "K", `${day}T12:00:00`, 700), mgo: 900 }
+    for (const quotes of [
+      { vlsfo: null, mgo: null },
+      { vlsfo: null, mgo: 0 },
+      { vlsfo: 0, mgo: null },
+    ]) {
+      const txg = { ...row("T", "T", `${day}T12:00:00`), ...quotes }
+      const [result] = combineTaiwanPriceHistory([khh, txg], "K", "T")
+      assert.equal(result.vlsfoTaichung, quotes.vlsfo)
+      assert.equal(result.mgoTaichung, quotes.mgo)
+      assert.equal(result.vlsfoKaohsiung, 700)
+      assert.equal(result.mgoKaohsiung, 900)
+      assert.equal(result.taichungRow, txg)
+    }
+  }
+})
+
+test("legacy basis fallback is used only when the pre-split Taichung record is absent", () => {
+  const khh = { ...row("K", "K", "2026-04-20T12:00:00", 700), mgo: 900 }
+  const [legacy] = combineTaiwanPriceHistory([khh], "K", "T")
+  assert.equal(legacy.taichungRow, null)
+  assert.equal(legacy.vlsfoTaichung, 700)
+  assert.equal(legacy.mgoTaichung, 900)
+  const [modern] = combineTaiwanPriceHistory([{ ...khh, recorded_at: "2026-04-21T12:00:00" }], "K", "T")
+  assert.equal(modern.vlsfoTaichung, null)
+  assert.equal(modern.mgoTaichung, null)
+})

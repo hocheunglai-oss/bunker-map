@@ -9,11 +9,23 @@ import {
 import {
   ensureCcinfoDriveFolderPath,
   loadCcinfoDriveContext,
+  prepareCcinfoFileTarget,
 } from "@/lib/ccinfoDrivePaths"
 import { loadGoogleApis } from "@/lib/googleApis"
 import { buildGoogleDriveFolderLookupQuery } from "@/lib/queryEscaping"
 
 const TOKEN_PATH = path.join(process.cwd(), ".google-drive-oauth-token.json")
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function folderMutationError(error: { code?: string }, operation: string) {
+  const status = ["40001", "23505", "23514", "40P01", "55P03"].includes(error.code || "") ? 409 : error.code === "22023" ? 400 : 500
+  const message = error.code === "23505" ? "Another folder already uses this name. No changes were saved."
+    : error.code === "40001" ? "This folder or its destination changed. Reopen the entry before trying again."
+      : error.code === "23514" ? "Move or delete files and subfolders inside this folder first."
+        : ["40P01", "55P03"].includes(error.code || "") ? "Another change is being saved. Please try again shortly."
+          : `The ${operation} could not be confirmed. Reopen the entry to check its saved folder before retrying.`
+  return NextResponse.json({ message }, { status })
+}
 
 function requireEnv(name: string) {
   const value = process.env[name]
@@ -157,21 +169,6 @@ function setFolderPathInOriginalPath(originalPath: string | null | undefined, fo
   return `${entryKind}/${entryName}/${suffix}`
 }
 
-function rebaseFolderPath(currentPath: string, sourcePath: string, targetParentPath: string) {
-  const folderName = sourcePath.split("/").filter(Boolean).pop() || sourcePath
-  const nextRoot = [targetParentPath, folderName].filter(Boolean).join("/")
-  if (currentPath === sourcePath) return nextRoot
-  if (currentPath.startsWith(`${sourcePath}/`)) return `${nextRoot}${currentPath.slice(sourcePath.length)}`
-  return currentPath
-}
-
-function canMoveFolderToPath(sourcePath: string, targetParentPath: string) {
-  const currentParentPath = sourcePath.split("/").filter(Boolean).slice(0, -1).join("/")
-  if (!sourcePath || currentParentPath === targetParentPath) return false
-  if (targetParentPath === sourcePath || targetParentPath.startsWith(`${sourcePath}/`)) return false
-  return true
-}
-
 async function requireCcinfoFileAccess(request: Request) {
   // CCINFO document management is intentionally collaborative for anyone
   // who can view CCINFO. Other CCINFO content edits remain protected by
@@ -212,7 +209,7 @@ export async function POST(request: Request) {
         },
         { onConflict: "entry_kind,entry_id,folder_path,name" },
       )
-      .select("id,entry_kind,entry_id,folder_path,name")
+      .select("id,entry_kind,entry_id,folder_path,name,updated_at,implicit")
       .single()
 
     if (error) throw error
@@ -237,9 +234,18 @@ export async function DELETE(request: Request) {
     }
 
     if (folderId) {
-      const { error } = await supabase.from("cc_entry_folders").delete().eq("id", folderId)
-      if (error) throw error
-      return NextResponse.json({ ok: true })
+      const entryKind = searchParams.get("entryKind") || ""
+      const entryId = searchParams.get("entryId") || ""
+      const folderPath = searchParams.get("folderPath") || ""
+      const expectedUpdatedAt = searchParams.get("expectedUpdatedAt") || ""
+      if (!["company", "country", "port"].includes(entryKind) || !UUID.test(entryId) || !UUID.test(folderId)
+        || !folderPath || !Number.isFinite(Date.parse(expectedUpdatedAt))) return NextResponse.json({ message: "Refresh this entry before deleting the folder." }, { status: 400 })
+      const { data, error } = await supabase.rpc("delete_ccinfo_folder", {
+        p_entry_kind: entryKind, p_entry_id: entryId, p_folder_id: folderId,
+        p_folder_path: folderPath, p_expected_updated_at: expectedUpdatedAt,
+      })
+      if (error) return folderMutationError(error, "delete")
+      return NextResponse.json({ ok: true, deletion: data })
     }
 
     if (fileId && source === "company") {
@@ -376,200 +382,35 @@ export async function PATCH(request: Request) {
     }
 
     if (action === "deleteFolderContents") {
-      if (!entryId || !folderPath) {
+      const virtual = folderId === `virtual:${folderPath}`
+      const expectedUpdatedAt = typeof body.expectedUpdatedAt === "string" ? body.expectedUpdatedAt : ""
+      if (!["company", "country", "port"].includes(entryKind) || !UUID.test(entryId) || !folderPath
+        || (!virtual && (!UUID.test(folderId) || !Number.isFinite(Date.parse(expectedUpdatedAt))))) {
         return NextResponse.json({ message: "Missing folder delete details." }, { status: 400 })
       }
-
-      if (source === "company") {
-        const { data: companyFiles, error: fileReadError } = await supabase
-          .from("cc_company_files")
-          .select("id,original_path")
-          .eq("company_id", entryId)
-          .is("deleted_at", null)
-        if (fileReadError) throw fileReadError
-
-        const ids = (companyFiles || [])
-          .filter((file) => {
-            const currentPath = deriveFolderPathFromOriginalPath(file.original_path)
-            return currentPath === folderPath || currentPath.startsWith(`${folderPath}/`)
-          })
-          .map((file) => file.id)
-
-        if (ids.length > 0) {
-          const { error } = await supabase
-            .from("cc_company_files")
-            .update({ deleted_at: new Date().toISOString() })
-            .in("id", ids)
-          if (error) throw error
-        }
-
-        return NextResponse.json({ ok: true, count: ids.length })
-      }
-
-      return NextResponse.json({ message: "Only imported company folders can be deleted with contents." }, { status: 400 })
+      const { data, error } = await supabase.rpc("delete_ccinfo_folder", {
+        p_entry_kind: entryKind, p_entry_id: entryId, p_folder_id: virtual ? null : folderId,
+        p_folder_path: folderPath, p_expected_updated_at: virtual ? null : expectedUpdatedAt,
+      })
+      if (error) return folderMutationError(error, "delete")
+      return NextResponse.json({ ok: true, deletion: data })
     }
 
-    if (action === "moveFolder") {
-      if (!entryKind || !entryId || !folderPath) {
-        return NextResponse.json({ message: "Missing folder move details." }, { status: 400 })
-      }
-
-      if (!canMoveFolderToPath(folderPath, targetFolderPath)) {
-        return NextResponse.json({ ok: true, skipped: true })
-      }
-
-      if (source === "company") {
-        const { data: companyFiles, error: fileReadError } = await supabase
-          .from("cc_company_files")
-          .select("id,file_name,original_path")
-          .eq("company_id", entryId)
-          .is("deleted_at", null)
-        if (fileReadError) throw fileReadError
-
-        for (const file of companyFiles || []) {
-          const currentPath = deriveFolderPathFromOriginalPath(file.original_path)
-          if (currentPath !== folderPath && !currentPath.startsWith(`${folderPath}/`)) continue
-          const nextFolderPath = rebaseFolderPath(currentPath, folderPath, targetFolderPath)
-          const { error } = await supabase
-            .from("cc_company_files")
-            .update({ original_path: setFolderPathInOriginalPath(file.original_path, nextFolderPath, file.file_name, "company", entryName) })
-            .eq("id", file.id)
-          if (error) throw error
-        }
-
-        return NextResponse.json({ ok: true })
-      }
-
-      const { data: folderRows, error: folderReadError } = await supabase
-        .from("cc_entry_folders")
-        .select("id,folder_path,name")
-        .eq("entry_kind", entryKind)
-        .eq("entry_id", entryId)
-      if (folderReadError) throw folderReadError
-
-      for (const folder of folderRows || []) {
-        const currentFullPath = [folder.folder_path, folder.name].filter(Boolean).join("/")
-        if (currentFullPath !== folderPath && !currentFullPath.startsWith(`${folderPath}/`)) continue
-        const nextFullPath = rebaseFolderPath(currentFullPath, folderPath, targetFolderPath)
-        const segments = nextFullPath.split("/").filter(Boolean)
-        const nextName = segments.pop() || folder.name
-        const nextParentPath = segments.join("/")
-        const { error } = await supabase
-          .from("cc_entry_folders")
-          .update({ folder_path: nextParentPath, name: nextName })
-          .eq("id", folder.id)
-        if (error) throw error
-      }
-
-      const { data: affectedFiles, error: fileReadError } = await supabase
-        .from("cc_entry_files")
-        .select("id,folder_path,file_name")
-        .eq("entry_kind", entryKind)
-        .eq("entry_id", entryId)
-        .or(`folder_path.eq.${folderPath},folder_path.like.${folderPath}/%`)
-      if (fileReadError) throw fileReadError
-
-      for (const file of affectedFiles || []) {
-        const nextFolderPath = rebaseFolderPath(String(file.folder_path || ""), folderPath, targetFolderPath)
-        const { error } = await supabase
-          .from("cc_entry_files")
-          .update({
-            folder_path: nextFolderPath,
-            original_path: `${entryKind}/${entryName}/${nextFolderPath ? `${nextFolderPath}/` : ""}${file.file_name}`,
-          })
-          .eq("id", file.id)
-        if (error) throw error
-      }
-
-      return NextResponse.json({ ok: true })
-    }
-
-    if (action === "renameFolder") {
-      if (!name || !entryKind || !entryId) {
+    if (action === "renameFolder" || action === "moveFolder") {
+      const expectedUpdatedAt = typeof body.expectedUpdatedAt === "string" ? body.expectedUpdatedAt : null
+      const virtual = folderId === `virtual:${folderPath}`
+      if (!["company", "country", "port"].includes(entryKind) || !UUID.test(entryId) || !folderPath
+        || (action === "renameFolder" && (!name || /[\u0000-\u001f\u007f-\u009f/\\]/.test(name) || Array.from(name).length > 200))
+        || (!virtual && (!UUID.test(folderId) || !expectedUpdatedAt || !Number.isFinite(Date.parse(expectedUpdatedAt))))) {
         return NextResponse.json({ message: "Missing folder rename details." }, { status: 400 })
       }
-
-      if (source === "company") {
-        if (!folderPath) {
-          return NextResponse.json({ message: "Missing imported folder path." }, { status: 400 })
-        }
-
-        const parentPath = folderPath.split("/").slice(0, -1).join("/")
-        const newFullPath = [parentPath, name].filter(Boolean).join("/")
-        const { data: companyFiles, error: fileReadError } = await supabase
-          .from("cc_company_files")
-          .select("id,file_name,original_path")
-          .eq("company_id", entryId)
-          .is("deleted_at", null)
-        if (fileReadError) throw fileReadError
-
-        for (const file of companyFiles || []) {
-          const currentPath = deriveFolderPathFromOriginalPath(file.original_path)
-          if (currentPath !== folderPath && !currentPath.startsWith(`${folderPath}/`)) continue
-          const nextFolderPath = currentPath.replace(folderPath, newFullPath)
-          const { error } = await supabase
-            .from("cc_company_files")
-            .update({ original_path: setFolderPathInOriginalPath(file.original_path, nextFolderPath, file.file_name, "company", entryName) })
-            .eq("id", file.id)
-          if (error) throw error
-        }
-
-        return NextResponse.json({ ok: true })
-      }
-
-      if (!folderId) {
-        return NextResponse.json({ message: "Missing folder rename details." }, { status: 400 })
-      }
-
-      const { data: folderRow, error: folderReadError } = await supabase
-        .from("cc_entry_folders")
-        .select("id,folder_path,name")
-        .eq("id", folderId)
-        .single()
-      if (folderReadError || !folderRow) throw folderReadError || new Error("Unable to load folder.")
-
-      const oldFullPath = [folderRow.folder_path, folderRow.name].filter(Boolean).join("/")
-      const newFullPath = [folderRow.folder_path, name].filter(Boolean).join("/")
-
-      const { error: folderUpdateError } = await supabase
-        .from("cc_entry_folders")
-        .update({ name })
-        .eq("id", folderId)
-      if (folderUpdateError) throw folderUpdateError
-
-      const { data: nestedFolders, error: nestedFolderError } = await supabase
-        .from("cc_entry_folders")
-        .select("id,folder_path")
-        .eq("entry_kind", entryKind)
-        .eq("entry_id", entryId)
-        .like("folder_path", `${oldFullPath}/%`)
-      if (nestedFolderError) throw nestedFolderError
-
-      for (const nested of nestedFolders || []) {
-        const nextFolderPath = String(nested.folder_path || "").replace(oldFullPath, newFullPath)
-        const { error } = await supabase.from("cc_entry_folders").update({ folder_path: nextFolderPath }).eq("id", nested.id)
-        if (error) throw error
-      }
-
-      const { data: affectedFiles, error: fileReadError } = await supabase
-        .from("cc_entry_files")
-        .select("id,folder_path,original_path,file_name")
-        .eq("entry_kind", entryKind)
-        .eq("entry_id", entryId)
-        .or(`folder_path.eq.${oldFullPath},folder_path.like.${oldFullPath}/%`)
-      if (fileReadError) throw fileReadError
-
-      for (const file of affectedFiles || []) {
-        const nextFolderPath = String(file.folder_path || "").replace(oldFullPath, newFullPath)
-        const nextOriginalPath = `${entryKind}/${entryName}/${nextFolderPath ? `${nextFolderPath}/` : ""}${file.file_name}`
-        const { error } = await supabase
-          .from("cc_entry_files")
-          .update({ folder_path: nextFolderPath, original_path: nextOriginalPath })
-          .eq("id", file.id)
-        if (error) throw error
-      }
-
-      return NextResponse.json({ ok: true })
+      const { data, error } = await supabase.rpc(action === "renameFolder" ? "rename_ccinfo_folder" : "move_ccinfo_folder", {
+        p_entry_kind: entryKind, p_entry_id: entryId, p_folder_id: virtual ? null : folderId,
+        p_folder_path: folderPath, p_expected_updated_at: virtual ? null : expectedUpdatedAt,
+        ...(action === "renameFolder" ? { p_name: name } : { p_target_parent_path: targetFolderPath }),
+      })
+      if (error) return folderMutationError(error, action === "renameFolder" ? "rename" : "move")
+      return NextResponse.json({ ok: true, [action === "renameFolder" ? "rename" : "move"]: data })
     }
 
     if (!fileId) {
@@ -580,28 +421,33 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ message: "Missing move details." }, { status: 400 })
     }
 
+    const target = await prepareCcinfoFileTarget(supabase, entryKind, entryId, folderPath, folderId || null)
+
     if (source === "company") {
       const { data: fileRow, error: readError } = await supabase
         .from("cc_company_files")
-        .select("id,file_name,original_path")
+        .select("id,file_name,original_path,updated_at")
         .eq("id", fileId)
+        .eq("company_id", entryId)
+        .is("deleted_at", null)
         .single()
       if (readError || !fileRow) throw readError || new Error("Unable to load file.")
 
-      const { error } = await supabase
-        .from("cc_company_files")
-        .update({
-          original_path: setFolderPathInOriginalPath(fileRow.original_path, folderPath, fileRow.file_name, entryKind, entryName),
-        })
-        .eq("id", fileId)
-      if (error) throw error
-      return NextResponse.json({ ok: true })
+      const { data, error } = await supabase.rpc("move_ccinfo_file", {
+        p_entry_kind: entryKind, p_entry_id: entryId, p_source: "company", p_file_id: fileId,
+        p_expected_updated_at: fileRow.updated_at, p_folder_id: target.folderId,
+      })
+      if (error) return folderMutationError(error, "file move")
+      return NextResponse.json({ ok: true, file: data })
     }
 
     const { data: fileRow, error: readError } = await supabase
       .from("cc_entry_files")
-      .select("id,file_name,drive_file_id,original_path")
+      .select("id,file_name,drive_file_id,original_path,updated_at")
       .eq("id", fileId)
+      .eq("entry_kind", entryKind)
+      .eq("entry_id", entryId)
+      .is("deleted_at", null)
       .single()
     if (readError || !fileRow) throw readError || new Error("Unable to load file.")
 
@@ -612,7 +458,7 @@ export async function PATCH(request: Request) {
     const { drive, rootFolderId } = await getDriveClient()
     if (!rootFolderId) throw new Error("Google Drive folder is not configured. Add GOOGLE_DRIVE_COMPANY_FOLDER_ID in Vercel.")
 
-    const targetFolderId = await ensureEntryFolderPath(drive, rootFolderId, supabase, entryKind, entryId, entryName, folderPath)
+    const targetFolderId = await ensureEntryFolderPath(drive, rootFolderId, supabase, entryKind, entryId, entryName, target.folderPath)
     const current = await drive.files.get({
       fileId: fileRow.drive_file_id,
       fields: "parents",
@@ -628,16 +474,12 @@ export async function PATCH(request: Request) {
       supportsAllDrives: true,
     })
 
-    const { error } = await supabase
-      .from("cc_entry_files")
-      .update({
-        folder_path: folderPath,
-        original_path: `${entryKind}/${entryName}/${folderPath ? `${folderPath}/` : ""}${fileRow.file_name}`,
-      })
-      .eq("id", fileId)
-    if (error) throw error
-
-    return NextResponse.json({ ok: true })
+    const { data, error } = await supabase.rpc("move_ccinfo_file", {
+      p_entry_kind: entryKind, p_entry_id: entryId, p_source: "entry", p_file_id: fileId,
+      p_expected_updated_at: fileRow.updated_at, p_folder_id: target.folderId,
+    })
+    if (error) return folderMutationError(error, "file move")
+    return NextResponse.json({ ok: true, file: data })
   } catch (error) {
     console.error("ccinfo move failed", error)
     return NextResponse.json({ message: messageFromError(error) }, { status: 500 })

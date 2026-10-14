@@ -1897,6 +1897,7 @@ function validateSections(backup, errors, warnings) {
   const polymorphicParents = {
     company: companyIds,
     country: countryIds,
+    port: idSet(data, "ccPorts"),
   }
   for (const key of ["ccEntryFiles", "ccEntryFolders"]) {
     let unknownKinds = 0

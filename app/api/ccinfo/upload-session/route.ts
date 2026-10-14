@@ -8,9 +8,10 @@ import {
   createAdminAuditedSupabaseClient,
 } from "@/lib/adminAudit"
 import {
-  buildCcinfoLogicalOriginalPath,
   ensureCcinfoDriveFolderPath,
   loadCcinfoDriveContext,
+  prepareCcinfoFileTarget,
+  registerCcinfoUploadedFile,
 } from "@/lib/ccinfoDrivePaths"
 import { loadGoogleApis } from "@/lib/googleApis"
 import { requireGoogleDriveUploadSessionUrl } from "@/lib/googleDriveUploadUrl"
@@ -160,6 +161,7 @@ export async function POST(request: Request) {
     const entryId = String(body.entryId || "")
     const entryName = String(body.entryName || "Untitled")
     const folderPath = String(body.folderPath || "").trim()
+    const folderId = typeof body.folderId === "string" ? body.folderId || null : null
     const fileName = String(body.fileName || "").trim()
     const fileSize = Number(body.fileSize || 0)
     const mimeType = getMimeType(fileName, typeof body.mimeType === "string" ? body.mimeType : null)
@@ -176,7 +178,8 @@ export async function POST(request: Request) {
       )
     }
 
-    const driveContext = await loadCcinfoDriveContext(supabase, entryKind, entryId, entryName, folderPath)
+    const target = await prepareCcinfoFileTarget(supabase, entryKind, entryId, folderPath, folderId)
+    const driveContext = await loadCcinfoDriveContext(supabase, entryKind, entryId, entryName, target.folderPath)
     const targetFolderId = await ensureCcinfoDriveFolderPath(drive, rootFolderId, driveContext, ensureFolder)
     const accessTokenResponse = await auth.getAccessToken()
     const accessToken = typeof accessTokenResponse === "string" ? accessTokenResponse : accessTokenResponse?.token
@@ -202,7 +205,7 @@ export async function POST(request: Request) {
     if (!uploadUrl) throw new Error("Google Drive did not return an upload session.")
     const validatedUploadUrl = requireGoogleDriveUploadSessionUrl(uploadUrl)
 
-    return NextResponse.json({ uploadUrl: validatedUploadUrl, mimeType })
+    return NextResponse.json({ uploadUrl: validatedUploadUrl, mimeType, folderId: target.folderId, folderPath: target.folderPath })
   } catch (error) {
     console.error("ccinfo upload session failed", error)
     return NextResponse.json({ message: messageFromError(error) }, { status: 500 })
@@ -300,12 +303,12 @@ export async function PATCH(request: Request) {
     const body = await request.json()
     const entryKind = String(body.entryKind || "")
     const entryId = String(body.entryId || "")
-    const entryName = String(body.entryName || "Untitled")
     const folderPath = String(body.folderPath || "").trim()
+    const folderId = typeof body.folderId === "string" ? body.folderId || null : null
     const fileName = String(body.fileName || "").trim()
     const driveFileId = String(body.driveFileId || "").trim()
 
-    if (!entryKind || !entryId || !fileName || !driveFileId) {
+    if (!entryKind || !entryId || !fileName || !driveFileId || (folderPath && !folderId)) {
       return NextResponse.json({ message: "Missing upload completion data." }, { status: 400 })
     }
 
@@ -315,32 +318,13 @@ export async function PATCH(request: Request) {
       fields: "id,name,webViewLink,webContentLink",
       supportsAllDrives: true,
     })
-    const driveContext = await loadCcinfoDriveContext(supabase, entryKind, entryId, entryName, folderPath)
+    const target = await prepareCcinfoFileTarget(supabase, entryKind, entryId, folderPath, folderId)
     const sharingWarning = await makeDriveFilePublic(drive, driveFileId)
     const url = driveFile.data.webViewLink || driveFile.data.webContentLink || `https://drive.google.com/file/d/${driveFileId}/view`
 
-    const { data: savedFile, error } = await supabase
-      .from("cc_entry_files")
-      .upsert(
-        {
-          entry_kind: entryKind,
-          entry_id: entryId,
-          folder_path: folderPath || "",
-          file_name: fileName,
-          file_type: path.extname(fileName).replace(".", "").toUpperCase() || "FILE",
-          drive_file_id: driveFileId,
-          drive_url: url,
-          deleted_at: null,
-          original_path: buildCcinfoLogicalOriginalPath(entryKind, driveContext.entryName, folderPath, fileName),
-        },
-        {
-          onConflict: "entry_kind,entry_id,original_path",
-        }
-      )
-      .select("id,folder_path,file_name,file_type,drive_file_id,drive_url")
-      .single()
-
-    if (error || !savedFile) throw error || new Error("Upload record could not be saved.")
+    const savedFile = await registerCcinfoUploadedFile(supabase, target, {
+      name: fileName, type: path.extname(fileName).replace(".", "").toUpperCase() || "FILE", driveId: driveFileId, url,
+    })
 
     return NextResponse.json({
       file: {

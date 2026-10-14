@@ -117,6 +117,17 @@ export async function quarantineAndDelete(
   if (!/^"[\x21\x23-\x7e]+"$/.test(etag) || etag !== resource.etag) throw safeError()
   const vcard = await readBoundedText(original)
   if (!/^BEGIN:VCARD\r?\n(?:[\s\S]*\r?\n)?END:VCARD\r?\n?$/.test(vcard) || (vcard.match(/^BEGIN:VCARD\r?$/gm) || []).length !== 1) throw safeError()
+  if (resource.contactId) {
+    const lines = vcard.replace(/\r?\n[ \t]/g, "").split(/\r?\n/)
+    const values = (name: string) => lines.filter((line) => line.split(":", 1)[0].split(";", 1)[0].toUpperCase() === name)
+      .map((line) => line.slice(line.indexOf(":") + 1))
+    const uids = values("UID")
+    const contactIds = values("X-BUNKER-MAP-CONTACT-ID")
+    // A canonical filename alone cannot authorize removing a different card.
+    // Queued source deletions must prove the same identity in its contents.
+    if (uids.length !== 1 || uids[0] !== `bunker-map-${resource.contactId}`
+      || contactIds.length !== 1 || contactIds[0] !== resource.contactId) throw safeError()
+  }
   const contentHash = hash(vcard)
   const bookHash = hash(getCardDavConfig().addressBookUrl)
   const row = {
@@ -163,7 +174,9 @@ export async function runPhonebookCarddavReconcile(supabase: SupabaseClient): Pr
     const snapshotHash = idsHash(source)
     if (!source.size) throw new SyncError("The saved phonebook is empty. Automatic cleanup is disabled.", "source-check")
     phase = "inventory"
-    const initial = compare(source, await readReconcileInventory())
+    const initialResources = await readReconcileInventory()
+    const initial = compare(source, initialResources)
+    const managedResources = new Map(initialResources.flatMap((resource) => resource.contactId ? [[resource.contactId, resource] as const] : []))
     // Persist repair intent before doing network work. An interrupted worker
     // or browser can never be the sole owner of an unsent saved change.
     if (initial.missing.length) {
@@ -174,7 +187,7 @@ export async function runPhonebookCarddavReconcile(supabase: SupabaseClient): Pr
     const queue = await supabase.from(QUEUE_TABLE).select("contact_id,version,attempts")
       .lte("next_attempt_at", new Date().toISOString()).order("queued_at", { ascending: true }).order("contact_id", { ascending: true }).limit(MAX_WRITES)
     if (queue.error || !queue.data) throw safeError()
-    const waitingDeletes: QueueItem[] = []
+    const failedDeletions = new Set<string>()
     for (const item of queue.data as QueueItem[]) {
       if (Date.now() > lease.deadline - 40_000) { result.blocked = "time-budget"; break }
       try {
@@ -184,10 +197,20 @@ export async function runPhonebookCarddavReconcile(supabase: SupabaseClient): Pr
           await acknowledge(supabase, item)
           result.repaired += 1
         } else {
-          const remote = await cardDavRequest(cardHref(item.contact_id), { method: "GET", cache: "no-store" })
-          if (remote.status === 404) await acknowledge(supabase, item)
-          else if (remote.ok) waitingDeletes.push(item)
-          else throw httpSyncError("verification", remote.status)
+          failedDeletions.add(item.contact_id)
+          const resource = managedResources.get(item.contact_id)
+          if (resource) {
+            // A durable source deletion is already scoped to one contact. Drain
+            // it in bounded batches even when an interrupted company deletion
+            // exceeds the unrelated-extra mass-cleanup safety limit.
+            await quarantineAndDelete(supabase, resource, snapshotHash, lease)
+            result.removed += 1
+          } else {
+            const remote = await cardDavRequest(cardHref(item.contact_id), { method: "GET", cache: "no-store" })
+            if (remote.status !== 404) throw remote.ok ? safeError() : httpSyncError("verification", remote.status)
+          }
+          await acknowledge(supabase, item)
+          failedDeletions.delete(item.contact_id)
         }
       } catch {
         result.failed += 1
@@ -205,18 +228,14 @@ export async function runPhonebookCarddavReconcile(supabase: SupabaseClient): Pr
       const repeated = await readReconcileInventory()
       if (JSON.stringify(resources) !== JSON.stringify(repeated)) result.blocked = "remote-changed"
       else for (const resource of beforeCleanup.extras) {
+        // Do not immediately bypass the retry/identity checks of a failed
+        // queued deletion by treating that card as an incidental orphan.
+        if (resource.contactId && failedDeletions.has(resource.contactId)) continue
         if (Date.now() > lease.deadline - 40_000) { result.blocked = "time-budget"; break }
         phase = "quarantine-and-delete"
         await quarantineAndDelete(supabase, resource, snapshotHash, lease)
         result.removed += 1
       }
-    }
-    phase = "delete-acknowledgment"
-    for (const item of waitingDeletes) {
-      const current = await fetchContacts(supabase, { contactIds: [item.contact_id] })
-      if (current.contacts.length) continue
-      const remote = await cardDavRequest(cardHref(item.contact_id), { method: "GET", cache: "no-store" })
-      if (remote.status === 404) await acknowledge(supabase, item)
     }
     phase = "final-verification"
     await checkSourceUnchanged(supabase, snapshotHash)

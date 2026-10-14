@@ -1,0 +1,69 @@
+{
+  "schema": "fcuno.sitewide-audit-checkpoint/v1",
+  "checkedAt": "2026-10-14T10:54:43Z",
+  "goal": "I want you to do a thorough debug sitewide",
+  "goalComplete": false,
+  "baseCommit": "ae758c5b780d7c65b9d683cb455e6e5d8a7b5d86",
+  "status": "tested-candidate-not-deployed",
+  "preservedReleases": {
+    "attendancePullRequests": [55, 56, 58, 59, 60],
+    "outlookTemplateDeletionPullRequest": 57,
+    "coordination": "Attendance chat confirmed no new overlapping patch; attendance runtime and Outlook repair are unchanged. The attendance sync test now uses a fixed in-window timestamp instead of the current clock."
+  },
+  "repairs": [
+    "CCINFO folder rename, move and deletion use atomic literal-path transactions, saved versions and collision checks, including empty and implicit descendants.",
+    "CCINFO late uploads and file moves resolve stable folder identities; late responses cannot replace another entry or discard current files. Deleted-file recovery and explicit-folder protections remain intact.",
+    "Phonebook authoritative queued deletions drain in bounded recoverable batches independently of the unrelated-extra safety threshold.",
+    "Phonebook company changes commit linked labels, inherited-detail work and durable sync queue entries together; source references, audit evidence and version checks are retained.",
+    "Task reminders reread current tasks before each submission. Calendar retry slots reuse occurrence receipts and never automatically resend an uncertain delivery.",
+    "Recovered official holidays retain validated source metadata and their original baseline without hiding real manual edits.",
+    "Taiwan historical prices preserve explicit unavailable quotes; fallback applies only to an absent legacy Taichung row. Padded basis-port labels resolve consistently.",
+    "Taiwan and Hong Kong history tables retain readable columns inside accessible horizontal scroll regions at phone widths.",
+    "Offline backup validation accepts port-scoped CCINFO files and folders using ccPorts, not the separate pricing ports table."
+  ],
+  "verification": {
+    "typescriptTests": { "passed": 1090, "failed": 0, "skipped": 0 },
+    "sqlAndMjsTests": { "files": 38, "passed": 253, "failed": 0, "skipped": 0, "runtimes": ["isolated PGlite", "owned native PostgreSQL 17.6"] },
+    "productionBuild": "passed with synthetic public configuration; no production credentials or database used",
+    "typecheck": "passed",
+    "scopedLint": { "errors": 0, "warnings": 53, "note": "Existing warning debt remains visible; it is not a full-repository clean-lint certification." },
+    "federationContract": "unchanged; verified SHA-256 7fc54e7c3bd79fb014ad81dc6d9190d021549d9428486ef85ed78fdff95d7cc2",
+    "independentReviews": "Phonebook, CCINFO and cross-feature integration reviewed independently; reproduced findings repaired and retested.",
+    "browserCoverage": {
+      "engines": ["isolated Chromium", "isolated WebKit"],
+      "widths": [320, 390, 1440],
+      "colourPreferences": ["light", "dark"],
+      "priceHistory": "12 actual local production-build contexts, Taiwan and Hong Kong, synthetic authenticated and signed-out responses, inspected screenshots; no page overflow",
+      "phonebookCompany": "12 actual-component synthetic API contexts plus held-save/held-read and original browser regressions; screenshots inspected",
+      "ccinfoFiles": "12 actual-component/global-CSS synthetic API contexts, signed-out guard, rename/move/delete/upload/navigation and visible pre-drop indicator; screenshots inspected",
+      "limitations": "Admin palette currently stays light under both OS preferences. These are browser-engine simulations, not physical iPhone or signed-in production mutation tests. Live Exchange and CardDAV propagation remain separate verification steps."
+    }
+  },
+  "runtimeObservations": {
+    "lastDaySample": "Seven error records: four rejected parser authentication requests and three stale Brent quotes. Earlier seven-day sync/backup errors are historical evidence, not proof of current outage.",
+    "brentLatestRead": "Fresh quote returned HTTP 200 at 2026-10-14T10:09Z; stale-data guard retained."
+  },
+  "deploymentRequirements": {
+    "migrations": [
+      { "file": "20261014100317_atomic_ccinfo_folder_rename.sql", "sha256": "4478a3720c6a2a15226a194d9cf8efee5f898dd89737a5097938c8caa3827bd1", "applied": false },
+      { "file": "20261014102506_atomic_phonebook_company_save.sql", "sha256": "f1973e55014b3252e6c0e5d9856dc65c32c44b2fed9a8182e6a210876921fade", "applied": false }
+    ],
+    "order": ["complete release checks and approval", "drain old non-HOME large uploads", "apply and verify exact migrations", "release and verify the same tested app candidate", "generate and verify a fresh schema-current backup"],
+    "oldTabs": "Refresh/reopen before editing. Old direct company renames and unversioned folder operations fail safely. Old non-HOME large-upload completions lack stable identity and require a refreshed retry; uploaded Drive content is preserved.",
+    "rollback": "An app-only rollback does not remove new database write safeguards. Keep migrations additive; prefer a reviewed forward repair instead of a destructive schema rollback.",
+    "calendarSchedule": "Event weekdays and task daily at 08:00, 08:15, 08:30 Hong Kong time; existing occurrence receipts suppress duplicates. Verified target Vercel team plan is Pro. Attendance reminder and confirmation schedules are unchanged.",
+    "dependencies": "Production dependency audit has zero vulnerabilities. The existing development-only braces advisory GHSA-vfj7-8cjw-p6xm remains open with no compatible published patch. Prior release exceptions are not a standing waiver for this batch; approval is still required if this warning remains the only release-gate failure."
+  },
+  "needsUserDoubleCheck": [
+    "One pre-existing phonebook contact, EMILY KWONG (ACCOUNTS), refers to BANLE INTERNATIONAL GROUP LIMITED without a matching current company. It was preserved; identify the correct company before any reassignment."
+  ],
+  "remainingSitewideScope": [
+    "Live Exchange/Azure and CardDAV end-to-end behavior, including device propagation",
+    "Remaining SPC user workflows and browser states",
+    "Current hosted backup and complete recovery evidence after release",
+    "Remaining permission, configuration and integration paths not covered by this checkpoint"
+  ],
+  "productionWritesDuringCheckpoint": false,
+  "canonicalDirtyCheckoutPreserved": true,
+  "personalBrowserTouched": false
+}

@@ -9,9 +9,10 @@ import {
   createAdminAuditedSupabaseClient,
 } from "@/lib/adminAudit"
 import {
-  buildCcinfoLogicalOriginalPath,
   ensureCcinfoDriveFolderPath,
   loadCcinfoDriveContext,
+  prepareCcinfoFileTarget,
+  registerCcinfoUploadedFile,
 } from "@/lib/ccinfoDrivePaths"
 import { loadGoogleApis } from "@/lib/googleApis"
 import { buildGoogleDriveFolderLookupQuery } from "@/lib/queryEscaping"
@@ -154,6 +155,7 @@ export async function POST(request: Request) {
     const entryId = String(formData.get("entryId") || "")
     const entryName = String(formData.get("entryName") || "Untitled")
     const folderPath = String(formData.get("folderPath") || "").trim()
+    const folderId = typeof formData.get("folderId") === "string" ? String(formData.get("folderId")) || null : null
     const uploadFile = formData.get("file")
 
     if (!entryKind || !entryId || !(uploadFile instanceof File)) {
@@ -168,7 +170,8 @@ export async function POST(request: Request) {
       )
     }
 
-    const driveContext = await loadCcinfoDriveContext(supabase, entryKind, entryId, entryName, folderPath)
+    const target = await prepareCcinfoFileTarget(supabase, entryKind, entryId, folderPath, folderId)
+    const driveContext = await loadCcinfoDriveContext(supabase, entryKind, entryId, entryName, target.folderPath)
     const targetFolderId = await ensureCcinfoDriveFolderPath(drive, rootFolderId, driveContext, ensureFolder)
 
     tempPath = path.join(os.tmpdir(), ".tmp-upload-" + Date.now() + "-" + uploadFile.name)
@@ -194,28 +197,9 @@ export async function POST(request: Request) {
 
     const url = uploaded.data.webViewLink || uploaded.data.webContentLink || `https://drive.google.com/file/d/${fileId}/view`
 
-    const { data: savedFile, error } = await supabase
-      .from("cc_entry_files")
-      .upsert(
-        {
-          entry_kind: entryKind,
-          entry_id: entryId,
-          folder_path: folderPath || "",
-          file_name: uploadFile.name,
-          file_type: path.extname(uploadFile.name).replace(".", "").toUpperCase() || "FILE",
-          drive_file_id: fileId,
-          drive_url: url,
-          deleted_at: null,
-          original_path: buildCcinfoLogicalOriginalPath(entryKind, driveContext.entryName, folderPath, uploadFile.name),
-        },
-        {
-          onConflict: "entry_kind,entry_id,original_path",
-        }
-      )
-      .select("id,folder_path,file_name,file_type,drive_file_id,drive_url")
-      .single()
-
-    if (error || !savedFile) throw error || new Error("Upload record could not be saved.")
+    const savedFile = await registerCcinfoUploadedFile(supabase, target, {
+      name: uploadFile.name, type: path.extname(uploadFile.name).replace(".", "").toUpperCase() || "FILE", driveId: fileId, url,
+    })
 
     return NextResponse.json({
       file: {

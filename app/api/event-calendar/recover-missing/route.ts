@@ -12,7 +12,8 @@ import {
 } from "@/lib/eventCalendarStore"
 import { EVENT_CALENDAR_PROTOCOL_VERSION } from "@/lib/eventCalendarProtocol"
 import { createCalendarServiceClient } from "@/lib/calendarServiceClient"
-import { loadEventCalendarHistory } from "@/lib/eventCalendarRecovery"
+import { loadEventCalendarHistory, readRecoverableHolidaySource } from "@/lib/eventCalendarRecovery"
+import type { HolidaySource } from "@/lib/holidayCalendar"
 
 type CalendarEvent = {
   id: string
@@ -24,6 +25,7 @@ type CalendarEvent = {
   tags: string[]
   eventType?: string
   sourceRow?: number
+  holidaySource?: HolidaySource
 }
 
 function getSupabaseClient() {
@@ -50,6 +52,7 @@ function normalizeEvent(value: unknown): CalendarEvent | null {
     return null
   }
 
+  const holidaySource = readRecoverableHolidaySource(event.holidaySource, event.id.trim())
   return {
     id: event.id.trim(),
     startDate: event.startDate,
@@ -60,6 +63,7 @@ function normalizeEvent(value: unknown): CalendarEvent | null {
     tags: normalizeStringList(event.tags),
     eventType: typeof event.eventType === "string" ? event.eventType : undefined,
     sourceRow: typeof event.sourceRow === "number" ? event.sourceRow : undefined,
+    ...(holidaySource ? { holidaySource } : {}),
   }
 }
 
