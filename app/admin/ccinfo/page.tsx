@@ -7,6 +7,8 @@ import { useIsMobile } from "@/lib/useIsMobile"
 import { getAuditChangeSummary, getAuditSubject, isCcinfoAuditLog } from "@/lib/auditDisplay"
 import { buildPostgrestCountryMatchFilter } from "@/lib/queryEscaping"
 import SimpleTable from "@/components/ccinfo/SimpleTable"
+import BcCalculator from "@/components/ccinfo/BcCalculator"
+import { normalizeBcCalculator, type BcCalculatorValues } from "@/lib/bcCalculator"
 import { CcinfoSaveConflict, createCcinfoSaveQueue, type CcinfoRecordChanges } from "@/lib/ccinfoSave"
 
 type RecordKind = "company" | "country" | "port"
@@ -369,6 +371,7 @@ type HighlightCard = {
   table?: string[][]
   column_widths?: number[]
   table_row_updates?: string[]
+  bc_calculator?: BcCalculatorValues
 }
 
 type SummaryMeta = {
@@ -445,6 +448,7 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
             table: Array.isArray(item?.table) ? item.table as string[][] : undefined,
             column_widths: Array.isArray(item?.column_widths) ? item.column_widths as number[] : undefined,
             table_row_updates: Array.isArray(item?.table_row_updates) ? item.table_row_updates as string[] : undefined,
+            bc_calculator: item?.bc_calculator ? normalizeBcCalculator(item.bc_calculator) : undefined,
             sections: Array.isArray(item?.sections)
               ? item.sections.map((section: Partial<HighlightCard>) => ({
                   title: typeof section?.title === "string" ? section.title : "",
@@ -469,6 +473,7 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
             table: Array.isArray(item?.table) ? item.table as string[][] : undefined,
             column_widths: Array.isArray(item?.column_widths) ? item.column_widths as number[] : undefined,
             table_row_updates: Array.isArray(item?.table_row_updates) ? item.table_row_updates as string[] : undefined,
+            bc_calculator: item?.bc_calculator ? normalizeBcCalculator(item.bc_calculator) : undefined,
           }))
           .filter((item: HighlightCard) => item.title.trim() || item.info.trim() || hasSectionTableLayout(item)),
       }
@@ -484,6 +489,7 @@ function parseSummaryMeta(value: string | null): SummaryMeta {
             table: Array.isArray(item?.table) ? item.table as string[][] : undefined,
             column_widths: Array.isArray(item?.column_widths) ? item.column_widths as number[] : undefined,
             table_row_updates: Array.isArray(item?.table_row_updates) ? item.table_row_updates as string[] : undefined,
+            bc_calculator: item?.bc_calculator ? normalizeBcCalculator(item.bc_calculator) : undefined,
             sections: Array.isArray(item?.sections)
               ? item.sections.map((section: Partial<HighlightCard>) => ({
                   title: typeof section?.title === "string" ? section.title : "",
@@ -533,6 +539,7 @@ function serializeSummaryMeta(items: HighlightCard[], mainLineUpdates: Record<st
           table: item.table,
           column_widths: item.column_widths,
           table_row_updates: item.table_row_updates,
+          bc_calculator: item.bc_calculator,
           sections: (item.sections || []).map((section) => ({
             title: section.title.trim(),
             info: section.info.trim(),
@@ -2587,7 +2594,7 @@ export default function CountryCompanyInfoPage() {
     try {
       const saved = await saveQueueRef.current.save({ kind: selectedKind, id: selectedId }, payload)
       if (recordOwnerRef.current === owner) {
-        setCurrentRecord((previous) => previous.id === selectedId ? { ...previous, updated_at: saved.updated_at } : previous)
+        setCurrentRecord((previous) => previous.id === selectedId ? { ...previous, summary: payload.summary, updated_at: saved.updated_at } : previous)
         if (selectedKind === "port" && (typeof saved.country_id === "string" || saved.country_id === null) && (typeof saved.country_name === "string" || saved.country_name === null)) {
           const countryId = saved.country_id || ""
           const countryName = saved.country_name || ""
@@ -3337,6 +3344,8 @@ export default function CountryCompanyInfoPage() {
       ? "Port Information"
       : "General Information"
   const mainInfoTabLabel = selectedKind === "port" ? "PORT INFORMATION" : "GENERAL INFORMATION"
+  const activeCompanyTab = selectedKind === "company" && activeInfoTab.startsWith("section-") ? highlights[Number(activeInfoTab.slice(8))] : null
+  const calculatorTabActive = Boolean(activeCompanyTab && (activeCompanyTab.title.trim().toUpperCase() === "BC CALCULATOR" || activeCompanyTab.bc_calculator))
   const fixedTabBackground = "var(--fc-admin-button-bg)"
   const fixedTabActiveBackground = "var(--fc-admin-selected-bg)"
   const userTabBackground = "var(--fc-admin-button-bg)"
@@ -3753,7 +3762,7 @@ export default function CountryCompanyInfoPage() {
     .slice(0, 12)
   const settingsMenu = (
     <div
-      style={{ ...panelStyle, position: "absolute", left: 0, bottom: "44px", padding: "7px", display: "grid", gap: "4px", minWidth: "178px", zIndex: 30 }}
+      style={{ ...panelStyle, position: "absolute", left: 0, ...(isMobile && calculatorTabActive ? { top: "44px" } : { bottom: "44px" }), padding: "7px", display: "grid", gap: "4px", minWidth: "178px", zIndex: 30 }}
       onMouseEnter={() => {
         if (menuCloseTimerRef.current) window.clearTimeout(menuCloseTimerRef.current)
       }}
@@ -3933,6 +3942,7 @@ export default function CountryCompanyInfoPage() {
                   {newEntityMenuOpen && newEntityMenu}
                 </div>
               </div>
+              {isMobile && calculatorTabActive && <div style={{ marginTop: "8px" }}>{settingsControl}</div>}
               {message && (
                 <div role="status" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginTop: "10px", color: "var(--fc-admin-panel-text)", fontSize: "12px", lineHeight: 1.5 }}>
                   <span>{message}</span>
@@ -4234,6 +4244,27 @@ export default function CountryCompanyInfoPage() {
                     <div style={{ display: "grid", gap: "12px" }}>
                       {highlights.map((highlight, index) => activeInfoTab === `section-${index}` ? (
                         <div key={`section-${index}`}>
+                          {selectedKind === "company" && (highlight.title.trim().toUpperCase() === "BC CALCULATOR" || highlight.bc_calculator) && (
+                            <BcCalculator
+                              key={`${selectedId}-${index}`}
+                              value={highlight.bc_calculator}
+                              savedValue={parseSummaryMeta(currentRecord.summary).sections[index]?.bc_calculator}
+                              saving={saving || sectionSaving}
+                              onChange={(value) => {
+                                if (recordLoading || recordOwnerRef.current !== renderOwner) return
+                                const nextHighlights = contentDraftRef.current.highlights.map((item, itemIndex) => itemIndex === index ? { ...item, bc_calculator: value } : item)
+                                contentDraftRef.current.highlights = nextHighlights
+                                setHighlights(nextHighlights)
+                              }}
+                              onSave={async () => {
+                                const owner = recordOwnerRef.current
+                                const nextHighlights = contentDraftRef.current.highlights
+                                await persistHighlights(nextHighlights)
+                                if (recordOwnerRef.current === owner && contentDraftRef.current.highlights === nextHighlights) setMessage("BC CALCULATOR SAVED.")
+                              }}
+                            />
+                          )}
+                          {(highlight.info.trim() || selectedKind !== "company" || (highlight.title.trim().toUpperCase() !== "BC CALCULATOR" && !highlight.bc_calculator)) && (
                           <BlockTextBlock
                             blocks={highlight.blocks?.length ? highlight.blocks : textToBlocks(highlight.info || "", highlight.line_updates || {}, currentRecord.updated_at)}
                             fallbackUpdatedAt={currentRecord.updated_at}
@@ -4247,6 +4278,7 @@ export default function CountryCompanyInfoPage() {
                             onBlockDelete={(blockId) => void deleteSectionBlock(index, blockId)}
                             onInsertBlock={(blockIndex) => insertSectionBlock(index, blockIndex)}
                           />
+                          )}
                           {(highlight.sections || []).length > 0 && (
                             <div style={{ display: "grid", gap: "12px", marginTop: "12px" }}>
                               {(highlight.sections || []).map((section, sectionIndex) => (
@@ -4473,7 +4505,7 @@ export default function CountryCompanyInfoPage() {
         </main>
         {!isMobile && <aside style={{ ...sidebarStyle, width: "320px", height: "100vh", overflow: "hidden" }}>{fileSection}</aside>}
       </div>
-      {isMobile && (
+      {isMobile && !calculatorTabActive && (
         <div style={{ position: "fixed", left: "14px", bottom: "14px", zIndex: 35 }}>
           {settingsControl}
         </div>
