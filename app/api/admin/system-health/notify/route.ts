@@ -5,6 +5,7 @@ import { normalizeEmailList, sendCalendarEmail } from "@/lib/eventCalendarEmail"
 import { getErrorMessage, getSystemHealth, type HealthCheck } from "@/lib/systemHealth"
 import { buildHealthAlertHtml, deliverHealthAlerts } from "@/lib/systemHealthAlerts"
 import { createHealthAlertStore } from "@/lib/systemHealthAlertStore"
+import { createBackupProtectionGapObserver } from "@/lib/backupProtectionGapStore"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -22,9 +23,7 @@ function hasCronAccess(request: Request) {
 }
 
 function isNonAlertingCheck(check: HealthCheck) {
-  if (NON_ALERTING_CHECK_IDS.has(check.id)) return true
-  if (check.id === "backup" && check.status === "warning") return true
-  return check.id === "drive-file-content-backup" && check.details?.firstBackupMissing === true
+  return NON_ALERTING_CHECK_IDS.has(check.id)
 }
 
 export async function GET(request: Request) {
@@ -41,7 +40,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const health = await getSystemHealth()
+    const health = await getSystemHealth({ backupGapObserver: createBackupProtectionGapObserver() })
     const recipients = normalizeEmailList(
       process.env.SYSTEM_HEALTH_EMAIL_RECIPIENTS ||
       process.env.EVENT_CALENDAR_EMAIL_RECIPIENTS
@@ -58,10 +57,9 @@ export async function GET(request: Request) {
       token: randomUUID(),
       store: createHealthAlertStore(recipient),
       async send(checks) {
-        const status = checks.some((check) => check.status === "error") ? "ERROR" : "WARNING"
         const result = await sendCalendarEmail({
           to: [recipient],
-          subject: `***** FC Uno System Health ${status}`,
+          subject: "FC Uno: action needed",
           html: buildHealthAlertHtml(checks, health.checkedAt),
         })
         if (!result.accepted.length) throw new Error("No System Health email recipients were accepted.")

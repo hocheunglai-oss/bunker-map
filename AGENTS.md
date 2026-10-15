@@ -67,3 +67,16 @@ Before any GitHub mutation, verify that the authenticated account is exactly
 push. Before any Vercel or Supabase mutation, verify the exact identifiers
 above. Chrome profile `Otto` is the final fallback only; an existing browser
 session is not a reason to bypass a verified API or CLI.
+
+## Continuing releases with the known development-tool warning
+
+On 15 October 2026, Otto instructed: "Keep deploying dont ask me again" for the
+existing development-only `braces` advisory `GHSA-vfj7-8cjw-p6xm` in the ESLint
+dependency chain. Do not ask for another release exception solely for that same
+unchanged warning. Continue verified releases when production dependencies are
+clear and every other release check passes. Rerun both audits, retain the known
+warning and failed full-audit evidence, and reassess compatible fixes normally.
+This does not approve new findings, changed production impact, other failed
+checks, scanner suppression, or bypassing platform security controls. The exact
+approval and scope are recorded in
+`docs/known-development-warning-release-authorization-2026-10-15.json`.

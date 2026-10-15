@@ -134,6 +134,23 @@ jobs:
           set -o pipefail
           FCUNO_BACKUP_SCALE_TEST=1 node --test tests/backup-validation-stream.test.mjs 2>&1 | tee backup-stream-tests.tap
 
+      - name: Verify backup protection deadlines and notification boundaries
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/backup-protection-*.test.ts tests/drive-file-backup-health.test.ts tests/system-health-alerts.test.ts tests/system-health-backup-window.test.ts 2>&1 | tee backup-protection-tests.tap
+
+      - name: Verify backup clocks and delivery with isolated PostgreSQL
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_runtime="${RUNNER_TEMP}/fcuno-backup-gap-test-runtime"
+          npm install --prefix "$test_runtime" --ignore-scripts --no-fund @electric-sql/pglite@0.5.8
+          npm audit signatures --prefix "$test_runtime"
+          PGLITE_MODULE_PATH="$test_runtime/node_modules/@electric-sql/pglite/dist/index.js" node --import tsx --test tests/backup-protection-flow.test.mjs tests/backup-protection-gaps-sql.test.mjs tests/system-health-alerts-sql.test.mjs 2>&1 | tee backup-protection-sql-tests.tap
+
       - name: Verify phonebook delivery, retry and failure reporting
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
@@ -200,6 +217,8 @@ jobs:
             outlook-contact-tests.tap
             spc-stem-tests.tap
             backup-stream-tests.tap
+            backup-protection-tests.tap
+            backup-protection-sql-tests.tap
             phonebook-sync-tests.tap
             session-trigger-tests.tap
             exchange-worker-tests.txt

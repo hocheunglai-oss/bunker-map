@@ -9,6 +9,7 @@ const check: HealthCheck = {
   message: "One file is overdue for backup", checkedAt: "2026-09-23T00:30:00.000Z",
   details: { alertLevel: 1, notificationEligible: true, incidentResolved: false },
 }
+const protectionId = "drive-file-content-protection"
 
 test("pending results preserve an incident; confirmed recovery clears it", () => {
   assert.equal(healthAlertObservation({ ...check, status: "ok", details: { incidentResolved: false } }, false).alert_level, null)
@@ -18,6 +19,8 @@ test("pending results preserve an incident; confirmed recovery clears it", () =>
   assert.equal(healthAlertObservation(check, false).alert_level, 1)
   assert.equal(healthAlertObservation({ ...check, details: { alertLevel: 2 } }, false).alert_level, 2)
   assert.equal(healthAlertObservation({ ...check, status: "error", details: { alertLevel: 1 } }, false).alert_level, 1)
+  assert.equal(healthAlertObservation({ ...check, details: { incidentResolved: true, notificationEligible: false, storageAdvice: true } }, false).alert_level, 0)
+  assert.equal(healthAlertObservation(check, false).check_id, protectionId)
 })
 
 test("no claim means no email and no delivery acknowledgement", async () => {
@@ -32,7 +35,7 @@ test("only claimed checks are sent, then delivery is acknowledged", async () => 
     claim: async (observations) => {
       assert.equal(observations.length, 2)
       sequence.push("claim")
-      return [check.id]
+      return [protectionId]
     },
     finish: async (token, delivered) => {
       assert.equal(token, "test")
@@ -49,7 +52,7 @@ test("only claimed checks are sent, then delivery is acknowledged", async () => 
 test("failed sends release claims without advancing the notified level", async () => {
   const results: boolean[] = []
   await assert.rejects(deliverHealthAlerts({ checks: [check], muted: () => false, token: "test",
-    store: { claim: async () => [check.id], finish: async (_, delivered) => { results.push(delivered) } },
+    store: { claim: async () => [protectionId], finish: async (_, delivered) => { results.push(delivered) } },
     send: async () => { throw new Error("SMTP unavailable") },
   }), /SMTP unavailable/)
   assert.deepEqual(results, [false])
@@ -58,7 +61,7 @@ test("failed sends release claims without advancing the notified level", async (
 test("failed acknowledgement after send keeps lease rather than inviting immediate duplicates", async () => {
   const results: boolean[] = []
   await assert.rejects(deliverHealthAlerts({ checks: [check], muted: () => false, token: "test",
-    store: { claim: async () => [check.id], finish: async (_, delivered) => { results.push(delivered); throw new Error("DB unavailable") } },
+    store: { claim: async () => [protectionId], finish: async (_, delivered) => { results.push(delivered); throw new Error("DB unavailable") } },
     send: async () => {},
   }), /DB unavailable/)
   assert.deepEqual(results, [true])
@@ -80,6 +83,14 @@ test("email is concise, uses HKT, escapes file names, and omits technical dump",
   assert.match(html, /&lt;img/)
   assert.doesNotMatch(html, /<img|internalhash|artifactSha256|ageHours|<table/)
   assert.match(html, /https:\/\/fcuno.com\/admin\/systemhealth/)
+  const many = buildHealthAlertHtml([{ ...check, details: { missingFiles: 5, missingFileNames: "One; Two; Three; Four; Five" } }], check.checkedAt)
+  assert.match(many, /One; Two; Three; and 2 more/)
+  assert.doesNotMatch(many, /Four|Five/)
+  const longName = "📄".repeat(90) + ".pdf"
+  const shortened = buildHealthAlertHtml([{ ...check, details: { missingFiles: 1, missingFileNames: longName } }], check.checkedAt)
+  assert.ok(shortened.includes("📄".repeat(77) + "…"))
+  assert.ok(!shortened.includes("📄".repeat(78)))
+  assert.ok(!shortened.includes("\uFFFD"), "display truncation cannot split a Unicode code point")
 })
 
 test("notification state is private, service-only, and not a new business-backup table", () => {
