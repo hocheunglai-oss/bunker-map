@@ -4,7 +4,7 @@ const assert = require('node:assert/strict')
 const { mkdirSync, readFileSync } = require('node:fs')
 const { resolve } = require('node:path')
 const https = require('node:https')
-const http = require('node:http')
+const { createLoopbackProxyHandler } = require('./fixtures/loopback-test-proxy.cjs')
 const { chromium, webkit } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright')
 const origin = process.env.FCUNO_GROUP_TEST_ORIGIN || 'http://127.0.0.1:38519'
 assert.ok(['127.0.0.1', 'localhost'].includes(new URL(origin).hostname), 'Only an isolated loopback server is allowed')
@@ -12,14 +12,7 @@ const output = process.env.FCUNO_GROUP_SCREENSHOTS || '/private/tmp/fcuno-outloo
 mkdirSync(output, { recursive: true })
 const expectedCases = []
 const upstream = process.env.FCUNO_GROUP_TEST_UPSTREAM ? new URL(process.env.FCUNO_GROUP_TEST_UPSTREAM) : null
-if (upstream) assert.ok(upstream.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(upstream.hostname), 'Proxy upstream must be loopback HTTP')
-const proxy = upstream ? https.createServer({ key: readFileSync(process.env.FCUNO_GROUP_TEST_TLS_KEY), cert: readFileSync(process.env.FCUNO_GROUP_TEST_TLS_CERT) }, (request, response) => {
-  const forward = http.request(new URL(request.url, upstream), { method: request.method, headers: { ...request.headers, host: upstream.host } }, received => {
-    response.writeHead(received.statusCode, received.headers); received.pipe(response)
-  })
-  forward.on('error', error => { response.writeHead(502); response.end(String(error)) })
-  request.pipe(forward)
-}) : null
+const proxy = upstream ? https.createServer({ key: readFileSync(process.env.FCUNO_GROUP_TEST_TLS_KEY), cert: readFileSync(process.env.FCUNO_GROUP_TEST_TLS_CERT) }, createLoopbackProxyHandler(upstream)) : null
 
 async function runCase(browser, engine, width, mode) {
   const context = await browser.newContext({ viewport: { width, height: 950 }, colorScheme: mode, timezoneId: 'Asia/Hong_Kong', ignoreHTTPSErrors: true })

@@ -23,6 +23,7 @@ function global:Send-MailMessage { throw 'TEST GUARD: unexpected email delivery'
 if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 `
 for (const file of [
+  "test-exchange-startup-bootstrap.ps1",
   "test-exchange-startup-retry.ps1",
   "test-exchange-connection-retry.ps1",
   "test-exchange-email-content.ps1",

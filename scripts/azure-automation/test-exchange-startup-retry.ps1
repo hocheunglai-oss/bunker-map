@@ -1,6 +1,9 @@
 param()
 
 $ErrorActionPreference = "Stop"
+# The fixture constructs the real HTTP exception without calling a web cmdlet.
+# Load its owning module explicitly while keeping the network guards in place.
+Import-Module Microsoft.PowerShell.Utility -NoClobber -ErrorAction Stop
 . (Join-Path $PSScriptRoot "sync-fcuno-outlook-addressbook.ps1") -LibraryOnly
 
 function Assert-True([bool]$Condition, [string]$Message) {
