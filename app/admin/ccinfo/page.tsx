@@ -4213,7 +4213,7 @@ export default function CountryCompanyInfoPage() {
                                 const owner = recordOwnerRef.current
                                 const nextHighlights = contentDraftRef.current.highlights
                                 await persistHighlights(nextHighlights)
-                                if (recordOwnerRef.current === owner && contentDraftRef.current.highlights === nextHighlights) setMessage("BC calculator saved.")
+                                if (recordOwnerRef.current === owner && contentDraftRef.current.highlights === nextHighlights) setMessage("BC CALCULATOR SAVED.")
                               }}
                             />
                           )}
