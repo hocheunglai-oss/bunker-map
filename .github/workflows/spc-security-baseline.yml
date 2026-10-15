@@ -134,12 +134,12 @@ jobs:
           set -o pipefail
           FCUNO_BACKUP_SCALE_TEST=1 node --test tests/backup-validation-stream.test.mjs 2>&1 | tee backup-stream-tests.tap
 
-      - name: Verify backup protection deadlines and notification boundaries
+      - name: Verify backup protection and bounded truth export
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
         run: |
           set -o pipefail
-          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/backup-protection-*.test.ts tests/drive-file-backup-health.test.ts tests/system-health-alerts.test.ts tests/system-health-backup-window.test.ts 2>&1 | tee backup-protection-tests.tap
+          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/backup-protection-*.test.ts tests/backup-truth-snapshot-export.test.ts tests/drive-file-backup-health.test.ts tests/system-health-alerts.test.ts tests/system-health-backup-window.test.ts 2>&1 | tee backup-protection-tests.tap
 
       - name: Verify backup clocks and delivery with isolated PostgreSQL
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
