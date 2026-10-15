@@ -5,6 +5,7 @@ import { transformSync } from "esbuild"
 import * as guard from "../lib/priceSetterLegacyWrites"
 import * as contacts from "../lib/outlookContactValidation"
 import * as ccinfo from "../lib/ccinfoSave"
+import * as groupWrites from "../lib/outlookGroupWriteGuard"
 
 function harness(auth?: "Unauthorized" | "Forbidden") {
   const permissions: { page: string; access: string }[] = []
@@ -17,6 +18,7 @@ function harness(auth?: "Unauthorized" | "Forbidden") {
     "@/lib/priceSetterLegacyWrites": guard,
     "@/lib/outlookContactValidation": contacts,
     "@/lib/ccinfoSave": ccinfo,
+    "@/lib/outlookGroupWriteGuard": groupWrites,
     "@supabase/supabase-js": { createClient() { throw Error("Unexpected client creation") } },
     "@/lib/adminAuth": { async requireAdminPagePermission(page: string, access: string) {
       permissions.push({ page, access })

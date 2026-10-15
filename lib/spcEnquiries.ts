@@ -9,7 +9,7 @@ import {
   writeSpcEnquiryNotes,
   type SpcEnquiryMeta,
 } from "@/lib/spcEnquiryText"
-import { ensurePendingSpcFixtureForEnquiry } from "@/lib/spcFixtures"
+import { buildPendingSpcFixtureForEnquiry } from "@/lib/spcFixtures"
 import {
   buildSpcEnquirySnapshot,
   buildSpcGroupAmendmentMessage,
@@ -71,6 +71,8 @@ export type SpcEnquiryOutcomeInput = {
   lostReason?: string
   supplierTraderUsername?: string
   supplierTraderDisplayName?: string
+  expectedUpdatedAt?: string
+  stemRequestId?: string
 }
 
 export type SpcFixtureInput = {
@@ -81,6 +83,7 @@ export type SpcFixtureInput = {
   lsmgo?: string
   price?: string
   barging?: string
+  expectedUpdatedAt?: string
 }
 
 export type ReofferSpcEnquiryInput = SaveSpcEnquiryInput
@@ -105,6 +108,9 @@ type SpcEnquiryRow = {
   last_amendment_changes: unknown
   created_at: string
   updated_at: string
+  stem_request_id?: string | null
+  stem_source_updated_at?: string | null
+  stem_supplier_username?: string | null
 }
 
 function cleanText(value: string | undefined) {
@@ -115,6 +121,15 @@ function cleanText(value: string | undefined) {
 function cleanDateInput(value: string | undefined) {
   const trimmed = value?.trim() || ""
   return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null
+}
+
+function timestampMicros(value: unknown) {
+  if (typeof value !== "string") return null
+  const match = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.(\d{1,6}))?(?:Z|[+-]\d{2}:\d{2})$/.exec(value)
+  const millis = Date.parse(value)
+  return match && Number.isFinite(millis)
+    ? BigInt(millis) * BigInt(1000) + BigInt((match[1] || "").padEnd(6, "0").slice(3))
+    : null
 }
 
 function mapEnquiry(row: SpcEnquiryRow): SpcEnquiry {
@@ -441,24 +456,78 @@ export async function updateSpcEnquiryOutcome(
   const existing = await loadSpcEnquiryRow(supabase, enquiryId)
   requireEnquiryOwner(existing, session)
 
+  const expectedUpdatedAt = input.expectedUpdatedAt?.trim() || ""
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(expectedUpdatedAt) || Number.isNaN(Date.parse(expectedUpdatedAt))) {
+    throw new Error("Refresh this enquiry before updating its outcome. Its saved version is required.")
+  }
+  if (outcome === "stem") {
+    const stemRequestId = input.stemRequestId?.trim() || ""
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(stemRequestId)) {
+      throw new Error("Refresh this enquiry before submitting STEM. A request id is required.")
+    }
+    const nextMeta: SpcEnquiryMeta = {
+      ...readSpcEnquiryMeta(existing.notes),
+      outcomeAt: new Date().toISOString(),
+      lostReason: undefined,
+      stemSupplierTraderUsername: cleanText(input.supplierTraderUsername) || undefined,
+      stemSupplierTraderDisplayName: cleanText(input.supplierTraderDisplayName) || cleanText(input.supplierTraderUsername) || undefined,
+      postponedAt: undefined,
+      cancelledAt: undefined,
+    }
+    // A retry whose response was lost needs no external user lookup. The RPC
+    // validates its durable operation identity and returns the canonical rows.
+    let nextNotes = writeSpcEnquiryNotes(formatSpcEnquiry(existing), nextMeta)
+    const fixture = existing.status === "sent"
+      ? await buildPendingSpcFixtureForEnquiry({ ...existing, notes: nextNotes })
+      : null
+    if (fixture) {
+      nextNotes = writeSpcEnquiryNotes(formatSpcEnquiry(existing), {
+        ...nextMeta,
+        stemSupplierTraderUsername: fixture.supplier_trader_username,
+        stemSupplierTraderDisplayName: fixture.supplier_trader_display_name,
+      })
+    }
+    const { data, error } = await supabase.rpc("stem_spc_enquiry_with_fixture", {
+      p_enquiry_id: enquiryId,
+      p_actor_username: session.username,
+      p_expected_updated_at: expectedUpdatedAt,
+      p_request_id: stemRequestId,
+      p_supplier_username: cleanText(input.supplierTraderUsername),
+      p_notes: fixture ? nextNotes : null,
+      p_fixture: fixture,
+    })
+    if (error) throw error
+    const row = Array.isArray(data) && data.length === 1 ? data[0] as SpcEnquiryRow : null
+    if (!row || row.id !== enquiryId || row.status !== "quoted"
+      || typeof row.stem_request_id !== "string" || row.stem_request_id.toLowerCase() !== stemRequestId.toLowerCase()
+      || timestampMicros(row.stem_source_updated_at) !== timestampMicros(expectedUpdatedAt)
+      || typeof row.stem_supplier_username !== "string" || row.stem_supplier_username.trim().toLowerCase() !== input.supplierTraderUsername?.trim().toLowerCase()
+      || typeof row.created_by_username !== "string" || row.created_by_username.toLowerCase() !== session.username?.toLowerCase()) {
+      throw new Error("SPC STEM did not return a verified saved enquiry. Refresh and review before trying again.")
+    }
+    return mapEnquiry(row as SpcEnquiryRow)
+  }
+
+  // A delayed LOST/POSTPONE/CANCEL must never overwrite a STEM committed by
+  // another tab. Both the state and the browser's source version are guarded.
+  const conflict = () => Object.assign(new Error("This enquiry changed while you were editing. Refresh and try again."), { code: "40001" })
+  if (existing.status !== "sent") throw conflict()
   if (outcome === "cancel") {
     const { data, error } = await supabase
       .from("spc_enquiries")
       .delete()
       .eq("id", enquiryId)
+      .eq("status", "sent")
+      .eq("updated_at", expectedUpdatedAt)
       .select("*")
       .single()
 
+    if (error?.code === "PGRST116") throw conflict()
     if (error) throw error
     return mapEnquiry(data as SpcEnquiryRow)
   }
 
-  const status =
-    outcome === "stem"
-      ? "quoted"
-      : outcome === "lost"
-        ? "cancelled"
-        : existing.status || "sent"
+  const status = outcome === "lost" ? "cancelled" : existing.status || "sent"
   const now = new Date().toISOString()
   const currentText = formatSpcEnquiry(existing)
   const nextMeta: SpcEnquiryMeta = {
@@ -470,14 +539,6 @@ export async function updateSpcEnquiryOutcome(
     nextMeta.lostReason = cleanText(input.lostReason) || undefined
     nextMeta.stemSupplierTraderUsername = undefined
     nextMeta.stemSupplierTraderDisplayName = undefined
-    nextMeta.postponedAt = undefined
-    nextMeta.cancelledAt = undefined
-  } else if (outcome === "stem") {
-    nextMeta.outcomeAt = now
-    nextMeta.lostReason = undefined
-    nextMeta.stemSupplierTraderUsername = cleanText(input.supplierTraderUsername) || undefined
-    nextMeta.stemSupplierTraderDisplayName =
-      cleanText(input.supplierTraderDisplayName) || cleanText(input.supplierTraderUsername) || undefined
     nextMeta.postponedAt = undefined
     nextMeta.cancelledAt = undefined
   } else if (outcome === "postpone") {
@@ -494,13 +555,13 @@ export async function updateSpcEnquiryOutcome(
       updated_at: now,
     })
     .eq("id", enquiryId)
+    .eq("status", "sent")
+    .eq("updated_at", expectedUpdatedAt)
     .select("*")
     .single()
 
+  if (error?.code === "PGRST116") throw conflict()
   if (error) throw error
-  if (outcome === "stem") {
-    await ensurePendingSpcFixtureForEnquiry(data as SpcEnquiryRow, session, request)
-  }
   return mapEnquiry(data as SpcEnquiryRow)
 }
 
@@ -599,10 +660,23 @@ export async function updateSpcEnquiryFixture(
 ) {
   const enquiryId = cleanText(id)
   if (!enquiryId) throw new Error("Enquiry id is required.")
+  const expectedUpdatedAt = fixture.expectedUpdatedAt?.trim() || ""
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(expectedUpdatedAt) || Number.isNaN(Date.parse(expectedUpdatedAt))) {
+    throw new Error("Refresh this enquiry before updating fixture notes. Its saved version is required.")
+  }
 
-  const context = createSpcAuditContext(session, request, "spc-fixtures")
+  const context = createSpcAuditContext(session, request, "spc-fixtures", {
+    action: "update-enquiry-fixture-notes",
+    targetType: "spc-enquiry",
+    targetId: enquiryId,
+  })
   const supabase = createSpcAuditedSupabaseClient(context)
   const existing = await loadSpcEnquiryRow(supabase, enquiryId)
+  const conflict = () => Object.assign(new Error("This enquiry changed while you were editing. Refresh and use the Fixtures page for an existing STEM."), { code: "40001" })
+  // This legacy operation annotates a sent enquiry before STEM. Once STEM has
+  // committed, its fixture editor is authoritative; this path may not replace
+  // outcome metadata or reinterpret an already committed operation receipt.
+  if (existing.status !== "sent" || existing.stem_request_id) throw conflict()
   const currentText = formatSpcEnquiry(existing)
   const now = new Date().toISOString()
   const nextMeta: SpcEnquiryMeta = {
@@ -624,9 +698,12 @@ export async function updateSpcEnquiryFixture(
       updated_at: now,
     })
     .eq("id", enquiryId)
+    .eq("status", "sent")
+    .eq("updated_at", expectedUpdatedAt)
     .select("*")
     .single()
 
+  if (error?.code === "PGRST116") throw conflict()
   if (error) throw error
   return mapEnquiry(data as SpcEnquiryRow)
 }

@@ -3,6 +3,7 @@ param()
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "sync-fcuno-outlook-addressbook.ps1") -LibraryOnly
 $script:ExchangeAddressBookDomain = Get-NormalizedExchangeAddressBookDomain "COSULICH1.ONMICROSOFT.COM"
+$minimalNoticeTestUrl = "https://mail-test.invalid/admin/outlookaddressbook"
 
 function Assert-True([bool]$Condition, [string]$Message) {
   if (-not $Condition) { throw "FAILED: $Message" }
@@ -1343,6 +1344,8 @@ try {
 
   $resolvedStats = @{
     syncMode = "incremental"
+    notificationAddressBookUrl = $minimalNoticeTestUrl
+    notificationIssueKind = "recovery"
     queuedRows = 1
     processedQueueRows = 1
     completedQueueRows = 1
@@ -1378,11 +1381,12 @@ try {
     requestedAt = "2026-07-22T07:22:00Z"
   })
   Assert-Equal "delivered" $resolvedNotificationDelivery.Status "A resolved-terminal notice must return an explicit successful delivery receipt"
-  Assert-True ($script:capturedResolvedSubject -match "1 terminal resolved") "The notice subject must state how many terminal failures were resolved"
-  Assert-True ($script:capturedResolvedHtml -match "Resolved") "The notice must visibly label a superseded terminal row as resolved"
-  Assert-True ($script:capturedResolvedHtml -match "Old terminal Exchange error") "The notice must show the exact prior terminal error"
-  Assert-True ($script:capturedResolvedHtml -match "processing_failed") "The notice must show the durable queue error history"
-  Assert-True ($script:capturedResolvedHtml -match $atomicQueueRowId) "The notice must show the superseding verified queue row ID"
+  Assert-Equal "FC Uno address book - working again" $script:capturedResolvedSubject "An optional recovery notice must use a calm nontechnical subject"
+  Assert-True ($script:capturedResolvedHtml -match "Address book syncing is working again") "The recovery notice must explain the outcome simply"
+  Assert-True ($script:capturedResolvedHtml -match "No action is needed") "The recovery notice must not create unnecessary follow-up work"
+  Assert-True ($script:capturedResolvedHtml -notmatch "Old terminal Exchange error|processing_failed") "Historical errors must remain in the audit record rather than the recovery email"
+  Assert-True ($script:capturedResolvedHtml -notmatch $atomicQueueRowId) "The recovery email must not expose internal row identifiers"
+  Assert-Equal 2 @($resolvedDetail.errorHistory).Count "Minimal recovery rendering must retain durable error history internally"
 
   $certificationResult = Commit-FullExchangeQueueCertification `
     "42@2026-07-22T07:15:00Z" `
@@ -1943,6 +1947,8 @@ Set-Item Function:Send-ExchangeSmtpMail -Value {
 try {
   $emailBacklogDetails = @{
     syncMode = "incremental"
+    notificationAddressBookUrl = $minimalNoticeTestUrl
+    notificationIssueKind = "contact_correction"
     queuedRows = 0
     processedQueueRows = 0
     completedQueueRows = 0
@@ -1969,19 +1975,25 @@ try {
   Assert-True ([bool]$backlogNotificationDelivery.Delivered) "A successful SMTP receipt must state that delivery completed"
   Assert-Equal 1 $backlogNotificationDelivery.RecipientCount "A successful SMTP receipt must retain the exact recipient count"
   Assert-True ([bool](Clean-Text $backlogNotificationDelivery.DeliveredAt)) "A successful SMTP receipt must retain its UTC delivery timestamp"
-  Assert-True ($script:capturedBacklogHtml -match "Queue change and backlog results") "A backlog notice must use a backlog-specific result title"
+  Assert-Equal "FC Uno address book - needs attention" $script:capturedBacklogSubject "An actionable notice must use a calm subject without technical counters"
+  Assert-True ($script:capturedBacklogHtml -match "Some contact or group details could not be updated in Outlook") "An actionable notice must explain the issue in ordinary language"
+  Assert-True ($script:capturedBacklogHtml -match "Please review the affected entries") "An actionable notice must give the reader a simple next step"
   Assert-True ($script:capturedBacklogHtml -match "Terminal stale group") "A backlog notice must name the terminal item"
-  Assert-True ($script:capturedBacklogHtml -match $terminalBacklogId) "A backlog notice must show the exact queue row ID"
-  Assert-True ($script:capturedBacklogHtml -match "retry limit exhausted") "A backlog notice must explain terminal retry exhaustion"
-  Assert-True ($script:capturedBacklogHtml -match "Not attempted") "A pending zero-attempt row must be labelled as not attempted"
+  Assert-True ($script:capturedBacklogHtml -notmatch $terminalBacklogId) "Exact queue identifiers must stay in the diagnostic record rather than the team email"
+  Assert-True ($script:capturedBacklogHtml -notmatch "retry limit exhausted|Not attempted|<table|<td") "Retry internals and diagnostic tables must stay out of the minimalist email"
   Assert-True ($script:capturedBacklogHtml -notmatch "No pending changes") "A backlog notice must never claim there are no pending changes"
   Assert-True ($script:capturedBacklogHtml -notmatch "Next retry") "Terminal and pending rows without next_attempt_at must not fabricate next-retry metadata"
-  Assert-True ($script:capturedBacklogHtml -match "Immutable audit checkpoint recorded") "A failed incremental notice may anchor its audit receipt without claiming that Exchange is fully certified"
-  Assert-True ($script:capturedBacklogHtml -match "does not mean every queued change succeeded") "A generic failed incremental checkpoint must explicitly separate ledger integrity from sync success"
-  Assert-True ($script:capturedBacklogHtml -notmatch "Current source-of-truth projection certified") "A failed incremental notice must never use full-certification wording"
+  Assert-True ($script:capturedBacklogHtml -notmatch "Immutable|checkpoint|ledger|certified|Requested by|Requested at") "Audit and scheduling information must stay in the internal record"
+  Assert-True ($script:capturedBacklogHtml -notmatch ("e" * 64)) "Checkpoint hashes must not appear in the team email"
+  Assert-Equal 1 ([regex]::Matches($script:capturedBacklogHtml, "<a ").Count) "An actionable notice must have one clear link"
+  Assert-True ($script:capturedBacklogHtml.Contains('href="' + $minimalNoticeTestUrl + '"')) "The action must lead to the verified address-book page"
+  Assert-Equal 201 $emailBacklogDetails.truthLedgerHeadSequence "Simplified email rendering must preserve the full internal checkpoint"
+  Assert-Equal ("e" * 64) $emailBacklogDetails.truthLedgerHeadHash "Simplified email rendering must not remove internal diagnostic evidence"
 
   $fullNoticeStats = @{
     syncMode = "full"
+    notificationAddressBookUrl = $minimalNoticeTestUrl
+    notificationIssueKind = "recovery"
     contacts = 1
     groups = 0
     groupMembers = 0
@@ -2039,24 +2051,18 @@ try {
     requestedAt = "2026-07-22T07:10:00Z"
   })
   Assert-Equal "delivered" $fullNotificationDelivery.Status "A successful full-sync notice must return an explicit delivered receipt"
-  Assert-True ($script:capturedBacklogHtml -match "Full reconciliation results") "A full-run notice must use a full-reconciliation result title"
-  Assert-True ($script:capturedBacklogHtml -match "Create contact") "A full-run notice must show each mutation action"
-  Assert-True ($script:capturedBacklogHtml -match "Email: \(missing\) -&gt; full-notice@example.com") "A full-run notice must show exact before/after fields"
-  Assert-True ($script:capturedBacklogHtml -match "FCUNO_CONTACT:c-full-notice") "A full-run notice must show the stable FCUNO identity"
-  Assert-True ($script:capturedBacklogHtml -match "dddddddd-dddd-4ddd-8ddd-dddddddddddd") "A full-run notice must show the verified Exchange identity"
-  Assert-True ($script:capturedBacklogHtml -notmatch "No Exchange mutations required") "A mutated full run must never use the zero-mutation fallback"
-  Assert-True ($script:capturedBacklogHtml -match "Current source-of-truth projection certified") "A fully certified run notice must clearly state that the current FCUNO-to-Exchange projection was certified"
-  Assert-True ($script:capturedBacklogHtml -match "FCUNO is authoritative") "A fully certified run notice must identify FCUNO as the authority"
-  Assert-True ($script:capturedBacklogHtml -notmatch "does not mean every queued change succeeded") "A fully certified run must not use the generic checkpoint-only qualification"
-  Assert-True ($script:capturedBacklogHtml -match "Projection evidence ledger sequence") "The notice summary must label the full-certification receipt sequence separately"
-  Assert-True ($script:capturedBacklogHtml -match "Ledger checkpoint sequence") "The notice summary must label the later ledger-head checkpoint separately"
-  Assert-True ($script:capturedBacklogHtml -match "Outlook template recipient truth reconciled") "The full notice must confirm that Outlook-template recipient evidence followed the certified projection"
-  Assert-True ($script:capturedBacklogHtml -match "Outlook templates currently sendable") "The full notice must report how many Outlook templates are currently safe to insert"
-  Assert-True ($script:capturedBacklogHtml -match "Outlook templates blocked by missing recipients") "The full notice must expose missing-recipient send blocks"
-  Assert-True ($script:capturedBacklogHtml -match "Outlook templates blocked by ambiguous recipients") "The full notice must expose ambiguous-recipient send blocks"
-  Assert-True ($script:capturedBacklogHtml -match ("f" * 64)) "The notice summary must retain the projection-evidence receipt hash"
-  Assert-True ($script:capturedBacklogHtml -match ("c" * 64)) "The notice summary must retain the latest checkpoint head hash"
-  Assert-True ($script:capturedBacklogHtml -match $atomicProjectionFingerprint) "The fully certified notice must display the exact canonical FCUNO-to-Exchange projection hash"
+  Assert-Equal "FC Uno address book - working again" $script:capturedBacklogSubject "A requested recovery notice must use a plain-language subject"
+  Assert-True ($script:capturedBacklogHtml -match "Address book syncing is working again") "A requested recovery notice must briefly explain that syncing recovered"
+  Assert-True ($script:capturedBacklogHtml -match "No action is needed") "A recovery notice must not create unnecessary team work"
+  Assert-True ($script:capturedBacklogHtml -notmatch "Create contact|full-notice@example.com|Full Notice Contact|FCUNO_CONTACT:c-full-notice") "Successful per-contact changes and stable identities belong in the diagnostic record"
+  Assert-True ($script:capturedBacklogHtml -notmatch "dddddddd-dddd-4ddd-8ddd-dddddddddddd|checkpoint|ledger|projection|templates|<table") "Technical evidence and unrelated template counts must stay out of the recovery email"
+  Assert-True ($script:capturedBacklogHtml -notmatch ("f" * 64)) "Projection-evidence receipt hashes must stay out of the recovery email"
+  Assert-True ($script:capturedBacklogHtml -notmatch ("c" * 64)) "Latest checkpoint hashes must stay out of the recovery email"
+  Assert-True ($script:capturedBacklogHtml -notmatch $atomicProjectionFingerprint) "The full-certified projection hash must remain internal"
+  Assert-Equal 1 ([regex]::Matches($script:capturedBacklogHtml, "<a ").Count) "A recovery notice must keep one address-book link"
+  Assert-Equal $atomicProjectionFingerprint $fullNoticeStats.sourceSnapshotHash "Minimalist rendering must preserve canonical evidence in the full sync record"
+  Assert-Equal ("f" * 64) $fullNoticeStats.truthEvidenceLedgerHash "Minimalist rendering must preserve the projection receipt in the full sync record"
+  Assert-Equal 51 $fullNoticeStats.templateRecipientTruthMissingTemplates "Template diagnostics must remain available internally"
 
   Set-Item Function:Send-ExchangeSmtpMail -Value {
     param($From, $To, $Subject, $Html)
@@ -2133,7 +2139,7 @@ $backlogOutcome = Get-IncrementalSyncOutcome @{
   supersededQueueRows = 0
 }
 Assert-Equal "failed" $backlogOutcome.Status "An unresolved unclaimable backlog must fail an incremental run"
-Assert-True ([bool]$backlogOutcome.AlwaysNotify) "An unresolved backlog must notify even for a scheduled incremental run"
+Assert-True ([bool]$backlogOutcome.AlwaysNotify) "An unresolved backlog must remain an alert candidate even for a scheduled incremental run"
 Assert-True ($backlogOutcome.Message -match "3 unresolved queue change") "The backlog failure must state the exact unresolved count"
 $emptyOutcome = Get-IncrementalSyncOutcome @{
   queuedRows = 0
@@ -2157,8 +2163,8 @@ $changedOutcome = Get-IncrementalSyncOutcome @{
   resolvedTerminalQueueRows = 0
 }
 Assert-Equal "completed" $changedOutcome.Status "A verified user change must complete successfully"
-Assert-True (Test-IncrementalSyncNotificationRequired $changedOutcome) "A verified user change must send an informative email report"
-Assert-True (Test-IncrementalSyncNotificationRequired $backlogOutcome) "An unresolved failure must continue to send an alert"
+Assert-True (-not (Test-IncrementalSyncNotificationRequired $changedOutcome)) "Verified user changes must not create routine emails"
+Assert-True (Test-IncrementalSyncNotificationRequired $backlogOutcome) "Unresolved failures must remain candidates for incident-based notification"
 
 $silentFullOutcome = @{
   failedQueueRows = 0
@@ -2185,13 +2191,13 @@ foreach ($key in @(
   "removedMembers"
 )) {
   $mutatedFullOutcome[$key] = 1
-  Assert-True (Test-FullSyncNotificationRequired "completed" $mutatedFullOutcome) "A successful full reconciliation must notify when $key records an Exchange mutation"
+  Assert-True (-not (Test-FullSyncNotificationRequired "completed" $mutatedFullOutcome)) "A successful full reconciliation must remain silent when $key records an Exchange mutation"
   $mutatedFullOutcome[$key] = 0
 }
-Assert-True (Test-FullSyncNotificationRequired "failed" $silentFullOutcome) "A failed full reconciliation must always notify"
+Assert-True (Test-FullSyncNotificationRequired "failed" $silentFullOutcome) "A failed full reconciliation must remain a candidate for incident-based notification"
 $failedFullOutcome = $silentFullOutcome.Clone()
 $failedFullOutcome.failedQueueRows = 1
-Assert-True (Test-FullSyncNotificationRequired "completed" $failedFullOutcome) "A full reconciliation with a recorded row failure must always notify"
+Assert-True (Test-FullSyncNotificationRequired "completed" $failedFullOutcome) "A full reconciliation with a recorded row failure must remain a candidate for incident-based notification"
 
 $fullLockMessage = "Full reconciliation was blocked by an active mutation lease."
 $fullLockDetails = New-FullSyncLockFailureDetails $fullLockMessage

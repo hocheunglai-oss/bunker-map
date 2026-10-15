@@ -16,7 +16,7 @@ test("fixture ETA editor presents two clearly labelled date groups", () => {
   for (const label of ["ETA start day", "ETA start month", "ETA end day", "ETA end month"]) {
     assert.match(fixturesPage, new RegExp(`aria-label="${label}"`))
   }
-  assert.match(fixturesPage, /disabled=\{!canEdit \|\| !parts\.endDay\}/)
+  assert.match(fixturesPage, /disabled=\{!canEdit \|\| Boolean\(savingId\) \|\| loading \|\| !parts\.endDay\}/)
 })
 
 test("fixture ETA date groups reserve enough room for full month abbreviations", () => {

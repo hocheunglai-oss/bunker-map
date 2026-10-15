@@ -13,9 +13,12 @@ import { timedJson } from "@/lib/serverTiming"
 export const dynamic = "force-dynamic"
 
 function errorResponse(error: unknown, fallback: string) {
-  const message = error instanceof Error ? error.message : fallback
+  const message = error instanceof Error ? error.message
+    : typeof error === "object" && error !== null && "message" in error && typeof error.message === "string"
+      ? error.message : fallback
+  const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : ""
   const status =
-    message === "Unauthorized"
+    code === "40001" ? 409 : code === "42501" ? 403 : code === "22023" ? 400 : message === "Unauthorized"
       ? 401
       : message === "Forbidden"
         ? 403
@@ -31,6 +34,8 @@ function errorResponse(error: unknown, fallback: string) {
 
 function fixtureInput(source: Record<string, unknown>): SpcFixtureInput {
   return {
+    expectedUpdatedAt: typeof source.expectedUpdatedAt === "string" ? source.expectedUpdatedAt : "",
+    expectedStatus: typeof source.expectedStatus === "string" ? source.expectedStatus : "",
     fixtureDate: typeof source.fixtureDate === "string" ? source.fixtureDate : "",
     supplierTrader: typeof source.supplierTrader === "string" ? source.supplierTrader : "",
     buyerTrader: typeof source.buyerTrader === "string" ? source.buyerTrader : "",
@@ -80,12 +85,17 @@ export async function PATCH(request: Request) {
       id?: unknown
       action?: unknown
       fixture?: unknown
+      expectedUpdatedAt?: unknown
+      expectedStatus?: unknown
     }
     const id = typeof payload.id === "string" ? payload.id.trim() : ""
     if (!id) throw new Error("Fixture id is required.")
     const action = payload.action === "complete" ? "complete" : payload.action === "delete" ? "delete" : "save"
     if (action === "delete") {
-      const deletedId = await deleteSpcFixture(id, session, request)
+      const deletedId = await deleteSpcFixture(id, {
+        expectedUpdatedAt: typeof payload.expectedUpdatedAt === "string" ? payload.expectedUpdatedAt : "",
+        expectedStatus: typeof payload.expectedStatus === "string" ? payload.expectedStatus : "",
+      }, session, request)
       return NextResponse.json({ success: true, id: deletedId })
     }
     const source =

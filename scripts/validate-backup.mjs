@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto"
-import fs from "node:fs"
 import path from "node:path"
 import { pricingBackupSchemaFromArtifact, pricingBackupSchemaVersion } from "../lib/backupPricingSchema.mjs"
+import {
+  DiskMap as Map,
+  DiskSet as Set,
+  hashValidationValue,
+  parseBoundedBackupJson,
+  readBackupForValidation,
+  sortedValidationRows,
+} from "../lib/backupValidationSpool.mjs"
 
 const backupPath = process.argv[2]
 if (!backupPath) {
@@ -387,8 +394,13 @@ function idSet(data, key) {
   )
 }
 
-function addError(errors, message) {
-  if (!errors.includes(message)) errors.push(message)
+function addError(errors, message, kind = "errors") {
+  // Use the same bounded sink for local validators and warnings, not only the
+  // final report. Reaching a diagnostic limit fails INVALID, never partial VALID.
+  if (message.length > 4096) throw new Error("Diagnostic output truncated: a message exceeds 4096 characters; the artifact is INVALID")
+  if (errors.includes(message)) return
+  if (errors.length >= 1000) throw new Error(`Diagnostic output truncated after 1000 distinct ${kind}; the artifact is INVALID`)
+  errors.push(message)
 }
 
 function isPresentPrimaryKeyValue(value) {
@@ -1107,7 +1119,7 @@ function parseJsonText(value, label, errors) {
     return null
   }
   try {
-    return JSON.parse(value)
+    return parseBoundedBackupJson(value)
   } catch (error) {
     addError(
       errors,
@@ -1246,7 +1258,7 @@ function validateSourceWarnings(backup, errors, warnings) {
         addError(errors, `warnings[${index}].${key}: invalid`)
       }
     }
-    warnings.push(`source warning: ${warning.message || JSON.stringify(warning)}`)
+    addError(warnings, `source warning: ${warning.message || JSON.stringify(warning)}`, "warnings")
   }
 }
 
@@ -1312,7 +1324,7 @@ function validateTopLevelAndManifest(backup, rawFile, errors, warnings) {
   ) {
     addError(errors, "deploymentCommit: expected null or a hexadecimal commit identifier")
   } else if (backup.deploymentCommit === null) {
-    warnings.push("deploymentCommit: missing; code provenance cannot be independently identified")
+    addError(warnings, "deploymentCommit: missing; code provenance cannot be independently identified", "warnings")
   }
   if (backup.previousVerifiedBackup !== null) {
     const previous = backup.previousVerifiedBackup
@@ -1415,7 +1427,7 @@ function validateTopLevelAndManifest(backup, rawFile, errors, warnings) {
     data: backup.data,
     warnings: backup.warnings,
   }
-  const actualArtifactSha256 = sha256(JSON.stringify(artifactPayload))
+  const actualArtifactSha256 = hashValidationValue(artifactPayload)
   if (integrity.artifactSha256 !== actualArtifactSha256) {
     addError(
       errors,
@@ -1463,7 +1475,7 @@ function validateTopLevelAndManifest(backup, rawFile, errors, warnings) {
       )
     }
 
-    const actualSectionSha256 = sha256(JSON.stringify(value))
+    const actualSectionSha256 = hashValidationValue(value)
     if (section.sha256 !== actualSectionSha256) {
       addError(
         errors,
@@ -1476,7 +1488,7 @@ function validateTopLevelAndManifest(backup, rawFile, errors, warnings) {
   // file bytes. It is intentionally printed rather than compared with the
   // compact logical-artifact hash above.
   return {
-    fileSha256: sha256(rawFile),
+    fileSha256: rawFile.fileSha256,
     artifactSha256: actualArtifactSha256,
   }
 }
@@ -1502,23 +1514,23 @@ function validatePriceSetterCreationReceipts(receipts, pricingSchemaVersion = "c
       || typeof row.port_id !== "string" || !uuid.test(row.port_id)
       || !["port", "divider"].includes(row.kind)
       || timestamp(row.created_at) === null) {
-      errors.push(`${label}: invalid durable creation receipt`)
+      addError(errors, `${label}: invalid durable creation receipt`)
       continue
     }
     const requestId = row.request_id.toLowerCase(), portId = row.port_id.toLowerCase()
-    if (requestIds.has(requestId) || portIds.has(portId)) errors.push(`${label}: duplicate creation identity`)
+    if (requestIds.has(requestId) || portIds.has(portId)) addError(errors, `${label}: duplicate creation identity`)
     requestIds.add(requestId); portIds.add(portId)
     if (requiresRecoveryFields || Object.hasOwn(row, "actor_id") || Object.hasOwn(row, "acknowledged_at")) {
       const ack = timestamp(row.acknowledged_at)
       if (!Object.hasOwn(row, "actor_id") || !Object.hasOwn(row, "acknowledged_at")
         || row.actor_id !== null && (typeof row.actor_id !== "string" || !uuid.test(row.actor_id))
         || row.acknowledged_at !== null && (row.actor_id === null || ack === null || ack < timestamp(row.created_at))) {
-        errors.push(`${label}: invalid creation recovery state`)
+        addError(errors, `${label}: invalid creation recovery state`)
         continue
       }
       if (row.actor_id !== null && row.acknowledged_at === null) {
         const actorId = row.actor_id.toLowerCase()
-        if (pendingActors.has(actorId)) errors.push(`${label}: multiple unfinished additions for one administrator`)
+        if (pendingActors.has(actorId)) addError(errors, `${label}: multiple unfinished additions for one administrator`)
         pendingActors.add(actorId)
       }
     }
@@ -1558,7 +1570,7 @@ function validateAttendanceDingtalkEvidence(data, migrationHead = "") {
       !isValidTimestamp(row.incoming_punch_time) ||
       !date.test(String(row.incoming_work_date || "")) ||
       !isValidTimestamp(row.first_seen_at)) {
-      errors.push(`${label}: invalid or incomplete punch-correction evidence`)
+      addError(errors, `${label}: invalid or incomplete punch-correction evidence`)
     }
   }
   for (const [index, row] of missing.entries()) {
@@ -1569,7 +1581,7 @@ function validateAttendanceDingtalkEvidence(data, migrationHead = "") {
       !isValidTimestamp(row.observed_window_to) ||
       Date.parse(row.observed_window_from) > Date.parse(row.observed_window_to) ||
       !isValidTimestamp(row.first_seen_at)) {
-      errors.push(`${label}: invalid or incomplete missing-punch evidence`)
+      addError(errors, `${label}: invalid or incomplete missing-punch evidence`)
     }
   }
   for (const [section, entries, parentIds] of [
@@ -1581,7 +1593,7 @@ function validateAttendanceDingtalkEvidence(data, migrationHead = "") {
         !isValidTimestamp(row.resolved_at) ||
         typeof row.resolved_by !== "string" || !row.resolved_by.trim() ||
         typeof row.resolution_note !== "string" || !row.resolution_note.trim()) {
-        errors.push(`${section}[${index}]: invalid or orphaned resolution`)
+        addError(errors, `${section}[${index}]: invalid or orphaned resolution`)
       }
     }
   }
@@ -1596,7 +1608,7 @@ function validateAttendanceDingtalkEvidence(data, migrationHead = "") {
     const raw = rawById.get(row.existing_raw_punch_id)
     if (raw && (isConfirmed(raw.person_id, raw.work_date) ||
       isConfirmed(row.incoming_person_id, row.incoming_work_date))) {
-      errors.push(`attendanceDingtalkPunchAnomalies: an open correction has a confirmed month`)
+      addError(errors, `attendanceDingtalkPunchAnomalies: an open correction has a confirmed month`)
       break
     }
   }
@@ -1604,7 +1616,7 @@ function validateAttendanceDingtalkEvidence(data, migrationHead = "") {
     if (!isPlainObject(row) || missingResolvedIds.has(row.id)) continue
     const raw = rawById.get(row.existing_raw_punch_id)
     if (raw && isConfirmed(raw.person_id, raw.work_date)) {
-      errors.push(`attendanceDingtalkMissingPunchAnomalies: an open omission has a confirmed month`)
+      addError(errors, `attendanceDingtalkMissingPunchAnomalies: an open omission has a confirmed month`)
       break
     }
   }
@@ -1930,9 +1942,8 @@ function validateSections(backup, errors, warnings) {
       (row) => isPlainObject(row) && !row.deleted_at && !row.drive_file_id
     )
     if (activeWithoutDriveId.length) {
-      warnings.push(
-        `${key}: ${activeWithoutDriveId.length} active file reference(s) have no Drive file id`
-      )
+      addError(warnings,
+        `${key}: ${activeWithoutDriveId.length} active file reference(s) have no Drive file id`, "warnings")
     }
   }
 }
@@ -2061,9 +2072,8 @@ function ledgerHashMaterial(row) {
 }
 
 function validateTruthLedger(data, snapshotsByHash, errors) {
-  const ledger = [...rows(data, "outlookExchangeTruthLedger")].sort(
-    (a, b) => Number(a?.ledger_sequence || 0) - Number(b?.ledger_sequence || 0)
-  )
+  const ledger = sortedValidationRows(rows(data, "outlookExchangeTruthLedger"),
+    row => Number(row?.ledger_sequence || 0))
   const auditIds = idSet(data, "auditLogs")
   const queueIds = idSet(data, "outlookExchangeSyncQueue")
 
@@ -2204,9 +2214,8 @@ function validateTruthLedger(data, snapshotsByHash, errors) {
 }
 
 function validateCertificationPairing(data, ledgerState, snapshotsByHash, errors, warnings) {
-  const certifications = [...rows(data, "outlookExchangeSyncCertifications")].sort(
-    (a, b) => Date.parse(a?.certified_at || 0) - Date.parse(b?.certified_at || 0)
-  )
+  const certifications = sortedValidationRows(rows(data, "outlookExchangeSyncCertifications"),
+    row => Date.parse(row?.certified_at || 0))
   checkDuplicateValues(
     certifications.map((row) => row?.run_id),
     "outlookExchangeSyncCertifications.run_id",
@@ -2373,14 +2382,13 @@ function validateCertificationPairing(data, ledgerState, snapshotsByHash, errors
   }
 
   const legacyWithoutProjection = certifications.filter(
-    (certification) =>
-      certification !== latestCertification &&
+    (certification, index) =>
+      index !== certifications.length - 1 &&
       !ledgerState.byEventKey.has(`projection:${certification.run_id}`)
   )
   if (legacyWithoutProjection.length) {
-    warnings.push(
-      `Exchange truth: ${legacyWithoutProjection.length} legacy certification(s) predate projection-evidence capture`
-    )
+    addError(warnings,
+      `Exchange truth: ${legacyWithoutProjection.length} legacy certification(s) predate projection-evidence capture`, "warnings")
   }
 
   return { certifications, latestCertification, latestProjection }
@@ -2698,13 +2706,14 @@ function validateTruthManifest(backup, ledgerState, certificationState, snapshot
 let rawFile
 let backup
 try {
-  rawFile = fs.readFileSync(backupPath, "utf8")
-  backup = JSON.parse(rawFile)
+  rawFile = await readBackupForValidation(backupPath)
+  backup = rawFile.backup
 } catch (error) {
   console.error(`INVALID: ${error instanceof Error ? error.message : String(error)}`)
   process.exit(1)
 }
 
+try {
 const errors = []
 const warnings = []
 const safeBackup = isPlainObject(backup) ? backup : {}
@@ -2780,7 +2789,7 @@ console.log(`Deployment commit: ${safeBackup.deploymentCommit || "-"}`)
 console.log(
   `Previous verified backup: ${safeBackup.previousVerifiedBackup?.name || "none (first v2 artifact)"}`
 )
-console.log(`File SHA-256: ${hashes.fileSha256 || sha256(rawFile)}`)
+console.log(`File SHA-256: ${hashes.fileSha256 || rawFile.fileSha256}`)
 console.log(`Artifact SHA-256: ${hashes.artifactSha256 || "-"}`)
 console.log(`Sections checked: ${backupContract.requiredSections.length}`)
 console.log(
@@ -2802,7 +2811,13 @@ for (const warning of warnings) console.log(`WARNING: ${warning}`)
 
 if (errors.length) {
   console.log("RESULT: INVALID")
-  process.exit(1)
+  process.exitCode = 1
+} else {
+  console.log("RESULT: VALID")
 }
-
-console.log("RESULT: VALID")
+} catch (error) {
+  console.error(`INVALID: ${error instanceof Error ? error.message : String(error)}`)
+  process.exitCode = 1
+} finally {
+  rawFile.close()
+}

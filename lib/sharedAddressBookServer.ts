@@ -26,6 +26,7 @@ export type SharedAddressBookGroup = {
   nickname: string | null
   description: string | null
   member_count: number
+  updated_at: string
 }
 
 export type SharedAddressBookGroupMember = {
@@ -93,7 +94,7 @@ export async function loadSharedAddressBook() {
     ),
     loadPagedTable<SharedAddressBookGroup>(
       "shared_addressbook_groups",
-      "id,source_book,source_uid,name,nickname,description,member_count",
+      "id,source_book,source_uid,name,nickname,description,member_count,updated_at",
       ["name", "id"],
     ),
     loadPagedTable<SharedAddressBookGroupMember>(

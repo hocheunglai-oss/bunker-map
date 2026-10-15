@@ -95,6 +95,8 @@ type DraftEnquiry = ParsedSpcEnquiry & {
 
 type OutcomeDraft = {
   id: string
+  expectedUpdatedAt: string
+  stemRequestId: string
   type: Extract<EnquiryOutcome, "stem" | "lost">
   lostReason: string
   supplierTraderUsername: string
@@ -469,6 +471,7 @@ export default function SpcEnquiriesPage() {
   const [supplierTraders, setSupplierTraders] = useState<SupplierTrader[]>([])
   const [buyerLostReasons, setBuyerLostReasons] = useState<string[]>([...FALLBACK_BUYER_LOST_REASONS])
   const [outcomeDraft, setOutcomeDraft] = useState<OutcomeDraft | null>(null)
+  const [outcomeError, setOutcomeError] = useState<{ requestId: string; message: string } | null>(null)
   const [reofferDraft, setReofferDraft] = useState<ReofferDraft | null>(null)
   const [enquiryEditorMode, setEnquiryEditorMode] = useState<"reoffer" | "amend">("reoffer")
   const [vlsfoMaxRemarks, setVlsfoMaxRemarks] = useState<VlsfoMaxRemark[]>([])
@@ -1051,8 +1054,12 @@ export default function SpcEnquiriesPage() {
   }
 
   function openOutcome(enquiry: SpcEnquiry, type: Extract<EnquiryOutcome, "stem" | "lost">) {
+    if (updatingId) return
+    setOutcomeError(null)
     setOutcomeDraft({
       id: enquiry.id,
+      expectedUpdatedAt: enquiry.updatedAt,
+      stemRequestId: crypto.randomUUID(),
       type,
       lostReason: buyerLostReasons[0] || "UNKNOWN",
       supplierTraderUsername: supplierTraders[0]?.username || "",
@@ -1065,6 +1072,8 @@ export default function SpcEnquiriesPage() {
     lostReason?: string
     supplierTraderUsername?: string
     supplierTraderDisplayName?: string
+    expectedUpdatedAt?: string
+    stemRequestId?: string
   }) {
     const response = await fetch("/api/spc/enquiries", {
       method: "PATCH",
@@ -1082,38 +1091,45 @@ export default function SpcEnquiriesPage() {
   }
 
   async function confirmOutcome() {
-    if (!canEdit || !outcomeDraft) return
+    if (!canEdit || !outcomeDraft || updatingId) return
+    const operation = { ...outcomeDraft }
+    setOutcomeError(null)
     const supplierTrader = supplierTraders.find(
-      (user) => user.username === outcomeDraft.supplierTraderUsername,
+      (user) => user.username === operation.supplierTraderUsername,
     )
-    setUpdatingId(outcomeDraft.id)
+    setUpdatingId(operation.id)
     try {
       await patchOutcome({
-        id: outcomeDraft.id,
-        outcome: outcomeDraft.type,
-        lostReason: outcomeDraft.type === "lost" ? outcomeDraft.lostReason : "",
+        id: operation.id,
+        outcome: operation.type,
+        lostReason: operation.type === "lost" ? operation.lostReason : "",
         supplierTraderUsername:
-          outcomeDraft.type === "stem" ? outcomeDraft.supplierTraderUsername : "",
-        supplierTraderDisplayName: outcomeDraft.type === "stem" ? supplierTrader?.displayName || "" : "",
+          operation.type === "stem" ? operation.supplierTraderUsername : "",
+        supplierTraderDisplayName: operation.type === "stem" ? supplierTrader?.displayName || "" : "",
+        expectedUpdatedAt: operation.expectedUpdatedAt,
+        stemRequestId: operation.stemRequestId,
       })
-      setOutcomeDraft(null)
+      setOutcomeDraft((current) => current?.stemRequestId === operation.stemRequestId ? null : current)
     } catch (error) {
       reportEnquiryError(error, "Failed to update enquiry.")
+      setOutcomeError({ requestId: operation.stemRequestId, message: error instanceof Error ? error.message : "Failed to update enquiry." })
     } finally {
-      setUpdatingId("")
+      setUpdatingId((current) => current === operation.id ? "" : current)
     }
   }
 
   async function quickOutcome(enquiry: SpcEnquiry, outcome: Extract<EnquiryOutcome, "postpone" | "cancel">) {
-    if (!canEdit) return
+    if (!canEdit || updatingId) return
+    setOutcomeError(null)
     setUpdatingId(enquiry.id)
     try {
-      await patchOutcome({ id: enquiry.id, outcome })
+      await patchOutcome({ id: enquiry.id, outcome, expectedUpdatedAt: enquiry.updatedAt })
       if (outcome === "cancel") {
         setEnquiries((current) => current.filter((row) => row.id !== enquiry.id))
       }
     } catch (error) {
       reportEnquiryError(error, "Failed to update enquiry.")
+      setOutcomeError({ requestId: "", message: error instanceof Error ? error.message : "Failed to update enquiry." })
     } finally {
       setUpdatingId("")
     }
@@ -1389,6 +1405,7 @@ export default function SpcEnquiriesPage() {
               <strong className="spc-enquiry-count">{activeEnquiries.length}</strong>
             </div>
             <div className="spc-sent-enquiries-list">
+              {!outcomeDraft && outcomeError ? <p className="spc-parser-report-error" role="alert">{outcomeError.message}</p> : null}
               {activeEnquiries.map((enquiry) => {
                 const matches = matchesFor(enquiry)
                 const amendmentLabels = spcAmendmentSummaryLabels(enquiry.amendmentChanges)
@@ -1450,16 +1467,17 @@ export default function SpcEnquiriesPage() {
 
       {outcomeDraft ? (
         <div className="spc-dialog-backdrop" role="presentation">
-          <section className="spc-dialog" role="dialog" aria-modal="true" aria-label="Update enquiry outcome">
+          <section className="spc-dialog" role="dialog" aria-modal="true" aria-busy={Boolean(updatingId)} aria-label="Update enquiry outcome">
             <div className="spc-dialog-header">
               <h2>{outcomeDraft.type === "lost" ? "Lost Reason" : "Supplier Trader"}</h2>
-              <button type="button" onClick={() => setOutcomeDraft(null)}>×</button>
+              <button type="button" aria-label="Close outcome dialog" disabled={Boolean(updatingId)} onClick={() => setOutcomeDraft(null)}>×</button>
             </div>
             {outcomeDraft.type === "lost" ? (
               <label className="spc-dialog-field">
                 <span>Reason</span>
                 <select
                   value={outcomeDraft.lostReason}
+                  disabled={Boolean(updatingId)}
                   onChange={(event) =>
                     setOutcomeDraft((current) =>
                       current ? { ...current, lostReason: event.target.value } : current,
@@ -1476,9 +1494,10 @@ export default function SpcEnquiriesPage() {
                 <span>Supplier Trader</span>
                 <select
                   value={outcomeDraft.supplierTraderUsername}
+                  disabled={Boolean(updatingId)}
                   onChange={(event) =>
                     setOutcomeDraft((current) =>
-                      current ? { ...current, supplierTraderUsername: event.target.value } : current,
+                      current ? { ...current, supplierTraderUsername: event.target.value, stemRequestId: crypto.randomUUID() } : current,
                     )
                   }
                 >
@@ -1489,18 +1508,19 @@ export default function SpcEnquiriesPage() {
                 </select>
               </label>
             )}
+            {outcomeError?.requestId === outcomeDraft.stemRequestId ? <p className="spc-parser-report-error" role="alert" style={{ margin: "0 16px 16px" }}>{outcomeError.message}</p> : null}
             <div className="spc-dialog-actions">
-              <button type="button" onClick={() => setOutcomeDraft(null)}>Cancel</button>
+              <button type="button" disabled={Boolean(updatingId)} onClick={() => setOutcomeDraft(null)}>Cancel</button>
               <button
                 type="button"
                 className="is-primary"
                 onClick={() => void confirmOutcome()}
                 disabled={
-                  updatingId === outcomeDraft.id ||
+                  Boolean(updatingId) ||
                   (outcomeDraft.type === "stem" && !outcomeDraft.supplierTraderUsername)
                 }
               >
-                Confirm
+                {updatingId ? "Saving..." : "Confirm"}
               </button>
             </div>
           </section>

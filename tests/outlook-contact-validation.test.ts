@@ -5,6 +5,7 @@ import vm from "node:vm"
 import ts from "typescript"
 import { ccinfoLegacyContentWriteMessage } from "../lib/ccinfoSave"
 import { priceSetterLegacyWriteMessage } from "../lib/priceSetterLegacyWrites"
+import { outlookGroupCreateValidationMessage, outlookGroupLegacyWriteMessage } from "../lib/outlookGroupWriteGuard"
 import {
   normalizeOutlookContactFields,
   validateOutlookContactFields,
@@ -98,6 +99,7 @@ function loadRoute(permissionError?: "Unauthorized" | "Forbidden") {
     "@/lib/outlookContactValidation": { validateOutlookContactFields },
     "@/lib/ccinfoSave": { ccinfoLegacyContentWriteMessage },
     "@/lib/priceSetterLegacyWrites": { priceSetterLegacyWriteMessage },
+    "@/lib/outlookGroupWriteGuard": { outlookGroupCreateValidationMessage, outlookGroupLegacyWriteMessage },
     "@/lib/adminAuth": { requireAdminPagePermission: async (page: string, permission: string) => {
       permissions.push({ page, permission })
       if (permissionError) throw new Error(permissionError)
@@ -208,13 +210,13 @@ test("the existing page-table scope still rejects an unrelated page before forwa
   assert.equal(permissions.length, 0)
 })
 
-test("contact reads, deletes and unrelated group writes are not treated as contact edits", async () => {
+test("contact reads/deletes and group membership writes are not treated as contact edits", async () => {
   for (const method of ["GET", "DELETE"]) {
     const { exports, forwarded } = loadRoute()
     assert.equal((await exports[method](request(method))).status, 200)
     assert.equal(forwarded.length, 1)
   }
   const { exports, forwarded } = loadRoute()
-  assert.equal((await exports.PATCH(request("PATCH", { name: "Group" }, "shared_addressbook_groups"))).status, 200)
+  assert.equal((await exports.POST(request("POST", { group_id: "group", contact_id: "contact", source_book: "FC-GENERAL" }, "shared_addressbook_group_members"))).status, 200)
   assert.equal(forwarded.length, 1)
 })

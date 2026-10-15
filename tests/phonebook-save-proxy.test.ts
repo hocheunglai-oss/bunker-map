@@ -7,6 +7,7 @@ import ts from "typescript"
 import { ccinfoLegacyContentWriteMessage } from "../lib/ccinfoSave"
 import { priceSetterLegacyWriteMessage } from "../lib/priceSetterLegacyWrites"
 import { validateOutlookContactFields } from "../lib/outlookContactValidation"
+import { outlookGroupCreateValidationMessage, outlookGroupLegacyWriteMessage } from "../lib/outlookGroupWriteGuard"
 
 const source = readFileSync(new URL("../app/api/admin/supabase/route.ts", import.meta.url), "utf8")
 const output = ts.transpileModule(source, {
@@ -23,6 +24,7 @@ function fixture(status = 200, payload: unknown = saved, forbidden = false) {
     "@/lib/ccinfoSave": { ccinfoLegacyContentWriteMessage },
     "@/lib/priceSetterLegacyWrites": { priceSetterLegacyWriteMessage },
     "@/lib/outlookContactValidation": { validateOutlookContactFields },
+    "@/lib/outlookGroupWriteGuard": { outlookGroupCreateValidationMessage, outlookGroupLegacyWriteMessage },
     "@/lib/adminAuth": { requireAdminPagePermission: async (...permission: string[]) => {
       permissions.push(permission)
       if (forbidden) throw new Error("Forbidden")

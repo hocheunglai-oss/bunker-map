@@ -216,7 +216,8 @@ test("actual SQL receipt JSON passes the real backup validator without losing ow
     const start = text.indexOf("function validatePriceSetterCreationReceipts"), end = text.indexOf("function validateSections", start)
     assert.ok(start >= 0 && end > start)
     const code = transformSync(text.slice(start, end), { loader: "js", format: "cjs", target: "node24" }).code
-    const validate = new Function(`${code};return validatePriceSetterCreationReceipts;`)()
+    const diagnostics = text.slice(text.indexOf("function addError"), text.indexOf("function isPresentPrimaryKeyValue"))
+    const validate = new Function(`${diagnostics}\n${code};return validatePriceSetterCreationReceipts;`)()
     const id = randomUUID(), result = await create(f, id)
     await ack(f, id)
     await f.db.query("select public.delete_price_setter_port($1,$2::jsonb,'{}'::jsonb)",

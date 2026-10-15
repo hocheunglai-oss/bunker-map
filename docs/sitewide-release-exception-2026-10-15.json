@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-10-15T07:50:55Z",
+  "status": "approved-conditional-one-time-exception-not-yet-released",
+  "approvedBy": "Otto Lai, directly in this chat",
+  "question": "May I release this combined repair batch if all other checks pass, while keeping the existing development-tool security warning open? This would be a one-time exception; the production dependencies have no reported vulnerability.",
+  "answer": "Yes, release if all other checks pass",
+  "scope": {
+    "pullRequest": "https://github.com/hocheunglai-oss/bunker-map/pull/61",
+    "batch": "Combined sitewide country/pricing, phonebook/CCINFO, Outlook groups, SPC transaction, backup validation and related register/navigation repairs",
+    "advisory": "GHSA-vfj7-8cjw-p6xm",
+    "package": "braces",
+    "installedVersion": "3.0.3",
+    "dependencyChain": "eslint-config-next -> @next/eslint-plugin-next -> fast-glob -> micromatch -> braces",
+    "classification": "Existing development-only code-checking dependency; deeply nested crafted patterns can exhaust the stack",
+    "notEvidenceOfCompromise": true,
+    "compatiblePublishedFixAtReview": false
+  },
+  "conditions": [
+    "All other functional, type, build, access-control, contract and release checks must pass on the final combined source.",
+    "Rerun unchanged full and production dependency audits on the final PR head. Any other advisory or failed check is outside this exception.",
+    "Keep the warning and failed full-audit evidence visible; do not disable, suppress or weaken scanners, deployment protections or branch requirements.",
+    "Verify the canonical account, repository, database, Vercel team/project and immutable release revision; preserve the user's dirty checkout and already-live Azure worker.",
+    "Apply only reviewed additive migrations and verify a staged production build before promotion; report remaining verification limits honestly."
+  ],
+  "notAuthorizedByThisException": [
+    "Any other failed release check or security finding",
+    "Any unrelated production data, contact, account, email, financial or cloud configuration change",
+    "A dependency downgrade, unreviewed upgrade or recurring waiver",
+    "A claim that the advisory is fixed, the whole site is bug-free or disaster recovery has been demonstrated"
+  ],
+  "followUp": "Keep the development dependency warning open and reassess compatible updates. This exception applies only to this combined repair release."
+}

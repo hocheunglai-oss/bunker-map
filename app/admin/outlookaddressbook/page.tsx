@@ -6,6 +6,7 @@ import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
 import type { AuditLogRecord } from "@/lib/auditLog"
 import { normalizeOutlookContactFields, validateOutlookContactFields, type OutlookContactFields } from "@/lib/outlookContactValidation"
+import { OUTLOOK_GROUP_EDIT_FIELDS, isOutlookGroupVersion, isSavedOutlookGroup, normalizeOutlookGroupFields, readStableOutlookGroupSnapshot, validateOutlookGroupFields, type OutlookGroupFields } from "@/lib/outlookGroupValidation"
 import {
   clearAdminClientCache,
   fetchAdminClientJson,
@@ -34,6 +35,7 @@ type SharedGroup = {
   nickname: string | null
   description: string | null
   member_count: number
+  updated_at?: string | null
 }
 
 type GroupMember = {
@@ -520,8 +522,16 @@ export default function OutlookAddressBookPage() {
   const [contactBusy, setContactBusy] = useState(false)
   const [contactNotice, setContactNotice] = useState("")
   const contactBusyRef = useRef(false)
-  const groupDraftsRef = useRef<Record<string, SharedGroup>>({})
-  const groupSaveChainsRef = useRef<Record<string, Promise<void>>>({})
+  const [groupDraft, setGroupDraft] = useState<SharedGroup | null>(null)
+  const [groupBusy, setGroupBusy] = useState(false)
+  const [groupNotice, setGroupNotice] = useState("")
+  const [groupBlockedIds, setGroupBlockedIds] = useState<Set<string>>(() => new Set())
+  const groupBusyRef = useRef(false)
+  const groupOwnerRef = useRef("")
+  const groupOperationRef = useRef(0)
+  const groupEditRevisionRef = useRef(0)
+  const mountedRef = useRef(true)
+  const createGroupIdRef = useRef<string | null>(null)
   const createMenuHideTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -534,7 +544,12 @@ export default function OutlookAddressBookPage() {
   }, [authenticated])
 
   useEffect(() => {
-    return () => clearCreateMenuHideTimer()
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      groupOperationRef.current += 1
+      clearCreateMenuHideTimer()
+    }
   }, [])
 
   useEffect(() => {
@@ -586,9 +601,15 @@ export default function OutlookAddressBookPage() {
     contactSourceAdding || CONTACT_EDIT_FIELDS.some((field) => (editedContact[field] || "") !== (selectedContact[field] || ""))
   ))
   const selectedGroup = groups.find((group) => group.id === selectedGroupId) || null
+  const editedGroup = groupDraft?.id === selectedGroupId ? groupDraft : selectedGroup
+  const groupDirty = Boolean(selectedGroup && editedGroup && (
+    groupSourceAdding || OUTLOOK_GROUP_EDIT_FIELDS.some((field) => (editedGroup[field] || "") !== (selectedGroup[field] || ""))
+  ))
+  const editorBusy = contactBusy || groupBusy
+  const groupVersionReady = Boolean(selectedGroup && isOutlookGroupVersion(selectedGroup.updated_at) && !groupBlockedIds.has(selectedGroup.id))
 
   useEffect(() => {
-    if (!contactDirty && !contactBusy) return
+    if (!contactDirty && !groupDirty && !editorBusy) return
     const beforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault()
       event.returnValue = ""
@@ -596,12 +617,14 @@ export default function OutlookAddressBookPage() {
     const beforeNavigate = (event: MouseEvent) => {
       const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null
       if (!(anchor instanceof HTMLAnchorElement) || anchor.target === "_blank" || anchor.hasAttribute("download") || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-      if (contactBusyRef.current || !window.confirm("Discard unsaved contact changes and leave this page?")) {
+      if (contactBusyRef.current || groupBusyRef.current || !window.confirm("Discard unsaved address book changes and leave this page?")) {
         event.preventDefault()
         event.stopPropagation()
       } else {
         setContactDraft(null)
         setContactSourceAdding(false)
+        setGroupDraft(null)
+        setGroupSourceAdding(false)
       }
     }
     window.addEventListener("beforeunload", beforeUnload)
@@ -610,7 +633,7 @@ export default function OutlookAddressBookPage() {
       window.removeEventListener("beforeunload", beforeUnload)
       document.removeEventListener("click", beforeNavigate, true)
     }
-  }, [contactDirty, contactBusy])
+  }, [contactDirty, groupDirty, editorBusy])
 
   const groupMemberIds = useMemo(
     () => new Set(members.filter((member) => member.group_id === selectedGroupId).map((member) => member.contact_id)),
@@ -759,6 +782,9 @@ export default function OutlookAddressBookPage() {
   }
 
   async function loadAll(options: { loadSecondary?: boolean } = {}) {
+    const loadedOwner = groupOwnerRef.current
+    const loadedOperation = groupOperationRef.current
+    const loadedRevision = groupEditRevisionRef.current
     setLoading(!readAdminClientCache(OUTLOOK_ADDRESS_BOOK_CACHE_KEY))
     setMessage("")
     try {
@@ -766,14 +792,17 @@ export default function OutlookAddressBookPage() {
         OUTLOOK_ADDRESS_BOOK_CACHE_KEY,
         "/api/outlook-addressbook/bootstrap",
       )
+      if (!mountedRef.current || groupBusyRef.current || groupOwnerRef.current !== loadedOwner ||
+          groupOperationRef.current !== loadedOperation || groupEditRevisionRef.current !== loadedRevision) return
       setContactDraft(null)
-      groupDraftsRef.current = {}
-      groupSaveChainsRef.current = {}
+      setGroupDraft(null)
+      setGroupBlockedIds(new Set())
+      groupOperationRef.current += 1
       setContacts((payload.contacts || []) as SharedContact[])
       setGroups((payload.groups || []) as SharedGroup[])
       setMembers((payload.members || []) as GroupMember[])
       setSelectedContactId("")
-      setSelectedGroupId("")
+      selectGroup("")
       setSaving("saved")
       if (options.loadSecondary !== false) {
         window.setTimeout(() => {
@@ -832,28 +861,31 @@ export default function OutlookAddressBookPage() {
     }
   }
 
-  function queueEntitySave(chainsRef: { current: Record<string, Promise<void>> }, entityId: string, operation: () => Promise<void>) {
-    const previous = chainsRef.current[entityId] || Promise.resolve()
-    const chained = previous.catch(() => undefined).then(operation)
-    const tracked: Promise<void> = chained.finally(() => {
-      if (chainsRef.current[entityId] === tracked) {
-        delete chainsRef.current[entityId]
-      }
-    })
-    chainsRef.current[entityId] = tracked
-    return tracked
+  function selectGroup(id: string) {
+    groupOwnerRef.current = id
+    setSelectedGroupId(id)
   }
 
-  async function waitForPendingSaves() {
-    while (true) {
-      const pending = Object.values(groupSaveChainsRef.current)
-      if (pending.length === 0) return
-      await Promise.all(pending)
-    }
+  function currentGroupOperation(id: string, operation: number) {
+    return mountedRef.current && groupOwnerRef.current === id && groupOperationRef.current === operation
+  }
+
+  function blockGroupVersion(id: string) {
+    setGroupBlockedIds(current => new Set([...current, id]))
+  }
+
+  function cancelGroupEdit() {
+    if (contactBusyRef.current || groupBusyRef.current) return
+    groupEditRevisionRef.current += 1
+    setGroupDraft(null)
+    setGroupSourceAdding(false)
+    setGroupSourceDraft("")
+    setGroupNotice("")
+    setMessage("")
   }
 
   function cancelContactEdit() {
-    if (contactBusyRef.current) return
+    if (contactBusyRef.current || groupBusyRef.current) return
     setContactDraft(null)
     setContactSourceAdding(false)
     setContactSourceDraft("")
@@ -862,21 +894,22 @@ export default function OutlookAddressBookPage() {
   }
 
   function leaveContactEditor() {
-    if (contactBusyRef.current) return false
-    if (contactDirty && !window.confirm("Discard unsaved contact changes?")) return false
+    if (contactBusyRef.current || groupBusyRef.current) return false
+    if ((contactDirty || groupDirty) && !window.confirm("Discard unsaved address book changes?")) return false
     cancelContactEdit()
+    cancelGroupEdit()
     return true
   }
 
   function editContact(partial: Partial<OutlookContactFields>) {
-    if (!selectedContact || contactBusyRef.current) return
+    if (!selectedContact || contactBusyRef.current || groupBusyRef.current) return
     setContactDraft((current) => ({ ...(current?.id === selectedContact.id ? current : selectedContact), ...partial }))
     setContactNotice("")
     setMessage("")
   }
 
   async function saveContact() {
-    if (!selectedContact || !editedContact || !contactDirty || contactBusyRef.current) return
+    if (!selectedContact || !editedContact || !contactDirty || contactBusyRef.current || groupBusyRef.current) return
     const fields = normalizeOutlookContactFields({ ...editedContact, source_book: contactSourceAdding ? contactSourceDraft : editedContact.source_book })
     const validationError = validateOutlookContactFields(fields)
     if (validationError) {
@@ -915,35 +948,113 @@ export default function OutlookAddressBookPage() {
     }
   }
 
-  async function saveGroup(partial: Partial<SharedGroup>) {
-    if (!selectedGroup) return
-    const nextGroup = {
-      ...(groupDraftsRef.current[selectedGroup.id] || selectedGroup),
-      ...partial,
-    }
-    groupDraftsRef.current[selectedGroup.id] = nextGroup
-    setGroups((current) => current.map((group) => (group.id === nextGroup.id ? nextGroup : group)))
-    markExchangeNeedsSync()
+  function editGroup(partial: Partial<OutlookGroupFields>) {
+    if (!selectedGroup || !groupVersionReady || contactBusyRef.current || groupBusyRef.current) return
+    groupEditRevisionRef.current += 1
+    setGroupDraft(current => ({ ...(current?.id === selectedGroup.id ? current : selectedGroup), ...partial }))
+    setGroupNotice("")
+    setMessage("")
+  }
+
+  async function saveGroup() {
+    if (!selectedGroup || !editedGroup || !groupDirty || !groupVersionReady || contactBusyRef.current || groupBusyRef.current) return
+    const fields = normalizeOutlookGroupFields({ ...editedGroup, source_book: groupSourceAdding ? groupSourceDraft : editedGroup.source_book })
+    const validationError = validateOutlookGroupFields(fields)
+    if (validationError) { setMessage(validationError); return }
+    const changes = Object.fromEntries(OUTLOOK_GROUP_EDIT_FIELDS.filter(field => fields[field] !== selectedGroup[field]).map(field => [field, fields[field]]))
+    if (!Object.keys(changes).length) { cancelGroupEdit(); return }
+    const group = selectedGroup
+    const operation = ++groupOperationRef.current
+    groupBusyRef.current = true
+    setGroupBusy(true)
     setSaving("saving")
     setMessage("")
-    void queueEntitySave(groupSaveChainsRef, nextGroup.id, async () => {
-      const groupToSave = groupDraftsRef.current[nextGroup.id] || nextGroup
-      const groupFields = {
-        id: groupToSave.id,
-        source_book: groupToSave.source_book,
-        source_uid: groupToSave.source_uid,
-        name: groupToSave.name,
-        nickname: groupToSave.nickname,
-        description: groupToSave.description,
+    let awaitingReply = true
+    try {
+      const response = await fetch("/api/outlook-addressbook/groups", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save", id: group.id, expectedUpdatedAt: group.updated_at, changes }),
+      })
+      const payload = await response.json()
+      if (!currentGroupOperation(group.id, operation)) return
+      awaitingReply = false
+      if (!response.ok) {
+        if (response.status !== 400) blockGroupVersion(group.id)
+        throw new Error(payload.message || "Could not save the group. Your edits are still here.")
       }
-      const { error } = await supabase.from("shared_addressbook_groups").upsert(groupFields, { onConflict: "id" })
-      if (error) {
-        setSaving("failed")
-        setMessage(error.message)
-        throw error
+      if (!isSavedOutlookGroup(payload.group, group.id, group.updated_at || undefined) || payload.group.source_uid !== group.source_uid ||
+          Object.entries(changes).some(([key, value]) => payload.group[key] !== value)) {
+        blockGroupVersion(group.id)
+        throw new Error("The saved group could not be verified. Your edits are still here; copy them before reloading.")
       }
+      setGroups(current => current.map(row => row.id === group.id ? payload.group : row))
+      setGroupDraft(null)
+      setGroupSourceAdding(false)
+      setGroupSourceDraft("")
+      setGroupNotice("Group saved. Exchange will update automatically within the next hour, or select Sync now.")
+      markExchangeNeedsSync()
       setSaving("saved")
-    }).catch(() => undefined)
+      void loadRecentActivities()
+    } catch (error) {
+      if (!currentGroupOperation(group.id, operation)) return
+      // A lost response may follow a committed save; retain the draft and do
+      // not guess its new version or replay the old draft as an upsert.
+      if (awaitingReply) blockGroupVersion(group.id)
+      setSaving("failed")
+      setMessage(error instanceof Error ? error.message : "Could not save the group. Your edits are still here.")
+    } finally {
+      if (groupOperationRef.current === operation) {
+        groupBusyRef.current = false
+        if (mountedRef.current) setGroupBusy(false)
+      }
+    }
+  }
+
+  async function reloadGroup() {
+    if (!selectedGroup || contactBusyRef.current || groupBusyRef.current) return
+    if (groupDirty && !window.confirm("Discard this unsaved draft and reload the group? Copy your changes first if needed.")) return
+    const id = selectedGroup.id
+    const operation = ++groupOperationRef.current
+    groupBusyRef.current = true
+    setGroupBusy(true)
+    setMessage("")
+    try {
+      const snapshot = await loadGroupSnapshot(id)
+      if (!currentGroupOperation(id, operation)) return
+      setGroups(current => current.map(row => row.id === id ? snapshot.group : row))
+      setMembers(current => [...current.filter(row => row.group_id !== id), ...snapshot.members])
+      setGroupBlockedIds(current => { const next = new Set(current); next.delete(id); return next })
+      setGroupDraft(null)
+      setGroupSourceAdding(false)
+      setGroupSourceDraft("")
+      setGroupNotice("Group reloaded.")
+      clearAdminClientCache(OUTLOOK_ADDRESS_BOOK_CACHE_KEY)
+    } catch (error) {
+      if (!currentGroupOperation(id, operation)) return
+      blockGroupVersion(id)
+      setMessage(error instanceof Error ? error.message : "The group could not be reloaded.")
+    } finally {
+      if (groupOperationRef.current === operation) {
+        groupBusyRef.current = false
+        if (mountedRef.current) setGroupBusy(false)
+      }
+    }
+  }
+
+  async function loadGroupSnapshot(id: string) {
+    return readStableOutlookGroupSnapshot(id, async () => {
+      const { data, error } = await supabase.from("shared_addressbook_groups").select("*").eq("id", id).single()
+      if (error) throw new Error("The group could not be reloaded. Your data is still here.")
+      return data
+    }, async () => {
+      const rows: GroupMember[] = []
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase.from("shared_addressbook_group_members").select("group_id,contact_id,source_book").eq("group_id", id).order("contact_id").range(from, from + 999)
+        if (error || !Array.isArray(data)) throw new Error("The group members could not be reloaded. Your data is still here.")
+        rows.push(...data)
+        if (data.length < 1000) return rows
+      }
+    })
   }
 
   function beginCreate(type: CreateDraftType) {
@@ -953,6 +1064,7 @@ export default function OutlookAddressBookPage() {
       ? selectedSourceBook
       : sourceBookOptions[0] || DEFAULT_SOURCE_BOOK
     setCreateDraftType(type)
+    createGroupIdRef.current = type === "group" ? newId("group") : null
     setCreateSourceBook(defaultSource)
     setCreateNewSourceBook("")
     setCreateName("")
@@ -962,7 +1074,8 @@ export default function OutlookAddressBookPage() {
   }
 
   function cancelCreate() {
-    if (contactBusyRef.current) return
+    if (contactBusyRef.current || groupBusyRef.current) return
+    createGroupIdRef.current = null
     setCreateDraftType(null)
     setCreateNewSourceBook("")
     setCreateName("")
@@ -980,14 +1093,13 @@ export default function OutlookAddressBookPage() {
   }
 
   function groupSourceBookValue() {
-    if (!selectedGroup) return ""
+    if (!editedGroup) return ""
     if (groupSourceAdding) return SOURCE_NEW
-    const sourceBook = cleanText(selectedGroup.source_book)
-    return sourceBook && sourceBookOptions.includes(sourceBook) ? sourceBook : SOURCE_NEW
+    return cleanText(editedGroup.source_book) || SOURCE_NEW
   }
 
   async function applyContactSourceBook(value: string) {
-    if (contactBusyRef.current) return
+    if (contactBusyRef.current || groupBusyRef.current) return
     if (value === SOURCE_NEW) {
       setContactSourceAdding(true)
       setContactSourceDraft("")
@@ -999,27 +1111,20 @@ export default function OutlookAddressBookPage() {
   }
 
   async function applyGroupSourceBook(value: string) {
+    if (contactBusyRef.current || groupBusyRef.current || !groupVersionReady) return
     if (value === SOURCE_NEW) {
+      groupEditRevisionRef.current += 1
       setGroupSourceAdding(true)
       setGroupSourceDraft("")
       return
     }
     setGroupSourceAdding(false)
     setGroupSourceDraft("")
-    await saveGroup({ source_book: value })
-  }
-
-  async function commitGroupSourceBook() {
-    const sourceBook = cleanText(groupSourceDraft)
-    if (!sourceBook) return
-    await saveGroup({ source_book: sourceBook })
-    setSelectedSourceBook(SOURCE_ALL)
-    setGroupSourceDraft("")
-    setGroupSourceAdding(false)
+    editGroup({ source_book: value })
   }
 
   async function submitCreate() {
-    if (contactBusyRef.current) return
+    if (contactBusyRef.current || groupBusyRef.current) return
     const sourceBook = resolvedCreateSourceBook()
     if (!sourceBook) {
       setMessage("Select or enter a Source Book before creating.")
@@ -1076,37 +1181,53 @@ export default function OutlookAddressBookPage() {
     return true
   }
 
-  async function createGroup(sourceBook: string, name = "NEW GROUP") {
-    const id = newId("group")
-    const group: SharedGroup = {
+  async function createGroup(sourceBook: string, name: string) {
+    const fields = normalizeOutlookGroupFields({ source_book: sourceBook, name, nickname: null, description: null })
+    const validation = validateOutlookGroupFields(fields)
+    if (validation) { setMessage(validation); return false }
+    const id = createGroupIdRef.current || newId("group")
+    createGroupIdRef.current = id
+    const group = {
+      ...fields,
       id,
-      source_book: sourceBook,
       source_uid: id,
-      name: cleanText(name) || "NEW GROUP",
-      nickname: null,
-      description: null,
       member_count: 0,
     }
-    markExchangeNeedsSync()
     setSaving("saving")
-    const { error } = await supabase.from("shared_addressbook_groups").insert(group)
-    if (error) {
+    let data: unknown = null
+    try {
+      const inserted = await supabase.from("shared_addressbook_groups").insert(group).select("*").single()
+      if (!inserted.error) data = inserted.data
+    } catch {
+      // The INSERT may already have committed. Read the same stable identity;
+      // never retry creation under a fresh ID or convert the retry to upsert.
+    }
+    if (!isSavedOutlookGroup(data, id) || data.source_uid !== id || Object.entries(group).some(([key, value]) => (data as unknown as Record<string, unknown>)[key] !== value)) {
+      try {
+        const readback = await supabase.from("shared_addressbook_groups").select("*").eq("id", id).single()
+        data = readback.error ? null : readback.data
+      } catch { data = null }
+    }
+    if (!mountedRef.current || createGroupIdRef.current !== id) return false
+    if (!isSavedOutlookGroup(data, id) || data.source_uid !== id || Object.entries(group).some(([key, value]) => (data as unknown as Record<string, unknown>)[key] !== value)) {
       setSaving("failed")
-      setMessage(error.message)
+      setMessage("The new group could not be verified. Reload the directory before creating it again.")
       return false
     }
-    groupDraftsRef.current[id] = group
-    setGroups((current) => [group, ...current])
+    markExchangeNeedsSync()
+    setGroupDraft(null)
+    const createdGroup = data
+    setGroups((current) => [createdGroup, ...current.filter(row => row.id !== id)])
     setSelectedSourceBook(SOURCE_ALL)
     setActiveView("groups")
-    setSelectedGroupId(id)
+    selectGroup(id)
     setSaving("saved")
     void loadRecentActivities()
     return true
   }
 
   async function deleteContact() {
-    if (!selectedContact || contactBusyRef.current || contactDirty) return
+    if (!selectedContact || contactBusyRef.current || groupBusyRef.current || contactDirty || groupDirty) return
     if (!confirm(`Delete contact ${selectedContact.display_name}?`)) return
     const deletedContact = selectedContact
     contactBusyRef.current = true
@@ -1135,23 +1256,43 @@ export default function OutlookAddressBookPage() {
   }
 
   async function deleteGroup() {
-    if (!selectedGroup) return
+    if (!selectedGroup || !groupVersionReady || groupDirty || contactBusyRef.current || groupBusyRef.current) return
     if (!confirm(`Delete group ${selectedGroup.name}?`)) return
     const deletedGroup = selectedGroup
-    markExchangeNeedsSync()
+    const operation = ++groupOperationRef.current
+    groupBusyRef.current = true
+    setGroupBusy(true)
     setSaving("saving")
-    const { error } = await supabase.from("shared_addressbook_groups").delete().eq("id", deletedGroup.id)
-    if (error) {
+    setMessage("")
+    try {
+      const response = await fetch("/api/outlook-addressbook/groups", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", id: deletedGroup.id, expectedUpdatedAt: deletedGroup.updated_at }),
+      })
+      const payload = await response.json()
+      if (!currentGroupOperation(deletedGroup.id, operation)) return
+      if (!response.ok) throw new Error(payload.message || "Could not delete the group.")
+      if (payload.deleted?.id !== deletedGroup.id || payload.deleted?.updated_at !== deletedGroup.updated_at) throw new Error("The group deletion could not be verified. Reload before retrying.")
+      markExchangeNeedsSync()
+      setGroupDraft(null)
+      setGroupNotice("")
+      setMembers((current) => current.filter((member) => member.group_id !== deletedGroup.id))
+      setGroups((current) => current.filter((group) => group.id !== deletedGroup.id))
+      setSelectedSourceBook(SOURCE_ALL)
+      selectGroup(groups.find((group) => group.id !== deletedGroup.id)?.id || "")
+      setSaving("saved")
+      void loadRecentActivities()
+    } catch (error) {
+      if (!currentGroupOperation(deletedGroup.id, operation)) return
+      blockGroupVersion(deletedGroup.id)
       setSaving("failed")
-      setMessage(error.message)
-      return
+      setMessage(error instanceof Error ? error.message : "Could not delete the group. Reload before retrying.")
+    } finally {
+      if (groupOperationRef.current === operation) {
+        groupBusyRef.current = false
+        if (mountedRef.current) setGroupBusy(false)
+      }
     }
-    setMembers((current) => current.filter((member) => member.group_id !== deletedGroup.id))
-    setGroups((current) => current.filter((group) => group.id !== deletedGroup.id))
-    setSelectedSourceBook(SOURCE_ALL)
-    setSelectedGroupId(groups.find((group) => group.id !== deletedGroup.id)?.id || "")
-    setSaving("saved")
-    void loadRecentActivities()
   }
 
   function deleteSelected() {
@@ -1165,34 +1306,59 @@ export default function OutlookAddressBookPage() {
   }
 
   async function addMember(contact: SharedContact) {
-    if (!selectedGroup) return
-    const member = { group_id: selectedGroup.id, contact_id: contact.id, source_book: selectedGroup.source_book || contact.source_book || "FC-OUTLOOK" }
-    markExchangeNeedsSync()
-    setSaving("saving")
-    const { error } = await supabase.from("shared_addressbook_group_members").upsert(member, { onConflict: "group_id,contact_id" })
-    if (error) {
-      setSaving("failed")
-      setMessage(error.message)
-      return
-    }
-    setMembers((current) => (current.some((item) => item.group_id === member.group_id && item.contact_id === member.contact_id) ? current : [...current, member]))
-    setSaving("saved")
-    void loadRecentActivities()
+    await mutateMember("add", contact.id)
   }
 
   async function removeMember(contactId: string) {
-    if (!selectedGroup) return
-    markExchangeNeedsSync()
+    await mutateMember("remove", contactId)
+  }
+
+  async function mutateMember(action: "add" | "remove", contactId: string) {
+    if (!selectedGroup || !groupVersionReady || groupDirty || contactBusyRef.current || groupBusyRef.current) return
+    const group = selectedGroup
+    const operation = ++groupOperationRef.current
+    const member = { group_id: group.id, contact_id: contactId, source_book: group.source_book }
+    groupBusyRef.current = true
+    setGroupBusy(true)
     setSaving("saving")
-    const { error } = await supabase.from("shared_addressbook_group_members").delete().eq("group_id", selectedGroup.id).eq("contact_id", contactId)
-    if (error) {
+    setMessage("")
+    let membershipSaved = false
+    try {
+      const { data, error } = action === "add"
+        ? await supabase.from("shared_addressbook_group_members").upsert(member, { onConflict: "group_id,contact_id" }).select("*").single()
+        : await supabase.from("shared_addressbook_group_members").delete().eq("group_id", group.id).eq("contact_id", contactId).select("group_id,contact_id")
+      if (!currentGroupOperation(group.id, operation)) return
+      if (error) throw new Error(error.message)
+      if (action === "add" ? !data || data.group_id !== group.id || data.contact_id !== contactId
+        : !Array.isArray(data) || data.some(row => row.group_id !== group.id || row.contact_id !== contactId)) {
+        throw new Error("The member change could not be verified. Reload before retrying.")
+      }
+      membershipSaved = true
+      setMembers(current => action === "add"
+        ? current.some(row => row.group_id === group.id && row.contact_id === contactId) ? current : [...current, member]
+        : current.filter(row => !(row.group_id === group.id && row.contact_id === contactId)))
+      markExchangeNeedsSync()
+      // Member triggers advance the parent's version. Never carry the old
+      // metadata version forward or acknowledge a guessed version locally.
+      const refreshed = await loadGroupSnapshot(group.id)
+      if (!currentGroupOperation(group.id, operation)) return
+      setGroups(current => current.map(row => row.id === group.id ? refreshed.group : row))
+      setMembers(current => [...current.filter(row => row.group_id !== group.id), ...refreshed.members])
+      setSaving("saved")
+      setGroupNotice("Group members saved.")
+      void loadRecentActivities()
+    } catch (error) {
+      if (!currentGroupOperation(group.id, operation)) return
+      blockGroupVersion(group.id)
+      setGroupNotice(membershipSaved ? "The member change was saved." : "")
       setSaving("failed")
-      setMessage(error.message)
-      return
+      setMessage(membershipSaved ? "The member change was saved, but the group could not be refreshed. Reload the group before editing its details." : error instanceof Error ? error.message : "The member change could not be verified. Reload the group before retrying.")
+    } finally {
+      if (groupOperationRef.current === operation) {
+        groupBusyRef.current = false
+        if (mountedRef.current) setGroupBusy(false)
+      }
     }
-    setMembers((current) => current.filter((member) => !(member.group_id === selectedGroup.id && member.contact_id === contactId)))
-    setSaving("saved")
-    void loadRecentActivities()
   }
 
   function downloadExchangeFiles() {
@@ -1203,8 +1369,8 @@ export default function OutlookAddressBookPage() {
   }
 
   async function syncExchange() {
-    if (contactBusyRef.current || contactDirty) {
-      setMessage("Save or Cancel your contact changes before syncing Exchange.")
+    if (contactBusyRef.current || groupBusyRef.current || contactDirty || groupDirty) {
+      setMessage("Save or Cancel your address book changes before syncing Exchange.")
       return
     }
     const startedAt = new Date().toISOString()
@@ -1212,7 +1378,6 @@ export default function OutlookAddressBookPage() {
     setExchangeSyncing(true)
     setExchangeButtonLabel("Syncing")
     try {
-      await waitForPendingSaves()
       const missingEmailExamples = contacts
         .filter((contact) => cleanText(contact.display_name) && !cleanText(contact.primary_email))
         .slice(0, 3)
@@ -1266,7 +1431,7 @@ export default function OutlookAddressBookPage() {
           <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px", fontWeight: 800 }}>
             Saved changes sync to Exchange automatically every hour.
           </div>
-          <button type="button" onClick={syncExchange} style={primaryButtonStyle} disabled={exchangeSyncing || contactBusy}>
+          <button type="button" onClick={syncExchange} style={primaryButtonStyle} disabled={exchangeSyncing || editorBusy || contactDirty || groupDirty}>
             {exchangeButtonLabel}
           </button>
         </div>
@@ -1300,7 +1465,7 @@ export default function OutlookAddressBookPage() {
                     <button
                       type="button"
                       onClick={() => void undoActivity(entry.id)}
-                      disabled={Boolean(undoingActivityId) || contactBusy}
+                      disabled={Boolean(undoingActivityId) || editorBusy}
                       title="Undo"
                       aria-label="Undo activity"
                       style={{ ...buttonStyle, minHeight: "22px", padding: "2px 7px", fontSize: "9px", opacity: undoingActivityId === entry.id ? 0.55 : 0.72 }}
@@ -1327,7 +1492,7 @@ export default function OutlookAddressBookPage() {
               onMouseEnter={clearCreateMenuHideTimer}
               onMouseLeave={scheduleCreateMenuHide}
             >
-              <button type="button" onClick={() => setCreateMenuOpen((current) => !current)} disabled={contactBusy || Boolean(undoingActivityId)} style={addButtonStyle} aria-label="Add contact or group" title="Add contact or group" data-admin-button-style="preserve">
+              <button type="button" onClick={() => setCreateMenuOpen((current) => !current)} disabled={editorBusy || Boolean(undoingActivityId)} style={addButtonStyle} aria-label="Add contact or group" title="Add contact or group" data-admin-button-style="preserve">
                 +
               </button>
               {createMenuOpen ? (
@@ -1376,7 +1541,7 @@ export default function OutlookAddressBookPage() {
                   key={`${item.type}-${item.id}`}
                   type="button"
                   data-admin-button-style="preserve"
-                  disabled={contactBusy || Boolean(undoingActivityId)}
+                  disabled={editorBusy || Boolean(undoingActivityId)}
                   onClick={() => {
                     if (active || !leaveContactEditor()) return
                     if (item.type === "contact") {
@@ -1384,7 +1549,7 @@ export default function OutlookAddressBookPage() {
                       setSelectedContactId(item.id)
                     } else {
                       setActiveView("groups")
-                      setSelectedGroupId(item.id)
+                      selectGroup(item.id)
                     }
                   }}
                   style={{
@@ -1433,7 +1598,7 @@ export default function OutlookAddressBookPage() {
           <div style={headerStyle}>
             <div style={titleStyle}>{activeView === "contacts" ? "Contact Editor" : "Group Editor"}</div>
             <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-              <button type="button" onClick={deleteSelected} style={dangerButtonStyle} disabled={contactBusy || (activeView === "contacts" ? !selectedContact || contactDirty : !selectedGroup)}>Delete</button>
+              <button type="button" onClick={deleteSelected} style={dangerButtonStyle} disabled={editorBusy || (activeView === "contacts" ? !selectedContact || contactDirty : !selectedGroup || groupDirty || !groupVersionReady)}>Delete</button>
             </div>
           </div>
           <div style={{ display: "grid", gap: "12px", padding: "12px" }}>
@@ -1480,14 +1645,15 @@ export default function OutlookAddressBookPage() {
             ) : (
             <section style={{ display: "grid", gap: "10px" }}>
               <div style={titleStyle}>Group Details</div>
-              {selectedGroup ? (
+              {editedGroup ? (
                 <>
-                  <label><div style={fieldLabelStyle}>Group Name</div><input value={selectedGroup.name || ""} onChange={(event) => void saveGroup({ name: event.target.value })} style={inputStyle} /></label>
-                  <label><div style={fieldLabelStyle}>Nickname / Alias Seed</div><input value={selectedGroup.nickname || ""} onChange={(event) => void saveGroup({ nickname: event.target.value })} style={inputStyle} /></label>
-                  <label><div style={fieldLabelStyle}>Description</div><input value={selectedGroup.description || ""} onChange={(event) => void saveGroup({ description: event.target.value })} style={inputStyle} /></label>
+                  <label><div style={fieldLabelStyle}>Group Name</div><input value={editedGroup.name || ""} disabled={editorBusy} readOnly={!groupVersionReady} onChange={(event) => editGroup({ name: event.target.value })} style={inputStyle} /></label>
+                  <label><div style={fieldLabelStyle}>Nickname / Alias Seed</div><input value={editedGroup.nickname || ""} disabled={editorBusy} readOnly={!groupVersionReady} onChange={(event) => editGroup({ nickname: event.target.value })} style={inputStyle} /></label>
+                  <label><div style={fieldLabelStyle}>Description</div><input value={editedGroup.description || ""} disabled={editorBusy} readOnly={!groupVersionReady} onChange={(event) => editGroup({ description: event.target.value })} style={inputStyle} /></label>
                   <label>
                     <div style={fieldLabelStyle}>Source Book</div>
-                    <select value={groupSourceBookValue()} onChange={(event) => void applyGroupSourceBook(event.target.value)} style={inputStyle}>
+                    <select aria-label="Source Book" value={groupSourceBookValue()} disabled={editorBusy || !groupVersionReady} onChange={(event) => void applyGroupSourceBook(event.target.value)} style={inputStyle}>
+                      {editedGroup.source_book && !sourceBookOptions.includes(editedGroup.source_book) ? <option value={editedGroup.source_book}>{editedGroup.source_book}</option> : null}
                       {sourceBookOptions.map((sourceBook) => (
                         <option key={sourceBook} value={sourceBook}>{sourceBook}</option>
                       ))}
@@ -1495,18 +1661,23 @@ export default function OutlookAddressBookPage() {
                     </select>
                   </label>
                   {groupSourceBookValue() === SOURCE_NEW ? (
-                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) auto", gap: "8px", alignItems: "end" }}>
+                    <div>
                       <label>
                         <div style={fieldLabelStyle}>New Source Book</div>
-                        <input value={groupSourceDraft} onChange={(event) => setGroupSourceDraft(event.target.value.toUpperCase())} style={inputStyle} />
+                        <input value={groupSourceDraft} disabled={editorBusy} readOnly={!groupVersionReady} onChange={(event) => { groupEditRevisionRef.current += 1; setGroupSourceDraft(event.target.value.toUpperCase()); setMessage("") }} style={inputStyle} />
                       </label>
-                      <button type="button" onClick={() => void commitGroupSourceBook()} style={primaryButtonStyle}>Apply</button>
                     </div>
                   ) : null}
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                    <button type="button" onClick={() => void saveGroup()} disabled={!groupDirty || editorBusy || !groupVersionReady} style={primaryButtonStyle}>{groupBusy ? "Saving..." : "Save"}</button>
+                    <button type="button" onClick={cancelGroupEdit} disabled={!groupDirty || editorBusy} style={buttonStyle}>Cancel</button>
+                    <button type="button" onClick={() => void reloadGroup()} disabled={editorBusy} style={buttonStyle}>Reload group</button>
+                    <span role="status" style={{ fontSize: "12px", color: "var(--fc-admin-muted)", overflowWrap: "anywhere" }}>{!groupVersionReady ? "Reload this group before editing. Your draft is still here if you need to copy it." : groupDirty ? "Unsaved changes — select Save when finished." : groupNotice || "Edit the details, then select Save."}</span>
+                  </div>
                   <div style={{ border: "1px solid var(--fc-admin-border-soft)", borderRadius: "12px", padding: "10px", background: "var(--fc-admin-panel-soft-bg)", color: "var(--fc-admin-panel-text)" }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginBottom: "8px", flexWrap: "wrap" }}>
                       <div style={titleStyle}>Members</div>
-                      <button type="button" onClick={() => setAddMemberMenuOpen(true)} style={primaryButtonStyle}>Add Member</button>
+                      <button type="button" onClick={() => setAddMemberMenuOpen(true)} disabled={editorBusy || groupDirty || !groupVersionReady} style={primaryButtonStyle}>Add Member</button>
                     </div>
                     <div style={{ display: "grid", gap: "6px", maxHeight: "240px", overflow: "auto" }}>
                       {selectedGroupMembers.length === 0 ? <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px" }}>No members yet.</div> : null}
@@ -1514,7 +1685,7 @@ export default function OutlookAddressBookPage() {
                         <div key={contact.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "7px 8px", borderRadius: "10px", background: "var(--fc-row-bg)", color: "var(--fc-admin-panel-text)", fontSize: "12px", flexWrap: "wrap" }}>
                           <span style={{ minWidth: 0, maxWidth: "520px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 800 }}>{contact.display_name}</span>
                           <span style={{ minWidth: 0, maxWidth: "360px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--fc-admin-muted)" }}>{contact.primary_email}</span>
-                          <button type="button" onClick={() => void removeMember(contact.id)} style={{ ...dangerButtonStyle, minHeight: "28px", padding: "4px 10px" }}>Remove</button>
+                          <button type="button" onClick={() => void removeMember(contact.id)} disabled={editorBusy || groupDirty || !groupVersionReady} style={{ ...dangerButtonStyle, minHeight: "28px", padding: "4px 10px" }}>Remove</button>
                         </div>
                       ))}
                     </div>
@@ -1531,7 +1702,7 @@ export default function OutlookAddressBookPage() {
       </div>
       {addMemberMenuOpen && selectedGroup ? (
         <div style={{ position: "fixed", inset: 0, zIndex: 75, display: "grid", placeItems: "center", padding: "18px", background: "rgba(15, 23, 42, 0.32)" }} onMouseDown={(event) => {
-          if (event.target === event.currentTarget) setAddMemberMenuOpen(false)
+          if (event.target === event.currentTarget && !groupBusyRef.current) setAddMemberMenuOpen(false)
         }}>
           <section style={{ ...panelStyle, width: "min(520px, 100%)", padding: "14px", display: "grid", gap: "12px", boxShadow: "0 24px 60px #00000038" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
@@ -1539,9 +1710,9 @@ export default function OutlookAddressBookPage() {
                 <div style={{ ...titleStyle, color: "var(--fc-admin-link)" }}>Add Member</div>
                 <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px", marginTop: "2px" }}>{selectedGroup.name}</div>
               </div>
-              <button type="button" onClick={() => setAddMemberMenuOpen(false)} style={{ ...buttonStyle, minWidth: "34px", padding: "6px 10px" }}>x</button>
+              <button type="button" onClick={() => setAddMemberMenuOpen(false)} disabled={editorBusy} aria-label="Close add member dialog" style={{ ...buttonStyle, minWidth: "34px", padding: "6px 10px" }}>x</button>
             </div>
-            <input value={addMemberSearch} onChange={(event) => setAddMemberSearch(event.target.value)} placeholder="Search contact to add" style={inputStyle} autoFocus />
+            <input value={addMemberSearch} disabled={editorBusy} onChange={(event) => setAddMemberSearch(event.target.value)} placeholder="Search contact to add" style={inputStyle} autoFocus />
             <div style={{ display: "grid", gap: "6px", maxHeight: isMobile ? "52vh" : "420px", overflow: "auto" }}>
               {addableContacts.length === 0 ? <div style={{ color: "var(--fc-admin-muted)", fontSize: "12px" }}>No matching contacts.</div> : null}
               {addableContacts.map((contact) => (
@@ -1550,6 +1721,7 @@ export default function OutlookAddressBookPage() {
                   type="button"
                   data-admin-button-style="preserve"
                   onClick={() => void addMember(contact)}
+                  disabled={editorBusy || groupDirty || !groupVersionReady}
                   style={{ ...buttonStyle, textAlign: "left", borderRadius: "10px", display: "grid", gap: "2px", minHeight: "auto" }}
                 >
                   <span style={{ fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{contact.display_name || contact.primary_email}</span>

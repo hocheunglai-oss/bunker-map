@@ -57,6 +57,8 @@ type SupplierRecord = {
 type FuelKey = "hsfo" | "vlsfo" | "lsmgo"
 
 type FixtureDraft = {
+  expectedUpdatedAt: string
+  expectedStatus: string
   fixtureDate: string
   supplierTrader: string
   buyerTrader: string
@@ -80,6 +82,8 @@ type FixturesResponse = {
 }
 
 const emptyDraft: FixtureDraft = {
+  expectedUpdatedAt: "",
+  expectedStatus: "",
   fixtureDate: "",
   supplierTrader: "",
   buyerTrader: "",
@@ -430,6 +434,8 @@ function blank(value: string | null | undefined) {
 
 function draftFromFixture(fixture: SpcFixture): FixtureDraft {
   return {
+    expectedUpdatedAt: fixture.updatedAt,
+    expectedStatus: fixture.fixtureStatus,
     fixtureDate: dateInput(fixture.fixtureDate),
     supplierTrader: traderValue(fixture.supplierTraderDisplayName, fixture.supplierTraderUsername),
     buyerTrader: traderValue(fixture.buyerTraderDisplayName, fixture.buyerTraderUsername),
@@ -455,6 +461,7 @@ export default function SpcFixturesPage() {
   const { loading: authLoading, authenticated, role, permissions } = useSpcAuth()
   const fixtureTableRef = useRef<HTMLDivElement | null>(null)
   const fixtureCanvasRef = useRef<HTMLDivElement | null>(null)
+  const operationRef = useRef("")
   const initialPeriod = useMemo(() => hongKongYearMonth(), [])
   const [fixtures, setFixtures] = useState<SpcFixture[]>([])
   const [users, setUsers] = useState<SpcUserOption[]>([])
@@ -584,8 +591,8 @@ export default function SpcFixturesPage() {
       .sort((a, b) => a.localeCompare(b))
   }, [users])
 
-  const loadData = useCallback(async () => {
-    if (!canView) return
+  const loadData = useCallback(async (discardDrafts = false) => {
+    if (!canView || operationRef.current) return
     setLoading(true)
     setMessage("")
     try {
@@ -600,7 +607,7 @@ export default function SpcFixturesPage() {
       setDrafts((current) => {
         const next: Record<string, FixtureDraft> = {}
         rows.forEach((fixture) => {
-          next[fixture.id] = current[fixture.id] || draftFromFixture(fixture)
+          next[fixture.id] = !discardDrafts && current[fixture.id] || draftFromFixture(fixture)
         })
         return next
       })
@@ -694,8 +701,12 @@ export default function SpcFixturesPage() {
     if (!editingId) return
 
     function closeCompletedEdit(event: PointerEvent) {
+      if (operationRef.current) return
       const target = event.target
       if (!(target instanceof Node)) return
+      // Refresh has its own discard confirmation. A cancelled confirmation
+      // must not lose the draft during the earlier pointerdown event.
+      if (target instanceof Element && target.closest(".spc-fixture-refresh-button")) return
       if (fixtureTableRef.current?.contains(target)) return
       const fixtureId = editingId.split(":")[0] || editingId
       const fixture = fixtures.find((row) => row.id === fixtureId)
@@ -710,6 +721,7 @@ export default function SpcFixturesPage() {
   }, [editingId, fixtures])
 
   function updateDraft(id: string, key: keyof FixtureDraft, value: string) {
+    if (operationRef.current) return
     setDrafts((current) => ({
       ...current,
       [id]: {
@@ -720,6 +732,7 @@ export default function SpcFixturesPage() {
   }
 
   function updateGradeDraft(id: string, key: "supplierName" | "price" | "barging", fuelKey: FuelKey | null, value: string) {
+    if (operationRef.current) return
     if (!fuelKey) {
       updateDraft(id, key, value)
       return
@@ -812,7 +825,7 @@ export default function SpcFixturesPage() {
   }
 
   async function submitFixture(fixture: SpcFixture, action: "save" | "complete") {
-    if (!canEdit) return
+    if (!canEdit || operationRef.current || loading) return
     if (fixture.fixtureStatus === "pending" && role !== "SUPPLIER TRADER" && role !== "ADMIN") {
       setMessage("ONLY SUPPLIER TRADERS AND ADMINS CAN EDIT THIS NEW STEM.")
       setMessageIsError(true)
@@ -828,7 +841,10 @@ export default function SpcFixturesPage() {
     const fixtureLabel = cleanText(prepared.draft.vesselName || fixture.vesselName || fixture.enquiryTitle || fixture.enquiryNumber).toUpperCase()
     const confirmMessage = action === "complete" ? `COMPLETE FIXTURE ${fixtureLabel}?` : `UPDATE FIXTURE ${fixtureLabel}?`
     if (!window.confirm(confirmMessage)) return
-    setSavingId(`${fixture.id}:${action}`)
+    const operation = `${fixture.id}:${action}`
+    operationRef.current = operation
+    setSavingId(operation)
+    setSupplierMenuKey("")
     setMessage("")
     try {
       const response = await fetch("/api/spc/fixtures", {
@@ -844,21 +860,26 @@ export default function SpcFixturesPage() {
       if (!response.ok || !data.fixture) throw new Error(data.message || "Failed to save fixture.")
       setFixtures((current) => current.map((row) => (row.id === fixture.id ? data.fixture! : row)))
       setDrafts((current) => ({ ...current, [fixture.id]: draftFromFixture(data.fixture!) }))
-      setEditingId("")
+      setEditingId((current) => current.startsWith(`${fixture.id}:`) ? "" : current)
       setMessage(action === "complete" ? "FIXTURE COMPLETED." : "FIXTURE SAVED.")
       setMessageIsError(false)
     } catch (error) {
       setMessage((error instanceof Error ? error.message : "Failed to save fixture.").toUpperCase())
       setMessageIsError(true)
     } finally {
-      setSavingId("")
+      if (operationRef.current === operation) {
+        operationRef.current = ""
+        setSavingId("")
+      }
     }
   }
 
   async function deleteFixture(fixture: SpcFixture) {
-    if (!canEdit) return
+    if (!canEdit || operationRef.current || loading) return
     if (!window.confirm(`DELETE FIXTURE ${cleanText(fixture.vesselName || fixture.enquiryTitle || fixture.enquiryNumber).toUpperCase()}?`)) return
-    setSavingId(`${fixture.id}:delete`)
+    const draft = drafts[fixture.id] || draftFromFixture(fixture)
+    operationRef.current = `${fixture.id}:delete`
+    setSavingId(operationRef.current)
     setMessage("")
     try {
       const response = await fetch("/api/spc/fixtures", {
@@ -867,6 +888,8 @@ export default function SpcFixturesPage() {
         body: JSON.stringify({
           id: fixture.id,
           action: "delete",
+          expectedUpdatedAt: draft.expectedUpdatedAt,
+          expectedStatus: draft.expectedStatus,
         }),
       })
       const data = (await response.json()) as { id?: string; message?: string }
@@ -884,6 +907,7 @@ export default function SpcFixturesPage() {
       setMessage((error instanceof Error ? error.message : "Failed to delete fixture.").toUpperCase())
       setMessageIsError(true)
     } finally {
+      operationRef.current = ""
       setSavingId("")
     }
   }
@@ -901,7 +925,7 @@ export default function SpcFixturesPage() {
         className={options?.className}
         value={draft[key]}
         onChange={(event) => updateDraft(fixture.id, key, event.target.value)}
-        disabled={!canEdit}
+        disabled={!canEdit || Boolean(savingId) || loading}
       />
     )
   }
@@ -926,7 +950,7 @@ export default function SpcFixturesPage() {
         className="is-sheet-pill"
         value={value}
         onChange={(event) => updateDraft(fixture.id, "account", event.target.value)}
-        disabled={!canEdit}
+        disabled={!canEdit || Boolean(savingId) || loading}
       >
         <option value="">ACCT</option>
         {officeOptions.map((office) => (
@@ -949,7 +973,7 @@ export default function SpcFixturesPage() {
             aria-label="ETA start day"
             value={parts.startDay}
             onChange={(event) => updateEta({ ...parts, startDay: event.target.value })}
-            disabled={!canEdit}
+            disabled={!canEdit || Boolean(savingId) || loading}
           >
             <option value="">DD</option>
             {dayOptions.map((day) => <option key={day} value={day}>{day}</option>)}
@@ -959,7 +983,7 @@ export default function SpcFixturesPage() {
             aria-label="ETA start month"
             value={parts.startMonth}
             onChange={(event) => updateEta({ ...parts, startMonth: event.target.value, endMonth: parts.endDay ? event.target.value : parts.endMonth })}
-            disabled={!canEdit}
+            disabled={!canEdit || Boolean(savingId) || loading}
           >
             {monthOptions.map((month) => <option key={month.label} value={month.label}>{month.label}</option>)}
           </select>
@@ -971,7 +995,7 @@ export default function SpcFixturesPage() {
             aria-label="ETA end day"
             value={parts.endDay}
             onChange={(event) => updateEta({ ...parts, endDay: event.target.value })}
-            disabled={!canEdit}
+            disabled={!canEdit || Boolean(savingId) || loading}
           >
             <option value="">DD</option>
             {dayOptions.map((day) => <option key={day} value={day}>{day}</option>)}
@@ -981,7 +1005,7 @@ export default function SpcFixturesPage() {
             aria-label="ETA end month"
             value={parts.endMonth}
             onChange={(event) => updateEta({ ...parts, endMonth: event.target.value })}
-            disabled={!canEdit || !parts.endDay}
+            disabled={!canEdit || Boolean(savingId) || loading || !parts.endDay}
           >
             {monthOptions.map((month) => <option key={month.label} value={month.label}>{month.label}</option>)}
           </select>
@@ -997,7 +1021,7 @@ export default function SpcFixturesPage() {
         inputMode="text"
         value={draft[key]}
         onChange={(event) => updateDraft(fixture.id, key, event.target.value)}
-        disabled={!canEdit}
+        disabled={!canEdit || Boolean(savingId) || loading}
       />
     )
   }
@@ -1046,7 +1070,7 @@ export default function SpcFixturesPage() {
                 setSupplierOptionQuery("")
               }
             }}
-            disabled={!canEdit}
+            disabled={!canEdit || Boolean(savingId) || loading}
           />
           {menuIsOpen ? (
             <div className="spc-fixture-supplier-menu">
@@ -1098,7 +1122,7 @@ export default function SpcFixturesPage() {
           inputMode="decimal"
           value={value}
           onChange={(event) => updateGradeDraft(fixture.id, field, key, event.target.value)}
-          disabled={!canEdit}
+          disabled={!canEdit || Boolean(savingId) || loading}
         />
       )
     }
@@ -1113,7 +1137,8 @@ export default function SpcFixturesPage() {
           type="button"
           className={`spc-fixture-complete-button${ready ? " is-ready" : ""}`}
           onClick={() => void submitFixture(fixture, "complete")}
-          disabled={!ready || savingId === `${fixture.id}:complete`}
+          disabled={!ready || Boolean(savingId) || loading}
+          aria-busy={savingId === `${fixture.id}:complete`}
           title={!ready ? `MISSING: ${missing.join(", ")}` : "COMPLETE"}
         >
           {savingId === `${fixture.id}:complete` ? "COMPLETING" : "COMPLETE"}
@@ -1127,7 +1152,8 @@ export default function SpcFixturesPage() {
           type="button"
           className="spc-fixture-save-button"
           onClick={() => void submitFixture(fixture, "save")}
-          disabled={!canEdit || savingId === `${fixture.id}:save`}
+          disabled={!canEdit || Boolean(savingId) || loading}
+          aria-busy={savingId === `${fixture.id}:save`}
         >
           {savingId === `${fixture.id}:save` ? "UPDATING" : "UPDATE"}
         </button>
@@ -1135,7 +1161,7 @@ export default function SpcFixturesPage() {
           type="button"
           className="spc-fixture-delete-button"
           onClick={() => void deleteFixture(fixture)}
-          disabled={!canEdit || savingId === `${fixture.id}:delete`}
+          disabled={!canEdit || Boolean(savingId) || loading}
         >
           {savingId === `${fixture.id}:delete` ? "DELETING" : "DELETE"}
         </button>
@@ -1174,7 +1200,7 @@ export default function SpcFixturesPage() {
             className={`${fixture.fixtureStatus === "pending" ? "is-pending" : ""}${editing ? " is-editing" : ""}`}
             data-fixture-action-key={rowCanEdit && (fixture.fixtureStatus === "pending" || editing) ? rowKey : undefined}
             onDoubleClick={() => {
-              if (rowCanEdit && mode === "completed") {
+              if (rowCanEdit && mode === "completed" && !operationRef.current && !loading) {
                 setSupplierMenuKey("")
                 setEditingId(rowKey)
               }
@@ -1220,10 +1246,16 @@ export default function SpcFixturesPage() {
             onChange={(event) => setFixtureSearchQuery(event.target.value)}
             autoComplete="off"
           />
-          <button type="button" className="spc-fixture-refresh-button" onClick={() => void loadData()} disabled={loading}>
+          <button type="button" className="spc-fixture-refresh-button" onClick={() => {
+            if (window.confirm("DISCARD LOCAL CHANGES AND LOAD THE LATEST FIXTURES?")) {
+              setEditingId("")
+              void loadData(true)
+            }
+          }} disabled={loading || Boolean(savingId)}>
             {loading ? "REFRESHING..." : "REFRESH"}
           </button>
         </div>
+        {message ? <div className={`spc-alert${messageIsError ? " is-error" : ""}`} role={messageIsError ? "alert" : "status"}>{message}</div> : null}
         <div className="spc-table-wrap" ref={fixtureTableRef}>
           <div
             className="spc-fixture-ledger-canvas"
@@ -1263,11 +1295,6 @@ export default function SpcFixturesPage() {
                   <td colSpan={fixtureColumnSpan}>
                     {fixtureSearchQuery.trim() ? "No new stems match your search." : "No new stems."}
                   </td>
-                </tr>
-              ) : null}
-              {message ? (
-                <tr className={messageIsError ? "spc-fixture-status-row is-error" : "spc-fixture-status-row"}>
-                  <td colSpan={fixtureColumnSpan}>{message}</td>
                 </tr>
               ) : null}
               <tr className="spc-fixture-section-row">

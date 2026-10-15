@@ -8,7 +8,9 @@ function load(file: string, start: string, end: string, result: string, args: st
   const content = source(file), from = content.indexOf(start), to = content.indexOf(end, from)
   assert.ok(from >= 0 && to > from, `Missing production declaration in ${file}`)
   const code = transformSync(content.slice(from, to), { loader: "ts", format: "cjs", target: "node24" }).code
-  return new Function(...args, `${code}; return ${result};`)(...values)
+  const validator = source("scripts/validate-backup.mjs")
+  const diagnostics = validator.slice(validator.indexOf("function addError"), validator.indexOf("function isPresentPrimaryKeyValue"))
+  return new Function(...args, `${diagnostics}\n${code}; return ${result};`)(...values)
 }
 
 const sections = [
