@@ -103,6 +103,7 @@ const sectionCardStyle: React.CSSProperties = {
     "radial-gradient(circle at top left, rgba(88, 182, 255, 0.08), transparent 28%), linear-gradient(180deg, rgba(4, 24, 49, 0.82) 0%, rgba(5, 22, 40, 0.76) 100%)",
   border: "1px solid rgba(173, 216, 255, 0.18)",
   borderRadius: "20px",
+  minWidth: 0,
   overflow: "hidden",
   boxShadow: "0 18px 44px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255,255,255,0.05)",
 }
@@ -321,7 +322,7 @@ export default function ChinaReport({ initialData }: { initialData: ChinaReportP
             }}
           >
             {[leftSections, rightSections].map((columnSections, columnIndex) => (
-              <div key={columnIndex} style={{ display: "grid", gap: "18px", alignContent: "start" }}>
+              <div key={columnIndex} style={{ display: "grid", minWidth: 0, gap: "18px", alignContent: "start" }}>
                 {columnSections.map((section) => {
                   const rowsToShow = visibleRows(section)
                   const isExpandable = Boolean(defaultExpandablePreviewRows[section.title])
@@ -347,6 +348,9 @@ export default function ChinaReport({ initialData }: { initialData: ChinaReportP
                         <span>{section.title}</span>
                         {isExpandable && (
                           <button
+                            type="button"
+                            aria-label={`${isExpanded ? "Collapse" : "Expand"} ${section.title}`}
+                            aria-expanded={isExpanded}
                             onClick={() => toggleSection(section.title)}
                             style={{
                               width: "28px",
@@ -368,106 +372,127 @@ export default function ChinaReport({ initialData }: { initialData: ChinaReportP
                       </div>
 
                       <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: isMobile
-                            ? "minmax(110px, 1fr) 68px 68px 68px"
-                            : "minmax(180px, 1fr) 100px 100px 100px",
-                          background: "rgba(255,255,255,0.035)",
-                          borderTop: "1px solid rgba(255,255,255,0.08)",
-                          fontVariantNumeric: "tabular-nums",
+                        role="region"
+                        aria-label={`${section.title} fuel prices`}
+                        tabIndex={0}
+                        onKeyDown={(event) => {
+                          if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+                          const region = event.currentTarget
+                          if (region.scrollWidth <= region.clientWidth) return
+                          if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                            event.preventDefault()
+                            region.scrollLeft += event.key === "ArrowRight" ? 40 : -40
+                          } else if (event.key === "Home" || event.key === "End") {
+                            event.preventDefault()
+                            region.scrollLeft = event.key === "Home" ? 0 : region.scrollWidth
+                          }
                         }}
+                        style={{ width: "100%", maxWidth: "100%", minWidth: 0, overflowX: "auto", outlineColor: "#7fd0ff", outlineOffset: "-2px" }}
                       >
-                        {[
-                          { label: "PORT", accent: "transparent" },
-                          { label: "HSFO", accent: "rgba(90,169,255,0.18)" },
-                          { label: "VLSFO", accent: "rgba(87,227,176,0.18)" },
-                          { label: "LSMGO", accent: "rgba(255,209,102,0.18)" },
-                        ].map((item, index) => (
+                        <div style={{ width: "100%", minWidth: isMobile ? "314px" : "480px" }}>
                           <div
-                            key={item.label}
                             style={{
-                              padding: isMobile ? "8px 10px" : "10px 14px",
-                              fontSize: isMobile ? "10px" : "12px",
-                              fontWeight: 700,
-                              color: "#cfe9ff",
-                              textAlign: index === 0 ? "left" : "center",
-                              borderRight: index < 3 ? "1px solid rgba(255,255,255,0.12)" : undefined,
-                              letterSpacing: "0.06em",
-                              boxShadow: index === 0 ? undefined : `inset 0 -2px 0 ${item.accent}`,
+                              display: "grid",
+                              gridTemplateColumns: isMobile
+                                ? "minmax(110px, 1fr) 68px 68px 68px"
+                                : "minmax(180px, 1fr) 100px 100px 100px",
+                              background: "rgba(255,255,255,0.035)",
+                              borderTop: "1px solid rgba(255,255,255,0.08)",
+                              fontVariantNumeric: "tabular-nums",
                             }}
                           >
-                            {item.label}
+                            {[
+                              { label: "PORT", accent: "transparent" },
+                              { label: "HSFO", accent: "rgba(90,169,255,0.18)" },
+                              { label: "VLSFO", accent: "rgba(87,227,176,0.18)" },
+                              { label: "LSMGO", accent: "rgba(255,209,102,0.18)" },
+                            ].map((item, index) => (
+                              <div
+                                key={item.label}
+                                style={{
+                                  padding: isMobile ? "8px 10px" : "10px 14px",
+                                  fontSize: isMobile ? "10px" : "12px",
+                                  fontWeight: 700,
+                                  color: "#cfe9ff",
+                                  textAlign: index === 0 ? "left" : "center",
+                                  borderRight: index < 3 ? "1px solid rgba(255,255,255,0.12)" : undefined,
+                                  letterSpacing: "0.06em",
+                                  boxShadow: index === 0 ? undefined : `inset 0 -2px 0 ${item.accent}`,
+                                }}
+                              >
+                                {item.label}
+                              </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
 
-                      {rowsToShow.map((row, index) => (
-                        <div
-                          key={`${section.title}-${row.port}`}
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: isMobile
-                              ? "minmax(110px, 1fr) 68px 68px 68px"
-                              : "minmax(180px, 1fr) 100px 100px 100px",
-                            background:
-                              index % 2 === 0
-                                ? "rgba(8, 46, 88, 0.76)"
-                                : "rgba(7, 37, 70, 0.68)",
-                            borderTop: "1px solid rgba(255,255,255,0.08)",
-                          }}
-                        >
-                          <div
-                            style={{
-                              padding: "11px 14px",
-                              borderRight: "1px solid rgba(255,255,255,0.12)",
-                              fontWeight: 600,
-                              fontSize: "14px",
-                              whiteSpace: "nowrap",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              background: "rgba(255,255,255,0.02)",
-                            }}
-                          >
-                            {row.port}
-                          </div>
-                          <div
-                            style={{
-                              padding: "11px 14px",
-                              borderRight: "1px solid rgba(255,255,255,0.12)",
-                              textAlign: "center",
-                              whiteSpace: "nowrap",
-                              fontSize: "14px",
-                              color: "#eef7ff",
-                            }}
-                          >
-                            {formatValue(row.hsfo, fuelFallback(row.port, "hsfo"))}
-                          </div>
-                          <div
-                            style={{
-                              padding: "11px 14px",
-                              borderRight: "1px solid rgba(255,255,255,0.12)",
-                              textAlign: "center",
-                              whiteSpace: "nowrap",
-                              fontSize: "14px",
-                              color: "#eef7ff",
-                            }}
-                          >
-                            {formatValue(row.vlsfo, fuelFallback(row.port, "vlsfo"))}
-                          </div>
-                          <div
-                            style={{
-                              padding: "11px 14px",
-                              textAlign: "center",
-                              whiteSpace: "nowrap",
-                              fontSize: "14px",
-                              color: "#eef7ff",
-                            }}
-                          >
-                            {formatValue(row.mgo, fuelFallback(row.port, "mgo"))}
-                          </div>
+                          {rowsToShow.map((row, index) => (
+                            <div
+                              key={`${section.title}-${row.port}`}
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns: isMobile
+                                  ? "minmax(110px, 1fr) 68px 68px 68px"
+                                  : "minmax(180px, 1fr) 100px 100px 100px",
+                                background:
+                                  index % 2 === 0
+                                    ? "rgba(8, 46, 88, 0.76)"
+                                    : "rgba(7, 37, 70, 0.68)",
+                                borderTop: "1px solid rgba(255,255,255,0.08)",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  padding: "11px 14px",
+                                  borderRight: "1px solid rgba(255,255,255,0.12)",
+                                  fontWeight: 600,
+                                  fontSize: "14px",
+                                  whiteSpace: "nowrap",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  background: "rgba(255,255,255,0.02)",
+                                }}
+                              >
+                                {row.port}
+                              </div>
+                              <div
+                                style={{
+                                  padding: "11px 14px",
+                                  borderRight: "1px solid rgba(255,255,255,0.12)",
+                                  textAlign: "center",
+                                  whiteSpace: "nowrap",
+                                  fontSize: "14px",
+                                  color: "#eef7ff",
+                                }}
+                              >
+                                {formatValue(row.hsfo, fuelFallback(row.port, "hsfo"))}
+                              </div>
+                              <div
+                                style={{
+                                  padding: "11px 14px",
+                                  borderRight: "1px solid rgba(255,255,255,0.12)",
+                                  textAlign: "center",
+                                  whiteSpace: "nowrap",
+                                  fontSize: "14px",
+                                  color: "#eef7ff",
+                                }}
+                              >
+                                {formatValue(row.vlsfo, fuelFallback(row.port, "vlsfo"))}
+                              </div>
+                              <div
+                                style={{
+                                  padding: "11px 14px",
+                                  textAlign: "center",
+                                  whiteSpace: "nowrap",
+                                  fontSize: "14px",
+                                  color: "#eef7ff",
+                                }}
+                              >
+                                {formatValue(row.mgo, fuelFallback(row.port, "mgo"))}
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
+                      </div>
                     </div>
                   )
                 })}

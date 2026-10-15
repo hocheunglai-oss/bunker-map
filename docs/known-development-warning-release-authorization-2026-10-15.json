@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-10-15T11:14:16Z",
+  "status": "standing-authorization-for-the-existing-development-only-warning",
+  "approvedBy": "Otto Lai, directly in this chat",
+  "question": "The new follow-up release still has the same unresolved warning in a development-only code checker; the production libraries pass. Your previous one-time exception was used for the batch already released. May I release this follow-up only if every other check passes, while keeping that warning visible?",
+  "answer": "Keep deploying dont ask me again",
+  "scope": {
+    "repository": "hocheunglai-oss/bunker-map",
+    "advisory": "GHSA-vfj7-8cjw-p6xm",
+    "package": "braces",
+    "installedVersion": "3.0.3",
+    "dependencyChain": "eslint-config-next -> @next/eslint-plugin-next -> fast-glob -> micromatch -> braces",
+    "classification": "Existing development-only code-checking dependency warning; not a production dependency finding"
+  },
+  "conditions": [
+    "Do not ask again for release approval solely because this same development-only advisory remains.",
+    "Rerun unchanged production and full dependency audits; retain the known full-audit failure visibly.",
+    "All other functional, type, build, access-control, contract, migration and release checks must pass on the exact intended release.",
+    "Do not suppress scanners, weaken release requirements, bypass platform security controls, or treat any new advisory/production dependency issue as approved.",
+    "Keep the warning open and reassess compatible remediation; if its classification or impact changes, this authorization no longer covers the changed risk."
+  ],
+  "priorOneTimeApproval": "docs/sitewide-release-exception-2026-10-15.json",
+  "limits": [
+    "Not authorization to ignore other failed checks, new security findings, or production dependency vulnerabilities.",
+    "No authorization for unrelated external messages, purchases, destructive operations, or unreviewed cloud changes."
+  ]
+}

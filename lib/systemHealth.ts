@@ -3,7 +3,8 @@ import { createClient } from "@supabase/supabase-js"
 import type { drive_v3 } from "googleapis"
 import { getEmailNoticeConfigStatus } from "@/lib/emailNotice"
 import { loadGoogleApis } from "@/lib/googleApis"
-import { evaluateDriveFileBackupHealth, isVerifiedDriveBackupManifest, type ActiveDriveBackupFile, type DriveBackupManifest } from "@/lib/driveFileBackupHealth"
+import { evaluateDriveFileBackupHealth, getDriveFileBackupGaps, isVerifiedDriveBackupManifest, type ActiveDriveBackupFile, type DriveBackupManifest } from "@/lib/driveFileBackupHealth"
+import { BackupProtectionObservationError, backupDueWindow, evaluateDatabaseBackupProtection, unknownBackupProtection, type BackupGapObserver, type BackupGapInput, type BackupProtectionGap } from "@/lib/backupProtectionPolicy"
 import { parsePricingBackupSchemaVersion, pricingBackupSchemaFromArtifact, pricingBackupSchemaFromInventory, pricingBackupSchemaVersion, type PricingBackupSchemaVersion } from "@/lib/backupPricingSchema.mjs"
 
 export type HealthStatus = "ok" | "warning" | "error"
@@ -36,7 +37,6 @@ const BACKUP_FOLDER_NAME = "Bunker Map Backups"
 const DAILY_FOLDER_NAME = "Daily Supabase Backups"
 const DRIVE_FILE_MANIFEST_FOLDER_NAME = "Drive File Backup Manifests"
 const DRIVE_FILE_MANIFEST_PREFIX = "drive-file-backup-manifest"
-const DAILY_BACKUP_WARNING_AGE_HOURS = 36
 const EXCHANGE_CERTIFICATION_WARNING_AGE_HOURS = 36
 const BACKUP_INTEGRITY_SCHEMA = "bunker-map-backup-integrity/v2"
 const BACKUP_FILE_SCHEMA = "bunker-map-backup/v2"
@@ -415,7 +415,8 @@ async function runCheck(
   id: string,
   label: string,
   fn: () => Promise<HealthCheckResult>,
-  timeoutMs = CHECK_TIMEOUT_MS
+  timeoutMs = CHECK_TIMEOUT_MS,
+  backupObserver?: BackupGapObserver,
 ): Promise<HealthCheck> {
   const checkedAt = new Date().toISOString()
   let timeout: ReturnType<typeof setTimeout> | undefined
@@ -431,21 +432,17 @@ async function runCheck(
     ])
     return { id, label, checkedAt, ...result }
   } catch (error) {
+    if (error instanceof BackupProtectionObservationError) throw error
+    if (id === "backup" || id === "drive-file-content-backup") {
+      await observeBackupGaps(backupObserver, id === "backup" ? "database" : "drive-file", checkedAt, [], false)
+      return { id, label, checkedAt, ...unknownBackupProtection() }
+    }
     return {
       id,
       label,
       checkedAt,
       status: "error",
       message: getErrorMessage(error),
-      ...(id === "drive-file-content-backup" ? {
-        details: {
-          alertKey: "drive-file-backup",
-          alertLevel: 1,
-          notificationEligible: true,
-          incidentResolved: false,
-          action: "Check backup access and the Cloud Run execution logs; backup health could not be verified.",
-        },
-      } : {}),
     }
   } finally {
     if (timeout) clearTimeout(timeout)
@@ -1199,7 +1196,7 @@ async function getCurrentBackupInventory() {
   const { data, error } = await getSupabaseClient().rpc(
     "get_bunker_map_backup_inventory"
   )
-  if (error) throw error
+  if (error) throw new BackupEvidenceReadError()
   const inventory = asRecord(data, "Live backup database inventory")
   if (inventory.schema !== BACKUP_INVENTORY_SCHEMA) {
     throw new Error("Live backup database inventory has an unsupported schema.")
@@ -1266,7 +1263,7 @@ async function listActiveDriveBackupFiles(
         .filter((row) => typeof row.drive_file_id === "string" && Boolean(row.drive_file_id))
         .map((row) => ({
           id: String(row.drive_file_id),
-          name: String(row.file_name || row.drive_file_id),
+          name: typeof row.file_name === "string" && row.file_name.trim() ? row.file_name : "Unnamed file",
           createdAt: typeof row.created_at === "string" ? row.created_at : null,
           updatedAt: typeof row.updated_at === "string" ? row.updated_at : null,
         })),
@@ -1430,21 +1427,25 @@ async function findDriveFolder(drive: drive_v3.Drive, parentId: string, name: st
 }
 
 async function readDriveFileBytes(drive: drive_v3.Drive, fileId: string) {
-  const response = await drive.files.get(
-    {
-      fileId,
-      alt: "media",
-      supportsAllDrives: true,
-    },
-    {
-      responseType: "stream",
+  try {
+    const response = await drive.files.get(
+      {
+        fileId,
+        alt: "media",
+        supportsAllDrives: true,
+      },
+      {
+        responseType: "stream",
+      }
+    )
+    const chunks: Buffer[] = []
+    for await (const chunk of response.data as AsyncIterable<Buffer | string>) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
     }
-  )
-  const chunks: Buffer[] = []
-  for await (const chunk of response.data as AsyncIterable<Buffer | string>) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+    return Buffer.concat(chunks)
+  } catch {
+    throw new BackupEvidenceReadError()
   }
-  return Buffer.concat(chunks)
 }
 
 async function readDriveJsonFile(drive: drive_v3.Drive, fileId: string) {
@@ -1459,31 +1460,51 @@ async function readDriveFileDigest(
   drive: drive_v3.Drive,
   fileId: string
 ) {
-  const response = await drive.files.get(
-    {
-      fileId,
-      alt: "media",
-      supportsAllDrives: true,
-    },
-    {
-      responseType: "stream",
+  try {
+    const response = await drive.files.get(
+      {
+        fileId,
+        alt: "media",
+        supportsAllDrives: true,
+      },
+      {
+        responseType: "stream",
+      }
+    )
+    const hasher = createHash("sha256")
+    let fileByteLength = 0
+    for await (const chunk of response.data as AsyncIterable<Uint8Array | string>) {
+      hasher.update(chunk)
+      fileByteLength +=
+        typeof chunk === "string"
+          ? Buffer.byteLength(chunk, "utf8")
+          : chunk.byteLength
+      if (!Number.isSafeInteger(fileByteLength)) {
+        throw new Error("Drive backup byte length exceeds the safe integer range.")
+      }
     }
-  )
-  const hasher = createHash("sha256")
-  let fileByteLength = 0
-  for await (const chunk of response.data as AsyncIterable<Uint8Array | string>) {
-    hasher.update(chunk)
-    fileByteLength +=
-      typeof chunk === "string"
-        ? Buffer.byteLength(chunk, "utf8")
-        : chunk.byteLength
-    if (!Number.isSafeInteger(fileByteLength)) {
-      throw new Error("Drive backup byte length exceeds the safe integer range.")
+    return {
+      uploadedFileSha256: hasher.digest("hex"),
+      fileByteLength,
     }
+  } catch {
+    throw new BackupEvidenceReadError()
   }
-  return {
-    uploadedFileSha256: hasher.digest("hex"),
-    fileByteLength,
+}
+
+class BackupEvidenceReadError extends Error {
+  constructor() { super("Backup evidence could not be read."); this.name = "BackupEvidenceReadError" }
+}
+
+async function observeBackupGaps(observer: BackupGapObserver | undefined, domain: "database" | "drive-file", observedAt: string, gaps: BackupGapInput[], complete: boolean) {
+  if (!observer) return [] as BackupProtectionGap[]
+  try {
+    const result = await observer({ domain, observedAt, gaps, complete })
+    if (!result.accepted) throw new BackupProtectionObservationError("A newer backup check is already recorded. No alert was sent from this older check.")
+    return result.gaps
+  } catch (error) {
+    if (error instanceof BackupProtectionObservationError) throw error
+    throw new BackupProtectionObservationError()
   }
 }
 
@@ -2439,7 +2460,16 @@ function verifyBackupArtifact(
   }
 }
 
-async function checkDriveBackup(): Promise<HealthCheckResult> {
+async function checkDriveBackup(observer?: BackupGapObserver): Promise<HealthCheckResult> {
+  const observedAt = new Date().toISOString()
+  const missingBackup = async (folder?: string): Promise<HealthCheckResult> => {
+    const now = Date.now()
+    const gaps = await observeBackupGaps(observer, "database", observedAt, [
+      { key: "availability", dueAt: new Date(backupDueWindow(now).deadlineAt).toISOString(), requiredSinceAt: new Date(backupDueWindow(now).databaseEarliestReceiptAt).toISOString() },
+    ], false)
+    const result = evaluateDatabaseBackupProtection({ now, receiptCreatedAt: null, inventoryCurrent: null, gaps })
+    return { ...result, details: { ...result.details, ...(folder ? { missingFolder: folder } : {}) } }
+  }
   const { google } = await loadGoogleApis()
   const auth = await getOAuthClient("GOOGLE_DRIVE_REFRESH_TOKEN")
   const drive = google.drive({ version: "v3", auth })
@@ -2447,24 +2477,12 @@ async function checkDriveBackup(): Promise<HealthCheckResult> {
   const sharedDriveId = process.env.GOOGLE_DRIVE_SHARED_DRIVE_ID || null
   const backupRoot = await findDriveFolder(drive, rootFolderId, BACKUP_FOLDER_NAME, sharedDriveId)
   if (!backupRoot?.id) {
-    return {
-      status: "warning",
-      message: "Backup root folder has not been created yet",
-      details: {
-        folder: BACKUP_FOLDER_NAME,
-      },
-    }
+    return missingBackup(BACKUP_FOLDER_NAME)
   }
 
   const dailyFolder = await findDriveFolder(drive, backupRoot.id, DAILY_FOLDER_NAME, sharedDriveId)
   if (!dailyFolder?.id) {
-    return {
-      status: "warning",
-      message: "Daily backup folder has not been created yet",
-      details: {
-        folder: DAILY_FOLDER_NAME,
-      },
-    }
+    return missingBackup(DAILY_FOLDER_NAME)
   }
 
   const candidates: drive_v3.Schema$File[] = []
@@ -2509,10 +2527,7 @@ async function checkDriveBackup(): Promise<HealthCheckResult> {
   const latest = verifiedCandidates[0]
 
   if (!latest?.createdTime) {
-    return {
-      status: "warning",
-      message: "No verified daily backup file found yet",
-    }
+    return missingBackup()
   }
 
   const ageHours = Math.round((Date.now() - new Date(latest.createdTime).getTime()) / 36_000) / 100
@@ -2696,10 +2711,16 @@ async function checkDriveBackup(): Promise<HealthCheckResult> {
       verified = legacyVerified
     }
   } catch (error) {
+    await observeBackupGaps(observer, "database", observedAt, [], false)
+    if (error instanceof BackupEvidenceReadError) return unknownBackupProtection()
     return {
       status: "error",
-      message: "Latest daily backup failed integrity verification",
+      message: "The latest database backup failed its safety checks.",
       details: {
+        notificationEligible: true,
+        incidentResolved: false,
+        alertLevel: 2,
+        action: "Open System Health and arrange a new verified database backup.",
         name: latest.name || "",
         createdTime: latest.createdTime,
         ageHours,
@@ -2713,10 +2734,16 @@ async function checkDriveBackup(): Promise<HealthCheckResult> {
   try {
     currentInventory = await getCurrentBackupInventory()
   } catch (error) {
+    await observeBackupGaps(observer, "database", observedAt, [], false)
+    if (error instanceof BackupEvidenceReadError) return unknownBackupProtection()
     return {
       status: "error",
-      message: "Live database failed the backup inventory contract",
+      message: "Some database information cannot be included safely in the backup.",
       details: {
+        notificationEligible: true,
+        incidentResolved: false,
+        alertLevel: 2,
+        action: "Open System Health and repair the database backup configuration.",
         name: latest.name || "",
         createdTime: latest.createdTime,
         webViewLink: latest.webViewLink || "",
@@ -2729,6 +2756,10 @@ async function checkDriveBackup(): Promise<HealthCheckResult> {
       status: "error",
       message: "Latest backup migration is ahead of the live database",
       details: {
+        notificationEligible: true,
+        incidentResolved: false,
+        alertLevel: 2,
+        action: "Open System Health and check the database and backup versions.",
         backupMigrationHead: verified.migrationHead,
         liveMigrationHead: currentInventory.migrationHead,
       },
@@ -2746,26 +2777,32 @@ async function checkDriveBackup(): Promise<HealthCheckResult> {
         verified.catalogSha256 === currentInventory.catalogSha256 &&
         verified.liveTableCount === currentInventory.liveTables.length
       : sameStringSet(verified.liveTables, currentInventory.liveTables))
-  const stale = ageHours > DAILY_BACKUP_WARNING_AGE_HOURS
   const provenanceIncomplete = !verified.deploymentCommit
+  const now = Date.now()
+  const window = backupDueWindow(now)
+  const gapsToObserve: BackupGapInput[] = []
+  if (Date.parse(latest.createdTime) < window.databaseEarliestReceiptAt) {
+    gapsToObserve.push({ key: "availability", dueAt: new Date(window.deadlineAt).toISOString(),
+      requiredSinceAt: new Date(window.databaseEarliestReceiptAt).toISOString(), coveredThroughAt: latest.createdTime })
+  }
+  if (!databaseInventoryCurrent) gapsToObserve.push({
+    key: "inventory", dueAt: new Date(window.nextDeadlineAt).toISOString(),
+    requiredVersion: currentInventory.migrationHead, requiredFingerprint: currentInventory.catalogSha256,
+    ...("catalogSha256" in verified && typeof verified.catalogSha256 === "string" ? {
+      coveredThroughAt: verified.generatedAt, coveredVersion: verified.migrationHead, coveredFingerprint: verified.catalogSha256,
+    } : {}),
+  })
+  const gaps = await observeBackupGaps(observer, "database", observedAt, gapsToObserve, true)
+  const protection = evaluateDatabaseBackupProtection({
+    now, receiptCreatedAt: latest.createdTime, generatedAt: verified.generatedAt,
+    inventoryCurrent: databaseInventoryCurrent, gaps,
+    advisory: unverifiedCandidateCount > 0 || provenanceIncomplete,
+  })
   return {
-    status:
-      stale ||
-      unverifiedCandidateCount > 0 ||
-      !databaseInventoryCurrent ||
-      provenanceIncomplete
-        ? "warning"
-        : "ok",
-    message: stale
-      ? "Latest verified daily backup is older than expected"
-      : unverifiedCandidateCount > 0
-        ? "Latest verified daily backup passed, but unverified backup files need review"
-        : !databaseInventoryCurrent
-          ? "Latest verified daily backup predates the live database schema"
-          : provenanceIncomplete
-            ? "Latest verified daily backup passed integrity checks but has no deployment commit"
-            : "Latest verified daily backup passed all integrity checks",
+    status: protection.status,
+    message: protection.message,
     details: {
+      ...protection.details,
       name: latest.name || "",
       createdTime: latest.createdTime,
       ageHours,
@@ -2802,7 +2839,8 @@ async function checkDriveBackup(): Promise<HealthCheckResult> {
   }
 }
 
-async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
+async function checkDriveFileContentBackup(observer?: BackupGapObserver): Promise<HealthCheckResult> {
+  const observedAt = new Date().toISOString()
   const supabase = getSupabaseClient()
   const [companyFiles, entryFiles] = await Promise.all([
     listActiveDriveBackupFiles(supabase, "cc_company_files"),
@@ -2811,8 +2849,22 @@ async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
   const companyFileCount = companyFiles.length
   const entryFileCount = entryFiles.length
   const total = companyFileCount + entryFileCount
-  const evaluate = (manifests: DriveBackupManifest[]): HealthCheckResult & { details: NonNullable<HealthCheckResult["details"]> } => {
-    const result = evaluateDriveFileBackupHealth({ activeFiles: [...companyFiles, ...entryFiles], manifests })
+  const evaluate = async (manifests: DriveBackupManifest[]): Promise<HealthCheckResult & { details: NonNullable<HealthCheckResult["details"]> }> => {
+    const now = Date.now()
+    const activeFiles = [...companyFiles, ...entryFiles]
+    const fileKey = (id: string) => createHash("sha256").update(id).digest("hex")
+    const gaps = await observeBackupGaps(observer, "drive-file", observedAt,
+      getDriveFileBackupGaps({ activeFiles, manifests, now }).map((gap) => ({
+        key: gap.fileId === null ? "schedule" : fileKey(gap.fileId), dueAt: gap.dueAt,
+        requiredSinceAt: gap.requiredSinceAt,
+        ...(gap.coveredThroughAt ? { coveredThroughAt: gap.coveredThroughAt } : {}),
+      })), true)
+    const byKey = new Map(gaps.map((gap) => [gap.key, Date.parse(gap.firstDueAt)]))
+    const firstDueByFileId = new Map(activeFiles.flatMap((file) => {
+      const due = byKey.get(fileKey(file.id))
+      return due === undefined ? [] : [[file.id, due] as const]
+    }))
+    const result = evaluateDriveFileBackupHealth({ activeFiles, manifests, now, firstDueByFileId, firstScheduleDueAt: byKey.get("schedule") })
     return {
       ...result,
       details: {
@@ -2824,11 +2876,12 @@ async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
   }
 
   if (!total) {
+    await observeBackupGaps(observer, "drive-file", observedAt, [], true)
     return {
       status: "ok",
       message: "No active Google Drive upload records found",
       details: {
-        alertKey: "drive-file-backup",
+        alertKey: "drive-file-content-protection",
         notificationEligible: false,
         incidentResolved: true,
         activeCompanyFiles: companyFileCount,
@@ -2844,13 +2897,13 @@ async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
   const sharedDriveId = process.env.GOOGLE_DRIVE_SHARED_DRIVE_ID || null
   const backupRoot = await findDriveFolder(drive, rootFolderId, BACKUP_FOLDER_NAME, sharedDriveId)
   if (!backupRoot?.id) {
-    const result = evaluate([])
+    const result = await evaluate([])
     return { ...result, details: { ...result.details, missingFolder: BACKUP_FOLDER_NAME } }
   }
 
   const manifestFolder = await findDriveFolder(drive, backupRoot.id, DRIVE_FILE_MANIFEST_FOLDER_NAME, sharedDriveId)
   if (!manifestFolder?.id) {
-    const result = evaluate([])
+    const result = await evaluate([])
     return { ...result, details: { ...result.details, missingFolder: DRIVE_FILE_MANIFEST_FOLDER_NAME } }
   }
 
@@ -2878,21 +2931,38 @@ async function checkDriveFileContentBackup(): Promise<HealthCheckResult> {
     }
   }
   const firstCandidate = await readCandidate(latest)
-  // Healthy daily checks download one manifest. Only failed/running attempts
-  // need older evidence, keeping the normal dashboard path inexpensive.
+  // Healthy daily checks download one manifest. Failed/running attempts and
+  // uncovered file versions may need older proof; the healthy path stays cheap.
   const candidates = [firstCandidate]
   const olderFiles = (latestManifest.data.files || []).slice(1)
   for (let from = 0; from < olderFiles.length; from += 3) {
-    if (candidates.some((candidate) => candidate.manifest && isVerifiedDriveBackupManifest(candidate.manifest))) break
+    const readable = candidates.flatMap((candidate) => candidate.manifest ? [candidate.manifest] : [])
+    const hasVerifiedGlobal = readable.some((manifest) => isVerifiedDriveBackupManifest(manifest, Date.now()))
+    // A verified global snapshot may omit an uncovered file. Older individual
+    // proof can retire that file's previous version before a new edit becomes
+    // due. Keep the ordinary healthy one-manifest path, but do not stop merely
+    // because ANY global manifest verified. Both listing and reads remain
+    // bounded to the latest ten, in batches of at most three.
+    const needsFileProof = getDriveFileBackupGaps({ activeFiles: [...companyFiles, ...entryFiles], manifests: readable, now: Date.now() })
+      .some((gap) => gap.fileId !== null && !gap.coveredThroughAt)
+    if (hasVerifiedGlobal && !needsFileProof) break
     candidates.push(...await Promise.all(olderFiles.slice(from, from + 3).map(readCandidate)))
   }
-  const result = evaluate(candidates.flatMap((candidate) => candidate.manifest ? [candidate.manifest] : []))
-  if (candidates[0]?.error) {
-    result.status = "warning"
-    result.message = "Latest Drive file backup evidence could not be read"
-    result.details.notificationEligible = true
-    result.details.incidentResolved = false
-  }
+  const manifests = candidates.flatMap((candidate) => candidate.manifest ? [candidate.manifest] : [])
+  let result: HealthCheckResult & { details: NonNullable<HealthCheckResult["details"]> }
+  // An unreadable required historical manifest might contain the per-file
+  // proof that retires an older gap. Do not turn that transport outage into a
+  // confirmed missing backup, or reconcile a supposedly complete gap set.
+  // Conversely, already sufficient verified coverage is not invalidated by an
+  // irrelevant older read failing in the same parallel batch.
+  const historyMayContainRequiredProof = candidates.some((candidate) => candidate.error)
+    && getDriveFileBackupGaps({ activeFiles: [...companyFiles, ...entryFiles], manifests, now: Date.now() }).length > 0
+  if (candidates[0]?.error || historyMayContainRequiredProof) {
+    await observeBackupGaps(observer, "drive-file", observedAt, [], false)
+    const known = evaluateDriveFileBackupHealth({ activeFiles: [...companyFiles, ...entryFiles], manifests })
+    const unknown = unknownBackupProtection("File backup protection could not be checked. It has not been marked as recovered.")
+    result = { ...unknown, details: { ...known.details, ...unknown.details } }
+  } else result = await evaluate(manifests)
   return {
     ...result,
     details: {
@@ -3151,7 +3221,8 @@ async function checkCronConfig(): Promise<HealthCheckResult> {
   }
 }
 
-export async function getSystemHealth(): Promise<SystemHealth> {
+export async function getSystemHealth(options: { backupGapObserver?: BackupGapObserver } = {}): Promise<SystemHealth> {
+  const observer = options.backupGapObserver
   const checks = await Promise.all([
     runCheck("supabase", "Supabase", checkSupabase),
     runCheck("schema", "Optional Schema", checkOptionalSchema),
@@ -3159,10 +3230,11 @@ export async function getSystemHealth(): Promise<SystemHealth> {
     runCheck(
       "backup",
       "Daily Backup",
-      checkDriveBackup,
-      BACKUP_CHECK_TIMEOUT_MS
+      () => checkDriveBackup(observer),
+      BACKUP_CHECK_TIMEOUT_MS,
+      observer,
     ),
-    runCheck("drive-file-content-backup", "Drive File Content Backup", checkDriveFileContentBackup, 45_000),
+    runCheck("drive-file-content-backup", "Drive File Content Backup", () => checkDriveFileContentBackup(observer), 45_000, observer),
     runCheck("calendar", "Google Calendar", checkGoogleCalendar),
     runCheck("contacts", "Google Contacts", checkGoogleContacts),
     runCheck("exchange-truth", "Exchange Truth Chain", checkExchangeTruth),

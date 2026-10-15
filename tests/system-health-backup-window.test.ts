@@ -75,12 +75,10 @@ test("Attendance Sync remains visible in System Health without sending email not
   )
 })
 
-test("backup warnings remain visible without sending repetitive email alerts", () => {
-  assert.match(
-    noticeRouteSource,
-    /check\.id === "backup" && check\.status === "warning"/,
-  )
-  assert.doesNotMatch(noticeRouteSource, /check\.id === "backup" && check\.status === "error"/)
+test("notification policy does not blanket-mute actionable backup warnings", () => {
+  assert.doesNotMatch(noticeRouteSource, /check\.id === "backup" && check\.status === "warning"/)
+  assert.doesNotMatch(noticeRouteSource, /firstBackupMissing/)
+  assert.match(noticeRouteSource, /getSystemHealth\(\{ backupGapObserver: createBackupProtectionGapObserver\(\) \}\)/)
 })
 
 test("daily backup has bounded retries that skip after a recent schema-current success", () => {

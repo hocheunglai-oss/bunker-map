@@ -3,6 +3,7 @@ import test from "node:test"
 import {
   driveBackupDeadlineForChange,
   evaluateDriveFileBackupHealth,
+  getDriveFileBackupGaps,
   hasDriveBackupObjectProof,
   isVerifiedDriveBackupManifest,
   type ActiveDriveBackupFile,
@@ -30,9 +31,9 @@ function manifest(start = todayStart, finish = todayFinish, ids = [oldFile.id]):
 const check = (now: string, manifests: DriveBackupManifest[], activeFiles = [oldFile]) =>
   evaluateDriveFileBackupHealth({ now: date(now), manifests, activeFiles })
 
-test("new uploads wait until the next 02:00 snapshot's 06:00 Hong Kong deadline", () => {
-  assert.equal(driveBackupDeadlineForChange(date(todayStart)), date("2026-09-22T22:00:00Z"))
-  assert.equal(driveBackupDeadlineForChange(date("2026-09-22T18:00:00.001Z")), date("2026-09-23T22:00:00Z"))
+test("new uploads wait until the next 02:00 snapshot plus06:15 publication grace", () => {
+  assert.equal(driveBackupDeadlineForChange(date(todayStart)), date("2026-09-22T22:15:00Z"))
+  assert.equal(driveBackupDeadlineForChange(date("2026-09-22T18:00:00.001Z")), date("2026-09-23T22:15:00Z"))
   const newFile = { ...oldFile, id: "new", name: "New map.png", createdAt: "2026-09-23T01:00:00Z", updatedAt: "2026-09-23T01:00:00Z" }
   const result = check("2026-09-23T02:00:00Z", [manifest()], [oldFile, newFile])
   assert.equal(result.status, "ok")
@@ -40,7 +41,7 @@ test("new uploads wait until the next 02:00 snapshot's 06:00 Hong Kong deadline"
   assert.equal(result.details.missingFiles, 0)
   assert.equal(result.details.notificationEligible, false)
   assert.match(result.message, /pending/)
-  const overdue = check("2026-09-23T22:00:00Z", [manifest("2026-09-23T18:00:00Z", "2026-09-23T18:10:00Z")], [oldFile, newFile])
+  const overdue = check("2026-09-23T22:15:00Z", [manifest("2026-09-23T18:00:00Z", "2026-09-23T18:10:00Z")], [oldFile, newFile])
   assert.equal(overdue.details.notificationEligible, true)
   assert.equal(overdue.details.missingFiles, 1)
   assert.equal(overdue.details.missingFileNames, "New map.png")
@@ -53,7 +54,7 @@ test("daily success stays quiet while the next run is within its retry window", 
   assert.equal(result.details.notificationEligible, false)
   assert.equal(result.details.incidentResolved, false)
   assert.equal(result.details.lastSuccessfulBackupAt, "2026-09-21T18:10:00.000Z")
-  const deadline = check("2026-09-22T22:00:00Z", [running, manifest(yesterdayStart, yesterdayFinish)])
+  const deadline = check("2026-09-22T22:15:00Z", [running, manifest(yesterdayStart, yesterdayFinish)])
   assert.equal(deadline.details.notificationEligible, true)
 })
 
@@ -95,6 +96,29 @@ test("legacy manifests with complete object-generation evidence remain valid", (
   assert.equal(check("2026-09-23T00:30:00Z", [legacy]).status, "ok")
 })
 
+test("failed legacy file references cannot establish coverage or falsely recover a missing-file incident", () => {
+  const missing = { ...oldFile, id: "missing", createdAt: "2026-09-21T19:00:00Z", updatedAt: "2026-09-21T19:00:00Z" }
+  const current = manifest()
+  const failedLegacy = manifest("2026-09-22T23:00:00Z", "2026-09-22T23:10:00Z", [oldFile.id, missing.id])
+  delete failedLegacy.schemaVersion
+  failedLegacy.status = "failed"
+  failedLegacy.counts = { totalFiles: 2, uploaded: 0, skipped: 2, failed: 1 }
+  failedLegacy.failures = [{ error: "Synthetic failed legacy attempt" }]
+  const input = { now: date("2026-09-23T00:30:00Z"), activeFiles: [oldFile, missing], manifests: [failedLegacy, current] }
+  const result = evaluateDriveFileBackupHealth(input)
+  assert.equal(result.details.missingFiles, 1)
+  assert.equal(result.details.coveredFiles, 1)
+  assert.equal(result.details.notificationEligible, true)
+  assert.equal(result.details.incidentResolved, false)
+  assert.equal(getDriveFileBackupGaps(input).find((gap) => gap.fileId === missing.id)?.coveredThroughAt, undefined)
+
+  const modernPartial = { ...failedLegacy, schemaVersion: 2 }
+  const modern = evaluateDriveFileBackupHealth({ ...input, manifests: [modernPartial, current] })
+  assert.equal(modern.details.missingFiles, 0)
+  assert.equal(modern.details.notificationEligible, false)
+  assert.equal(modern.details.incidentResolved, true)
+})
+
 test("new manifests require explicit verification, not only success or completed time", () => {
   for (const changes of [
     { verification: { status: "pending" } },
@@ -109,11 +133,11 @@ test("new manifests require explicit verification, not only success or completed
   }
 })
 
-test("completed failed backup after the deadline cannot use an earlier success as recovery", () => {
+test("later failed manual attempt does not invalidate sufficient verified current-cycle protection", () => {
   const failed = { ...manifest("2026-09-22T23:00:00Z", "2026-09-22T23:10:00Z"), status: "failed" }
   const result = check("2026-09-23T00:30:00Z", [failed, manifest()])
-  assert.equal(result.details.notificationEligible, true)
-  assert.equal(result.details.incidentResolved, false)
+  assert.equal(result.details.notificationEligible, false)
+  assert.equal(result.details.incidentResolved, true)
   assert.equal(result.details.lastSuccessfulBackupAt, "2026-09-22T18:10:00.000Z")
 })
 
@@ -136,11 +160,11 @@ test("duplicate references count once and retain the latest update", () => {
   assert.equal(result.details.pendingFiles, 1)
 })
 
-test("malformed latest evidence and no manifest are actionable rather than successful", () => {
+test("missing protection is actionable, but malformed later metadata does not invalidate sufficient verified proof", () => {
   assert.equal(check("2026-09-23T00:30:00Z", []).details.incidentResolved, false)
   const result = check("2026-09-23T00:30:00Z", [{ generatedAt: "bad" }, manifest()])
-  assert.equal(result.details.notificationEligible, true)
-  assert.equal(result.details.incidentResolved, false)
+  assert.equal(result.details.notificationEligible, false)
+  assert.equal(result.details.incidentResolved, true)
 })
 
 test("September 16 evidence plus a September 17 upload is genuinely overdue on September 23", () => {
@@ -155,4 +179,61 @@ test("September 16 evidence plus a September 17 upload is genuinely overdue on S
   assert.equal(result.details.missingFileNames, "KAOHSIUNG Port map.png")
   assert.equal(result.details.alertLevel, 2)
   assert.equal(result.details.notificationEligible, true)
+})
+
+test("storage advice stays visible and quiet without preventing verified protection recovery", () => {
+  const full = manifest()
+  full.counts = { ...(full.counts as object), estimatedCurrentStorageBytes: 4.25 * 1024 ** 3 }
+  const result = check("2026-09-23T00:30:00Z", [full])
+  assert.equal(result.status, "warning")
+  assert.equal(result.details.freeTierUsedPercent, 85)
+  assert.equal(result.details.storageAdvice, true)
+  assert.equal(result.details.notificationEligible, false)
+  assert.equal(result.details.incidentResolved, true)
+  assert.equal(result.details.alertKey, "drive-file-content-protection")
+})
+
+test("missing file escalates48h after its own deadline even with fresh successful global manifests", () => {
+  const missing = { ...oldFile, id: "missing", createdAt: "2026-09-23T01:00:00Z", updatedAt: "2026-09-23T01:00:00Z" }
+  const start = "2026-09-25T18:00:00Z", finish = "2026-09-25T18:10:00Z"
+  const before = check("2026-09-25T22:14:59.999Z", [manifest(start, finish)], [oldFile, missing])
+  const exact = check("2026-09-25T22:15:00.000Z", [manifest(start, finish)], [oldFile, missing])
+  assert.equal(before.details.alertLevel, 1)
+  assert.equal(exact.details.alertLevel, 2)
+  assert.equal(exact.status, "error")
+  assert.equal(exact.details.missingFiles, 1)
+  assert.equal(exact.details.lastSuccessfulBackupAt, finish.replace("Z", ".000Z"))
+})
+
+test("later edits without intervening verified proof cannot postpone an established missing-file deadline", () => {
+  const edited = { ...oldFile, id: "missing", createdAt: "2026-09-23T01:00:00Z", updatedAt: "2026-09-25T23:00:00Z" }
+  const input = { now: date("2026-09-26T00:30:00Z"), manifests: [manifest("2026-09-25T18:00:00Z", "2026-09-25T18:10:00Z")], activeFiles: [oldFile, edited] }
+  assert.equal(evaluateDriveFileBackupHealth(input).details.pendingFiles, 1)
+  const persisted = evaluateDriveFileBackupHealth({ ...input, firstDueByFileId: new Map([[edited.id, date("2026-09-23T22:15:00Z")]]) })
+  assert.equal(persisted.details.pendingFiles, 0)
+  assert.equal(persisted.details.missingFiles, 1)
+  assert.equal(persisted.details.alertLevel, 2)
+})
+
+test("verified overnight protection then a new morning edit carries reset proof and remains legitimately pending", () => {
+  const edited = { ...oldFile, updatedAt: "2026-09-23T00:00:00Z" }
+  const input = { now: date("2026-09-23T00:30:00Z"), manifests: [manifest()], activeFiles: [edited] }
+  const gaps = getDriveFileBackupGaps(input)
+  assert.deepEqual(gaps, [{ fileId: oldFile.id, dueAt: "2026-09-23T22:15:00.000Z", requiredSinceAt: "2026-09-23T00:00:00.000Z", coveredThroughAt: "2026-09-22T18:00:00.000Z" }])
+  const result = evaluateDriveFileBackupHealth({ ...input, firstDueByFileId: new Map([[oldFile.id, date(gaps[0].dueAt)]]) })
+  assert.equal(result.details.pendingFiles, 1)
+  assert.equal(result.details.notificationEligible, false)
+  assert.equal(result.details.incidentResolved, true)
+  const failed = { ...manifest(), status: "failed" }
+  assert.equal(getDriveFileBackupGaps({ ...input, manifests: [failed] })[0].coveredThroughAt, "2026-09-22T18:00:00.000Z")
+  assert.equal(evaluateDriveFileBackupHealth({ ...input, manifests: [failed] }).details.incidentResolved, false)
+  assert.equal(getDriveFileBackupGaps({ ...input, manifests: [{ ...failed, schemaVersion: 3 }] })[0].coveredThroughAt, undefined)
+})
+
+test("new installation with only not-yet-due files does not invent a missed backup", () => {
+  const newFile = { ...oldFile, createdAt: "2026-09-23T01:00:00Z", updatedAt: "2026-09-23T01:00:00Z" }
+  const result = check("2026-09-23T02:00:00Z", [], [newFile])
+  assert.equal(result.details.pendingFiles, 1)
+  assert.equal(result.details.notificationEligible, false)
+  assert.equal(result.details.incidentResolved, false)
 })

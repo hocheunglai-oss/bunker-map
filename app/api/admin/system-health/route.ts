@@ -2,6 +2,8 @@ import { NextResponse } from "next/server"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 import { getSystemHealth } from "@/lib/systemHealth"
 import { timedJson } from "@/lib/serverTiming"
+import { createBackupProtectionGapPreviewObserver } from "@/lib/backupProtectionGapStore"
+import { BackupProtectionObservationError } from "@/lib/backupProtectionPolicy"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -17,7 +19,7 @@ async function loadHealth(forceRefresh: boolean) {
   }
   if (!forceRefresh && healthPromise) return healthPromise
 
-  healthPromise = getSystemHealth()
+  healthPromise = getSystemHealth({ backupGapObserver: createBackupProtectionGapPreviewObserver() })
   try {
     const value = await healthPromise
     cachedHealth = { expiresAt: Date.now() + HEALTH_CACHE_MS, value }
@@ -40,7 +42,13 @@ export async function GET(request: Request) {
   }
 
   const forceRefresh = new URL(request.url).searchParams.get("refresh") === "1"
-  const health = await loadHealth(forceRefresh)
+  let health: Awaited<ReturnType<typeof getSystemHealth>>
+  try {
+    health = await loadHealth(forceRefresh)
+  } catch (error) {
+    if (!(error instanceof BackupProtectionObservationError)) throw error
+    return NextResponse.json({ message: "Backup protection is temporarily unavailable. Please try again." }, { status: 500 })
+  }
   return timedJson("/api/admin/system-health", startedAt, health, undefined, {
     forceRefresh,
     status: health.status,

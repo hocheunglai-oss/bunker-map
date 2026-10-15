@@ -1,10 +1,8 @@
+import { BACKUP_HOUR_MS, BACKUP_PUBLICATION_GRACE_MS, backupDeadlineForFileChange, backupDueWindow } from "./backupProtectionPolicy"
+
 // Backups take a snapshot at 02:00 Hong Kong time and may retry until 06:00.
 // Compare against the last deadline that has passed, never the current retry
 // window: starting a new attempt must not hide yesterday's unresolved failure.
-const HOUR_MS = 60 * 60 * 1000
-const DAY_MS = 24 * HOUR_MS
-const HONG_KONG_OFFSET_MS = 8 * HOUR_MS
-const RETRY_WINDOW_MS = 4 * HOUR_MS
 
 export type ActiveDriveBackupFile = {
   id: string
@@ -40,14 +38,8 @@ function count(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0
 }
 
-function snapshotStartForDay(time: number) {
-  return Math.floor((time + HONG_KONG_OFFSET_MS) / DAY_MS) * DAY_MS
-    - HONG_KONG_OFFSET_MS + 2 * HOUR_MS
-}
-
 export function driveBackupDeadlineForChange(changedAt: number): number {
-  const dayStart = snapshotStartForDay(changedAt)
-  return (changedAt <= dayStart ? dayStart : dayStart + DAY_MS) + RETRY_WINDOW_MS
+  return backupDeadlineForFileChange(changedAt)
 }
 
 export function hasDriveBackupObjectProof(value: unknown): boolean {
@@ -70,7 +62,8 @@ function evidence(manifest: DriveBackupManifest, now: number): ManifestEvidence 
   const files = new Map<string, Record<string, unknown>>()
   // A scheduler acknowledgement, in-progress manifest or unsupported skip is
   // not evidence that any file has been durably backed up.
-  if (completedAt !== null && (manifest.status === undefined || manifest.status === "succeeded" || manifest.status === "failed")) {
+  if (completedAt !== null && (manifest.schemaVersion === undefined || manifest.schemaVersion === 2)
+    && (manifest.status === undefined || manifest.status === "succeeded" || manifest.status === "failed")) {
     for (const value of listedFiles) {
       if (hasDriveBackupObjectProof(value)) {
         const file = record(value)
@@ -92,6 +85,11 @@ function evidence(manifest: DriveBackupManifest, now: number): ManifestEvidence 
     && count(counts.uploaded) + count(counts.skipped) === totalFiles
   const verified = completedAt !== null && contractVerified && completeListing
     && counts.failed === 0 && failures.length === 0
+  // Legacy manifests have no supported per-entry verification contract. Their
+  // individual references are trusted only when the WHOLE legacy manifest is
+  // verified. Unlike completed v2 entries, failed legacy rows cannot establish
+  // coverage or clear an existing missing-file incident.
+  if (legacyContract && !verified) files.clear()
   return {
     manifest, startedAt, completedAt, verified, files,
     failed: manifest.status === "failed" || count(counts.failed) > 0 || failures.length > 0
@@ -103,30 +101,22 @@ export function isVerifiedDriveBackupManifest(manifest: DriveBackupManifest, now
   return evidence(manifest, now)?.verified === true
 }
 
-export function evaluateDriveFileBackupHealth({
-  activeFiles,
-  manifests,
-  now = Date.now(),
-}: {
+type DriveHealthInput = {
   activeFiles: ActiveDriveBackupFile[]
   manifests: DriveBackupManifest[]
   now?: number
-}): {
-  status: "ok" | "warning" | "error"
-  message: string
-  details: Record<string, string | number | boolean | null>
-} {
+  firstDueByFileId?: ReadonlyMap<string, number>
+  firstScheduleDueAt?: number
+}
+
+function analyzeDriveProtection({ activeFiles, manifests, now = Date.now(), firstDueByFileId, firstScheduleDueAt }: DriveHealthInput) {
   const snapshots = manifests.map((manifest) => evidence(manifest, now))
     .filter((item): item is ManifestEvidence => item !== null)
     .sort((a, b) => b.startedAt - a.startedAt)
   const latest = snapshots[0]
   const latestUnreadable = manifests.length > 0 && evidence(manifests[0], now) === null
   const lastSuccess = snapshots.find((item) => item.verified)
-  const todayStart = snapshotStartForDay(now)
-  const dueStart = now >= todayStart + RETRY_WINDOW_MS ? todayStart : todayStart - DAY_MS
-  const nextDeadline = now < todayStart + RETRY_WINDOW_MS
-    ? todayStart + RETRY_WINDOW_MS : todayStart + DAY_MS + RETRY_WINDOW_MS
-  const overdue = !lastSuccess || lastSuccess.startedAt < dueStart
+  const window = backupDueWindow(now)
   const uniqueActive = new Map<string, ActiveDriveBackupFile>()
   for (const file of activeFiles) {
     const previous = uniqueActive.get(file.id)
@@ -136,24 +126,48 @@ export function evaluateDriveFileBackupHealth({
   }
   const missing: ActiveDriveBackupFile[] = []
   const pending: ActiveDriveBackupFile[] = []
+  const gaps: Array<{ fileId: string | null; dueAt: string; requiredSinceAt: string; coveredThroughAt?: string }> = []
+  let oldestMissingDeadline: number | null = null
   for (const file of uniqueActive.values()) {
     const changedAt = Math.max(timestamp(file.createdAt) ?? 0, timestamp(file.updatedAt) ?? 0)
     const covered = snapshots.some((snapshot) => snapshot.completedAt !== null
       && snapshot.startedAt >= changedAt && snapshot.files.has(file.id))
     if (covered) continue
-    if (changedAt && now < driveBackupDeadlineForChange(changedAt)) pending.push(file)
-    else missing.push(file)
+    const newDue = changedAt ? driveBackupDeadlineForChange(changedAt) : window.deadlineAt
+    const due = Math.min(newDue, firstDueByFileId?.get(file.id) ?? newDue)
+    // A supported completed v2 attempt records each generation only after its
+    // own upload/checksum proof. Another file failing does not erase that proof;
+    // only a fully verified manifest can establish GLOBAL scheduled recovery.
+    const lastCovered = snapshots.find((snapshot) => snapshot.files.has(file.id)
+      && (snapshot.verified || snapshot.manifest.schemaVersion === 2 && snapshot.completedAt !== null))
+    gaps.push({ fileId: file.id, dueAt: new Date(due).toISOString(), requiredSinceAt: new Date(changedAt || window.snapshotAt).toISOString(),
+      ...(lastCovered ? { coveredThroughAt: new Date(lastCovered.startedAt).toISOString() } : {}) })
+    if (now < due) pending.push(file)
+    else {
+      missing.push(file)
+      oldestMissingDeadline = oldestMissingDeadline === null ? due : Math.min(oldestMissingDeadline, due)
+    }
   }
-  const latestRetryDeadline = latest ? snapshotStartForDay(latest.startedAt) + RETRY_WINDOW_MS : null
+  // An installation with only new, not-yet-due files has no missed overnight
+  // obligation. A new run must not hide an older established obligation.
+  const requiredFiles = [...uniqueActive.values()].some((file) => {
+    const changed = Math.max(timestamp(file.createdAt) ?? 0, timestamp(file.updatedAt) ?? 0)
+    return !changed || changed <= window.snapshotAt
+  }) || missing.length > 0
+  const overdue = requiredFiles && (!lastSuccess || lastSuccess.startedAt < window.snapshotAt)
+  const newScheduleDue = lastSuccess
+    ? backupDeadlineForFileChange(lastSuccess.startedAt + 1)
+    : window.deadlineAt
+  const scheduleDue = Math.min(newScheduleDue, firstScheduleDueAt ?? newScheduleDue)
+  if (overdue) gaps.push({ fileId: null, dueAt: new Date(scheduleDue).toISOString(), requiredSinceAt: new Date(newScheduleDue - 4 * BACKUP_HOUR_MS - BACKUP_PUBLICATION_GRACE_MS).toISOString(),
+    ...(lastSuccess ? { coveredThroughAt: new Date(lastSuccess.startedAt).toISOString() } : {}) })
   const latestAttemptUnresolved = Boolean(latest && !latest.verified
     && (!lastSuccess || latest.startedAt >= lastSuccess.startedAt))
-  const failureDue = latestAttemptUnresolved && latestRetryDeadline !== null && now >= latestRetryDeadline
   const ageHours = lastSuccess?.completedAt !== null && lastSuccess?.completedAt !== undefined
     ? Math.round((now - lastSuccess.completedAt) / 36_000) / 100 : null
-  const oldestSeen = snapshots.at(-1)?.startedAt
-  const escalation = lastSuccess?.completedAt !== null && lastSuccess?.completedAt !== undefined
-    ? now - lastSuccess.completedAt >= 48 * HOUR_MS
-    : oldestSeen !== undefined && now - oldestSeen >= 48 * HOUR_MS
+  const escalation = (overdue && ((lastSuccess?.completedAt !== null && lastSuccess?.completedAt !== undefined
+    && now - lastSuccess.completedAt >= 48 * BACKUP_HOUR_MS) || now - scheduleDue >= 48 * BACKUP_HOUR_MS))
+    || (oldestMissingDeadline !== null && now - oldestMissingDeadline >= 48 * BACKUP_HOUR_MS)
   const latestManifest = latest?.manifest ?? {}
   const counts = record(latestManifest.counts)
   const gcs = record(latestManifest.gcs)
@@ -162,38 +176,39 @@ export function evaluateDriveFileBackupHealth({
   const usedPercent = limitBytes ? Math.round(storageBytes / limitBytes * 10_000) / 100 : 0
   const storageNearLimit = limitBytes > 0 && usedPercent >= 80
   const outsideFreeRegion = typeof gcs.location === "string" && Boolean(gcs.location) && limitBytes === 0
-  const backupProblem = overdue || missing.length > 0 || failureDue || latestUnreadable
-  const notificationEligible = backupProblem || storageNearLimit || outsideFreeRegion
+  const backupProblem = overdue || missing.length > 0
+  const notificationEligible = backupProblem
+  const verifiedHealthy = Boolean(lastSuccess) && !backupProblem && latest?.manifest.status !== "running"
   const filesLabel = missing.length === 1 ? "1 file is" : `${missing.length} files are`
-  const message = latestUnreadable || !latest ? "No readable, completed Drive file backup evidence was found"
-    : overdue ? "The scheduled Drive file backup has not completed successfully by 06:00 Hong Kong time"
-    : failureDue ? "The latest Drive file backup has not been verified successfully"
-    : missing.length ? `${filesLabel} still missing a verified backup after the backup deadline`
+  const message = missing.length ? `${filesLabel} still missing a verified backup after the backup deadline`
+    : overdue ? "The overnight file backup has not completed successfully."
+    : pending.length ? `${pending.length} new or changed file(s) pending the next scheduled backup`
+    : latestUnreadable && !lastSuccess ? "File backup evidence could not be verified."
     : outsideFreeRegion ? "Drive file backup storage is outside the free-tier region"
     : storageNearLimit ? "Drive file backup storage is close to the free-tier storage limit"
-    : pending.length ? `${pending.length} new or changed file(s) pending the next scheduled backup`
-    : latestAttemptUnresolved ? "Drive file backup is running or retrying before the 06:00 deadline"
+    : latestAttemptUnresolved && !verifiedHealthy ? "Drive file backup is running or retrying before the deadline"
     : "All eligible active files have a verified Drive file backup"
   return {
-    status: notificationEligible ? (backupProblem && escalation ? "error" : "warning") : "ok",
+    status: (notificationEligible ? (escalation ? "error" : "warning") : storageNearLimit || outsideFreeRegion || latestUnreadable && !lastSuccess ? "warning" : "ok") as "ok" | "warning" | "error",
     message,
     details: {
-      alertKey: "drive-file-backup",
-      alertLevel: backupProblem && escalation ? 2 : 1,
+      alertKey: "drive-file-content-protection",
+      alertLevel: escalation ? 2 : 1,
       notificationEligible,
       // An in-progress attempt must not close/re-arm an unresolved incident.
-      incidentResolved: !notificationEligible && !latestAttemptUnresolved && Boolean(lastSuccess),
+      incidentResolved: verifiedHealthy,
       activeFiles: uniqueActive.size,
       coveredFiles: uniqueActive.size - missing.length - pending.length,
       missingFiles: missing.length,
       pendingFiles: pending.length,
       coverage: `${uniqueActive.size - missing.length - pending.length} / ${uniqueActive.size}`,
-      missingFileNames: missing.map((file) => file.name || file.id).slice(0, 20).join("; "),
-      pendingFileNames: pending.map((file) => file.name || file.id).slice(0, 20).join("; "),
+      missingFileNames: missing.map((file) => file.name || "Unnamed file").slice(0, 20).join("; "),
+      pendingFileNames: pending.map((file) => file.name || "Unnamed file").slice(0, 20).join("; "),
       lastSuccessfulBackupAt: lastSuccess?.completedAt ? new Date(lastSuccess.completedAt).toISOString() : null,
       lastBackupAttemptAt: latest ? new Date(latest.startedAt).toISOString() : null,
-      nextBackupDeadline: new Date(nextDeadline).toISOString(),
-      backupSchedule: "Daily 02:00 Asia/Hong_Kong; retries until 06:00",
+      nextBackupDeadline: new Date(window.nextDeadlineAt).toISOString(),
+      oldestMissingDeadline: oldestMissingDeadline === null ? null : new Date(oldestMissingDeadline).toISOString(),
+      backupSchedule: "Daily 02:00 Asia/Hong_Kong; retries until 06:00; publication grace until 06:15",
       ageHours,
       totalFiles: count(counts.totalFiles),
       uploadedFiles: count(counts.uploaded),
@@ -204,11 +219,28 @@ export function evaluateDriveFileBackupHealth({
       freeTierRemainingGiB: Math.round((limitBytes - storageBytes) / 1024 ** 3 * 1000) / 1000,
       freeTierUsedPercent: usedPercent,
       gcsLocation: String(gcs.location || ""),
+      storageAdvice: storageNearLimit || outsideFreeRegion,
       action: backupProblem
-        ? "Check the Cloud Run backup execution and its failure details, retry the failed files, and verify a completed backup."
+        ? "Open System Health and arrange a verified backup of the missing files."
         : storageNearLimit || outsideFreeRegion
           ? "Review backup storage usage and retention before the free allowance is exceeded."
           : "No action required; new files are picked up by the next scheduled backup.",
     },
+    gaps,
   }
+}
+
+// Sparse internal evidence only; never include this array or Drive IDs in the
+// public health response or the notification-state table.
+export function getDriveFileBackupGaps(input: DriveHealthInput) {
+  return analyzeDriveProtection(input).gaps
+}
+
+export function evaluateDriveFileBackupHealth(input: DriveHealthInput): {
+  status: "ok" | "warning" | "error"
+  message: string
+  details: Record<string, string | number | boolean | null>
+} {
+  const result = analyzeDriveProtection(input)
+  return { status: result.status, message: result.message, details: result.details }
 }
