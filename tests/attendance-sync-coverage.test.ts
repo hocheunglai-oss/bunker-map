@@ -239,7 +239,7 @@ test("changed or missing upstream punches make their sync partial", async () => 
 
 test("invalid upstream records never reach the complete-window comparison", async () => {
   const fixture = syncFixture([{ id: "person-1", dingtalk_user_id: "ding-one" }], {
-    records: [{ userId: "ding-one", checkType: "rejected", userCheckTime: Date.now() }],
+    records: [{ userId: "ding-one", checkType: "rejected", userCheckTime: Date.parse("2026-10-14T01:00:00.000Z") }],
   })
   const result = await runAttendanceSync({
     now: new Date("2026-10-14T10:10:00.000Z"), ...fixture,

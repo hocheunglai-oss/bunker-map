@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 import ts from "typescript"
+import { emptyBcCalculator, normalizeBcCalculator, type BcCalculatorValues } from "../lib/bcCalculator"
 
 type Section = {
   title: string
@@ -12,6 +13,7 @@ type Section = {
   column_widths?: number[]
   table_row_updates?: string[]
   sections?: Section[]
+  bc_calculator?: BcCalculatorValues
 }
 type Summary = {
   sections: Section[]
@@ -31,7 +33,7 @@ const declarations = names.map((name) => {
   return declaration.getText(ast)
 })
 const compiled = ts.transpileModule(declarations.join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
-const { parseSummaryMeta, serializeSummaryMeta } = new Function(`${compiled}; return { parseSummaryMeta, serializeSummaryMeta }`)() as {
+const { parseSummaryMeta, serializeSummaryMeta } = new Function("normalizeBcCalculator", `${compiled}; return { parseSummaryMeta, serializeSummaryMeta }`)(normalizeBcCalculator) as {
   parseSummaryMeta: (value: string | null) => Summary
   serializeSummaryMeta: (sections: Section[], updates: Record<string, string>, blocks?: Summary["mainBlocks"], mainSections?: Section[]) => string
 }
@@ -72,6 +74,16 @@ test("Nested-tab and top-level tab tables preserve the same table metadata throu
     assert.deepEqual(section.table_row_updates, supplierTable.table_row_updates)
   }
   assert.deepEqual(roundTrip(loaded), loaded)
+})
+
+test("BC calculator inputs survive company summary saves and reloads", () => {
+  const calculator = emptyBcCalculator()
+  calculator.grades[0] = { quantity: "200", buy: "886", sell: "940" }
+  calculator.grades[1] = { quantity: "75", buy: "1200", sell: "1320" }
+  const loaded = roundTrip({ sections: [{ title: "BC CALCULATOR", info: "", bc_calculator: calculator }], mainLineUpdates: {}, mainBlocks: [], mainSections: [] })
+  assert.deepEqual(loaded.sections[0].bc_calculator, calculator)
+  loaded.mainSections.push({ title: "OTHER SECTION", info: "A note" })
+  assert.deepEqual(roundTrip(loaded).sections[0].bc_calculator, calculator)
 })
 
 test("Legacy array summaries retain nested tables and normalize notes without changing the old format behavior", () => {
