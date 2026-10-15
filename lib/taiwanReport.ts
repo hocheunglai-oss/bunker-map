@@ -42,7 +42,7 @@ const taiwanBasisPortFallbacks: Partial<Record<string, Partial<Record<FuelKey, s
 }
 
 export function getTaiwanBasisFormula(portName: string, fuel: FuelKey): string | null {
-  return taiwanBasisPortFallbacks[portName.toLowerCase()]?.[fuel] ?? null
+  return taiwanBasisPortFallbacks[portName.trim().toLowerCase()]?.[fuel] ?? null
 }
 
 function buildFuelSnapshot(today: number | null, last: number | null): FuelSnapshot {

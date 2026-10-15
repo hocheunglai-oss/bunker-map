@@ -4,6 +4,7 @@ import { requireAdminPagePermission } from "@/lib/adminAuth"
 import { validateOutlookContactFields, type OutlookContactFields } from "@/lib/outlookContactValidation"
 import { priceSetterLegacyWriteMessage } from "@/lib/priceSetterLegacyWrites"
 import { ccinfoLegacyContentWriteMessage } from "@/lib/ccinfoSave"
+import { outlookGroupCreateValidationMessage, outlookGroupLegacyWriteMessage } from "@/lib/outlookGroupWriteGuard"
 
 const PAGE_TABLES: Record<string, Set<string>> = {
   pricesetter: new Set(["ports", "price_history", "remarks"]),
@@ -38,6 +39,7 @@ const PAGE_AUDIT_CONTEXT: Record<string, { label: string; path: string }> = {
 }
 
 class OutlookContactValidationError extends Error {}
+class OutlookGroupValidationError extends Error {}
 
 function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : "Database action failed."
@@ -46,7 +48,7 @@ function errorResponse(error: unknown) {
       ? 401
       : message === "Forbidden"
         ? 403
-        : error instanceof OutlookContactValidationError || message.startsWith("Select an existing phonebook company:")
+        : error instanceof OutlookContactValidationError || error instanceof OutlookGroupValidationError || message.startsWith("Select an existing phonebook company:")
           ? 400
           : 500
   return NextResponse.json({ message }, { status })
@@ -140,6 +142,11 @@ async function proxyRequest(request: Request) {
 
     const session = await requireAdminPagePermission(pageId, isRead ? "view" : "edit")
 
+    const groupLegacyMessage = outlookGroupLegacyWriteMessage(table, request.method, request.headers.get("prefer"))
+    if (groupLegacyMessage) {
+      return NextResponse.json({ code: "REFRESH_REQUIRED", message: groupLegacyMessage }, { status: 409, headers: { "Cache-Control": "private, no-store" } })
+    }
+
     // Check after authorization and before forwarding a service-role request.
     // Old price tabs otherwise bypass the atomic save/settings/order endpoint.
     const legacyMessage = priceSetterLegacyWriteMessage(pageId, table, request.method)
@@ -181,6 +188,10 @@ async function proxyRequest(request: Request) {
     headers.set("apikey", serviceKey)
     headers.set("authorization", `Bearer ${serviceKey}`)
     const requestBody = isRead ? undefined : await request.arrayBuffer()
+    if (table === "shared_addressbook_groups" && request.method === "POST" && requestBody) {
+      const groupError = outlookGroupCreateValidationMessage(requestBody)
+      if (groupError) throw new OutlookGroupValidationError(groupError)
+    }
     const ccinfoMessage = ccinfoLegacyContentWriteMessage(pageId, table, request.method, target, request.headers.get("prefer"), requestBody)
     if (ccinfoMessage) {
       return NextResponse.json({ code: "REFRESH_REQUIRED", message: ccinfoMessage }, { status: 409, headers: { "Cache-Control": "private, no-store" } })

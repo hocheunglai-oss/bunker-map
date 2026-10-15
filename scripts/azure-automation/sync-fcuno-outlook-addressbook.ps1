@@ -18,7 +18,11 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-09-02.21"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-10-09.1"
+# Generated from config/fcunoConnections.ts; validate before Azure publication.
+$ExchangeNotificationAddressBookUrl = "https://fcuno.com/admin/outlookaddressbook"
+$script:ExchangeNotificationRunReceipts = @{}
+$script:ExchangeSyncStage = "startup"
 $script:ExchangeOnlineConnected = $false
 $script:ExchangeAddressBookDomain = ""
 $script:CanonicalExchangeRows = $null
@@ -79,6 +83,59 @@ function Import-ExchangeOnlineManagementModule {
       throw "Could not import ExchangeOnlineManagement. The runbook is using PowerShell $($PSVersionTable.PSVersion), so this script expects ExchangeOnlineManagement $requiredVersion. Import that exact module version into the Automation runtime, using PowerShell 7.6 with ExchangeOnlineManagement 3.10.1 for the current FCUNO worker. Also upload PowerShellGet and PackageManagement for ExchangeOnlineManagement 3.x in Azure Automation. Original error: $($_.Exception.Message)"
     }
     throw "Could not import ExchangeOnlineManagement. Import ExchangeOnlineManagement, PowerShellGet, and PackageManagement into the Automation account for this runtime. Original error: $($_.Exception.Message)"
+  }
+}
+
+function Test-ExchangeConnectionRetryableError($ErrorRecord) {
+  if (-not $ErrorRecord) { return $false }
+  # This startup failure can leave a partially formed connection. Do not extend
+  # it to arbitrary module, authentication, certificate or permission errors.
+  $message = Clean-Text $ErrorRecord.Exception.Message
+  if ($message -eq "Module could not be correctly formed. Please run Connect-ExchangeOnline again.") {
+    return $true
+  }
+  return (Test-ExchangeTemporaryServerError $ErrorRecord)
+}
+
+function Disconnect-ExchangeOnlineSafely {
+  try {
+    Disconnect-ExchangeOnline -Confirm:$false -ErrorAction Stop | Out-Null
+  } catch {
+    # Cleanup must never replace the original connection error or prevent the
+    # mutation lease from being released by the runbook's outer finally block.
+    Write-Warning ("Could not clean up the Exchange connection: {0}" -f $_.Exception.Message)
+  } finally {
+    $script:ExchangeOnlineConnected = $false
+  }
+}
+
+function Connect-ExchangeOnlineWithRetry(
+  $AppId,
+  $CertificateFilePath,
+  [securestring]$CertificatePassword,
+  $Organization,
+  [ValidateRange(1, 3)][int]$MaxAttempts = 3,
+  [ValidateRange(0, 30)][int]$RetryDelaySeconds = 5
+) {
+  $script:ExchangeOnlineConnected = $false
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
+    try {
+      # Retry only connection setup, never lock renewal or contact mutations.
+      # No partial command output may escape from an unsuccessful attempt.
+      Connect-ExchangeOnline -AppId $AppId -CertificateFilePath $CertificateFilePath -CertificatePassword $CertificatePassword -Organization $Organization -ShowBanner:$false -ErrorAction Stop | Out-Null
+    } catch {
+      $connectionError = $_
+      # Connect may have created a partial session even though it threw before
+      # setting ExchangeOnlineConnected. Clean up on the final failure too.
+      Disconnect-ExchangeOnlineSafely
+      if (-not (Test-ExchangeConnectionRetryableError $connectionError) -or $attempt -ge $MaxAttempts) { throw }
+      $delaySeconds = $RetryDelaySeconds * $attempt
+      Write-Warning ("Exchange connection attempt {0} of {1} had a temporary failure; retrying in {2}s before sending any failure notice: {3}" -f $attempt, $MaxAttempts, $delaySeconds, (Clean-Text $connectionError.Exception.Message))
+      if ($delaySeconds -gt 0) { Start-Sleep -Seconds $delaySeconds }
+      continue
+    }
+    $script:ExchangeOnlineConnected = $true
+    return
   }
 }
 
@@ -1834,10 +1891,30 @@ function Get-ExchangeSyncLockLeaseMinutes($SyncMode = $script:CurrentSyncMode) {
 
 function Acquire-ExchangeSyncLock($SyncMode) {
   if (-not $script:CurrentQueueRunId) { $script:CurrentQueueRunId = [Guid]::NewGuid().ToString() }
-  $result = Invoke-SupabaseRest -Method "POST" -Path "rpc/acquire_outlook_exchange_sync_lock" -Body @{
+  $body = @{
     p_run_id = $script:CurrentQueueRunId
     p_sync_mode = Clean-Text $SyncMode
     p_lease_minutes = Get-ExchangeSyncLockLeaseMinutes $SyncMode
+  }
+  # This exact RPC is idempotent for the same run ID, including a lost response
+  # after acquisition. Never replay arbitrary POSTs or Exchange contact writes.
+  for ($attempt = 1; $attempt -le 3; $attempt += 1) {
+    try {
+      $result = Invoke-SupabaseRest -Method "POST" -Path "rpc/acquire_outlook_exchange_sync_lock" -Body $body
+      break
+    } catch {
+      $statusCode = $null
+      if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+        $statusCode = [int]$_.Exception.Response.StatusCode
+      }
+      $retryable = $statusCode -in @(408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524) -or
+        $_.Exception -is [System.TimeoutException] -or
+        $_.Exception -is [System.Threading.Tasks.TaskCanceledException]
+      if (-not $retryable -or $attempt -ge 3) { throw }
+      $delaySeconds = 5 * $attempt
+      Write-Warning ("Exchange startup had a temporary connection failure; retrying lock acquisition in {0}s (attempt {1} of 3). No contact changes have started." -f $delaySeconds, $attempt)
+      Start-Sleep -Seconds $delaySeconds
+    }
   }
   if ($result -isnot [bool]) {
     throw "The Exchange sync lock acquisition RPC returned malformed confirmation instead of a native boolean."
@@ -5149,6 +5226,140 @@ function Get-SyncSummaryLabel($Key) {
   }
 }
 
+function Get-ExchangeSyncEmailAffectedNames($Details) {
+  $candidates = New-Object System.Collections.ArrayList
+  $providedNames = Get-DetailValue $Details "notificationAffectedNames"
+  if (Has-MapKey $Details "notificationAffectedNames") {
+    foreach ($name in @($providedNames)) { [void]$candidates.Add($name) }
+  } else {
+    foreach ($change in @(Get-DetailValue $Details "changeDetails")) {
+      if ($null -eq $change) { continue }
+      $changeStatus = (Clean-Text (Get-DetailValue $change "status")).ToLowerInvariant()
+      $entityType = (Clean-Text (Get-DetailValue $change "entityType")).ToLowerInvariant()
+      if ($changeStatus -notin @("failed", "pending", "processing", "skipped")) { continue }
+      if ($entityType -notin @("contact", "group")) { continue }
+      if ((Get-DetailValue $change "supersededByQueueRowId") -or
+          (Get-DetailValue $change "supersededByFullRunId")) { continue }
+      [void]$candidates.Add((Get-DetailValue $change "displayName"))
+    }
+  }
+
+  $names = New-Object System.Collections.ArrayList
+  $seen = @{}
+  $hasMore = $false
+  foreach ($value in @($candidates)) {
+    if ($value -isnot [string]) { continue }
+    $name = Clean-Text ($value -replace "[\x00-\x1F\x7F]", " ")
+    if (-not $name -or $name -in @("Unknown item", "Unknown contact", "Unknown group")) { continue }
+    # Never substitute diagnostic identifiers for a human-readable name.
+    if ($name -match "(?i)(FCUNO_(?:CONTACT|GROUP):|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})" -or
+        $name -match "^[0-9a-fA-F]{64}$") { continue }
+    if ($seen.ContainsKey($name)) { continue }
+    $seen[$name] = $true
+    if ($names.Count -ge 3) { $hasMore = $true; break }
+    $textElements = [System.Globalization.StringInfo]::new($name)
+    if ($textElements.LengthInTextElements -gt 80) {
+      $name = $textElements.SubstringByTextElements(0, 77) + "..."
+    }
+    [void]$names.Add($name)
+  }
+  return [pscustomobject]@{ Names = @($names); HasMore = $hasMore }
+}
+
+function Get-ExchangeSyncEmailContent($Status, $Message, $Details, $WebhookPayload) {
+  # Raw exceptions, transport metadata and audit evidence belong in the stored
+  # sync record, not in a team email. Only these deliberately written summaries
+  # and a small set of actual affected names are eligible for this rendering.
+  $addressBookUrl = Clean-Text (Get-DetailValue $Details "notificationAddressBookUrl")
+  $linkUri = $null
+  if (-not [Uri]::TryCreate($addressBookUrl, [UriKind]::Absolute, [ref]$linkUri) -or
+      $linkUri.Scheme -ne "https" -or $linkUri.UserInfo -or $linkUri.Query -or
+      $linkUri.Fragment -or $linkUri.AbsolutePath -ne "/admin/outlookaddressbook") {
+    throw "A verified FC Uno address book URL is required to prepare the notification."
+  }
+
+  $issueKind = (Clean-Text (Get-DetailValue $Details "notificationIssueKind")).ToLowerInvariant()
+  $isCompleted = (Clean-Text $Status).ToLowerInvariant() -eq "completed"
+  $hasOutstandingItems = ([int](Get-DetailValue $Details "failedQueueRows") -gt 0 -or
+    [int](Get-DetailValue $Details "backlogRows") -gt 0 -or
+    [int](Get-DetailValue $Details "invalidContacts") -gt 0)
+  $subject = "FC Uno address book - needs attention"
+  $title = "Address book needs attention"
+  $summary = "FC Uno could not complete the address book update."
+  $action = "Please ask your FC Uno administrator to check the sync."
+  $showAffectedNames = $true
+
+  switch ($issueKind) {
+    "contact_correction" {
+      $summary = "Some contact or group details could not be updated in Outlook."
+      $action = "Please review the affected entries in the address book and correct their details. If they look correct, ask your FC Uno administrator for help."
+    }
+    "sync_delayed" {
+      $subject = "FC Uno address book - updates delayed"
+      $title = "Address book updates delayed"
+      $summary = "Address book updates are taking longer than expected."
+      $action = "Please ask your FC Uno administrator to check the delay."
+    }
+    "service_access" {
+      $summary = "FC Uno cannot currently connect to Outlook to update the address book."
+      $action = "Please ask your FC Uno administrator to restore the connection."
+    }
+    "verification" {
+      $summary = "FC Uno could not complete its address book check."
+      $action = "Please ask your FC Uno administrator to review the latest sync."
+    }
+    "recovery" {
+      if ($isCompleted -and -not $hasOutstandingItems) {
+        $subject = "FC Uno address book - working again"
+        $title = "Address book sync restored"
+        $summary = "Address book syncing is working again."
+        $action = "No action is needed."
+        $showAffectedNames = $false
+      }
+    }
+    default {
+      if (-not $issueKind -and $isCompleted -and -not $hasOutstandingItems) {
+        $subject = "FC Uno address book - updated"
+        $title = "Address book updated"
+        $summary = "The address book sync completed."
+        $action = "No action is needed."
+        $showAffectedNames = $false
+      }
+    }
+  }
+
+  $affectedHtml = ""
+  $affectedText = ""
+  if ($showAffectedNames) {
+    $affected = Get-ExchangeSyncEmailAffectedNames $Details
+    if (@($affected.Names).Count -gt 0) {
+      $nameItems = @($affected.Names | ForEach-Object { "<li style='margin:4px 0;'>$(Escape-Html $_)</li>" }) -join ""
+      $affectedHtml = "<p style='margin:20px 0 6px;font-weight:600;'>Affected entries</p><ul style='margin:0;padding-left:20px;'>$nameItems</ul>"
+      $affectedText = "Affected entries: " + ($affected.Names -join "; ") + "."
+      if ($affected.HasMore) {
+        $affectedHtml += "<p style='margin:8px 0 0;color:#59636e;'>See the address book for the remaining entries.</p>"
+        $affectedText += " See the address book for the remaining entries."
+      }
+    }
+  }
+
+  $html = @"
+<div style="margin:0;padding:24px;font-family:Arial,sans-serif;color:#17212b;line-height:1.6;background:#ffffff;">
+  <div style="max-width:560px;margin:0 auto;">
+    <p style="margin:0 0 16px;color:#59636e;font-size:12px;">FC UNO</p>
+    <h1 style="margin:0 0 16px;font-size:22px;line-height:1.3;">$(Escape-Html $title)</h1>
+    <p style="margin:0 0 12px;">$(Escape-Html $summary)</p>
+    <p style="margin:0;">$(Escape-Html $action)</p>
+    $affectedHtml
+    <p style="margin:24px 0 0;"><a href="$(Escape-Html $addressBookUrl)" style="color:#0066cc;">Open Outlook Address Book</a></p>
+  </div>
+</div>
+"@
+  $text = (@($title, $summary, $action, $affectedText, "Open Outlook Address Book: $addressBookUrl") |
+    Where-Object { $_ }) -join "`n`n"
+  return [pscustomobject]@{ Subject = $subject; Html = $html; Text = $text }
+}
+
 function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayload) {
   $Details = Get-StatsObject $Details
   $recipients = Get-NotificationRecipients $WebhookPayload
@@ -5164,304 +5375,9 @@ function Send-ExchangeSyncNotification($Status, $Message, $Details, $WebhookPayl
   }
 
   $from = Get-NoticeEmailFrom
-
-  $requestedBy = Clean-Text $WebhookPayload.requestedBy
-  if (-not $requestedBy) { $requestedBy = "Admin" }
-  $startedAt = Format-HongKongTime $WebhookPayload.requestedAt
-
-  $queuedValue = Get-DetailValue $Details "queuedRows"
-  $hasQueueStats = $null -ne $queuedValue
-  $queuedRows = if ($hasQueueStats) { [int]$queuedValue } else { 0 }
-  $completedRows = [int](Get-DetailValue $Details "completedQueueRows")
-  $failedRows = [int](Get-DetailValue $Details "failedQueueRows")
-  $backlogRows = [int](Get-DetailValue $Details "backlogRows")
-  $retryableBacklogRows = [int](Get-DetailValue $Details "retryableBacklogRows")
-  $terminalBacklogRows = [int](Get-DetailValue $Details "terminalBacklogRows")
-  $activeBacklogRows = [int](Get-DetailValue $Details "activeBacklogRows")
-  $skippedRows = [int](Get-DetailValue $Details "skippedQueueRows")
-  $supersededRows = [int](Get-DetailValue $Details "supersededQueueRows")
-  $resolvedTerminalRows = [int](Get-DetailValue $Details "resolvedTerminalQueueRows")
-  $actionableSkippedRows = [Math]::Max(0, $skippedRows - $supersededRows - $resolvedTerminalRows)
-  $statusText = "Completed"
-  $statusColor = "#166534"
-  $statusBackground = "#dcfce7"
-  $statusBorder = "#86efac"
-  if ($Status -ne "completed" -or $failedRows -gt 0) {
-    $statusText = "Failed"
-    $statusColor = "#991b1b"
-    $statusBackground = "#fee2e2"
-    $statusBorder = "#fca5a5"
-  } elseif ($actionableSkippedRows -gt 0) {
-    $statusText = "Completed with skipped changes"
-    $statusColor = "#854d0e"
-    $statusBackground = "#fef9c3"
-    $statusBorder = "#fde047"
-  }
-
-  $changeRows = ""
-  $changeDetails = Get-DetailValue $Details "changeDetails"
-  $changeIndex = 0
-  $maxChangeRows = 200
-  foreach ($change in @($changeDetails)) {
-    if ($null -eq $change -or $changeIndex -ge $maxChangeRows) { continue }
-
-    $changeStatus = (Clean-Text (Get-DetailValue $change "status")).ToLowerInvariant()
-    $changeStatusText = "Completed"
-    $changeStatusColor = "#166534"
-    $changeStatusBackground = "#dcfce7"
-    $rowBackground = "#ffffff"
-    if ($changeStatus -eq "failed") {
-      $changeStatusText = "Failed"
-      $changeStatusColor = "#991b1b"
-      $changeStatusBackground = "#fee2e2"
-      $rowBackground = "#fff7f7"
-    } elseif ($changeStatus -eq "pending") {
-      $changeStatusText = "Pending"
-      $changeStatusColor = "#854d0e"
-      $changeStatusBackground = "#fef9c3"
-      $rowBackground = "#fffdf2"
-    } elseif ($changeStatus -eq "processing") {
-      $changeStatusText = "Processing"
-      $changeStatusColor = "#1e40af"
-      $changeStatusBackground = "#dbeafe"
-      $rowBackground = "#eff6ff"
-    } elseif ($changeStatus -eq "skipped") {
-      $changeStatusText = "Skipped"
-      $changeStatusColor = "#854d0e"
-      $changeStatusBackground = "#fef9c3"
-      $rowBackground = "#fffdf2"
-    } elseif ($changeStatus -eq "superseded") {
-      $changeStatusText = "Resolved"
-      $changeStatusColor = "#1e40af"
-      $changeStatusBackground = "#dbeafe"
-      $rowBackground = "#eff6ff"
-    }
-
-    $actionLabel = Clean-Text (Get-DetailValue $change "actionLabel")
-    if (-not $actionLabel) { $actionLabel = Get-QueueActionLabel (Get-DetailValue $change "action") }
-    $entityType = Clean-Text (Get-DetailValue $change "entityType")
-    $displayName = Clean-Text (Get-DetailValue $change "displayName")
-    if (-not $displayName) { $displayName = "Unknown item" }
-    $identifier = Clean-Text (Get-DetailValue $change "identifier")
-    $result = Clean-Text (Get-DetailValue $change "result")
-    if (-not $result) { $result = "No result detail was recorded." }
-    $queueRowId = Clean-Text (Get-DetailValue $change "queueRowId")
-    $eventId = Clean-Text (Get-DetailValue $change "eventId")
-    $auditLogIds = @(Get-DetailValue $change "auditLogIds" | ForEach-Object { Clean-Text $_ } | Where-Object { $_ })
-    $changeSetIds = @(Get-DetailValue $change "changeSetIds" | ForEach-Object { Clean-Text $_ } | Where-Object { $_ })
-    $actorId = Clean-Text (Get-DetailValue $change "actorId")
-    $rowRequestedBy = Clean-Text (Get-DetailValue $change "requestedBy")
-    $rowQueuedAt = Clean-Text (Get-DetailValue $change "queuedAt")
-    $rowAttempt = [int](Get-DetailValue $change "attempt")
-    $queueStatus = Clean-Text (Get-DetailValue $change "queueStatus")
-    $retryState = Clean-Text (Get-DetailValue $change "retryState")
-    $nextRetryAt = Clean-Text (Get-DetailValue $change "nextRetryAt")
-    $runId = Clean-Text (Get-DetailValue $change "runId")
-    $stableId = Clean-Text (Get-DetailValue $change "stableId")
-    $exchangeIdentity = Clean-Text (Get-DetailValue $change "exchangeIdentity")
-    $supersededByQueueRowId = Clean-Text (Get-DetailValue $change "supersededByQueueRowId")
-    $supersededByRunId = Clean-Text (Get-DetailValue $change "supersededByRunId")
-    $supersededByFullRunId = Clean-Text (Get-DetailValue $change "supersededByFullRunId")
-
-    $identifierHtml = ""
-    if ($identifier) {
-      $identifierHtml = "<div style='margin-top:3px;color:#475569;font-size:12px;'>$(Escape-Html $identifier)</div>"
-    }
-    $fieldChangesHtml = ""
-    $fieldChanges = @(Get-DetailValue $change "fieldChanges")
-    if ($fieldChanges.Count -gt 0) {
-      $fieldItems = @($fieldChanges | ForEach-Object { "<li style='margin:2px 0;'>$(Escape-Html $_)</li>" }) -join ""
-      $fieldChangesHtml = "<div style='margin-top:7px;color:#334155;font-size:11px;font-weight:800;'>Exact change</div><ul style='margin:3px 0 0 17px;padding:0;color:#475569;font-size:11px;'>$fieldItems</ul>"
-    }
-    $errorHistoryHtml = ""
-    $errorHistory = @(Get-DetailValue $change "errorHistory" | Where-Object { $null -ne $_ })
-    if ($errorHistory.Count -gt 0) {
-      $historyItems = @($errorHistory | ForEach-Object {
-        $historyJson = $_ | ConvertTo-Json -Depth 8 -Compress
-        "<li style='margin:3px 0;word-break:break-word;'><code>$(Escape-Html $historyJson)</code></li>"
-      }) -join ""
-      $errorHistoryHtml = "<div style='margin-top:7px;color:#334155;font-size:11px;font-weight:800;'>Durable queue error history</div><ul style='margin:3px 0 0 17px;padding:0;color:#475569;font-size:10px;'>$historyItems</ul>"
-    }
-    $queueMetadata = @()
-    if ($rowRequestedBy) { $queueMetadata += "Requested by $(Escape-Html $rowRequestedBy)" }
-    if ($actorId -and $actorId -ne $rowRequestedBy) { $queueMetadata += "Actor $(Escape-Html $actorId)" }
-    if ($rowQueuedAt) { $queueMetadata += "Queued $(Escape-Html $rowQueuedAt)" }
-    if ($rowAttempt -gt 0) { $queueMetadata += "Attempt $(Escape-Html $rowAttempt)" }
-    elseif ($queueStatus -eq "pending") { $queueMetadata += "Not attempted" }
-    if ($queueStatus) { $queueMetadata += "Queue status $(Escape-Html $queueStatus)" }
-    if ($nextRetryAt) { $queueMetadata += "Next retry $(Escape-Html $nextRetryAt)" }
-    if ($runId) { $queueMetadata += "Run $(Escape-Html $runId)" }
-    if ($retryState) { $queueMetadata += "Retry state $(Escape-Html $retryState)" }
-    if ($stableId) { $queueMetadata += "FCUNO stable ID $(Escape-Html $stableId)" }
-    if ($exchangeIdentity) { $queueMetadata += "Exchange identity $(Escape-Html $exchangeIdentity)" }
-    if ($eventId) { $queueMetadata += "Event $(Escape-Html $eventId)" }
-    if ($auditLogIds.Count -gt 0) { $queueMetadata += "Audit log$(if ($auditLogIds.Count -gt 1) { 's' } else { '' }) $(Escape-Html (($auditLogIds | Select-Object -First 5) -join ', '))" }
-    if ($changeSetIds.Count -gt 0) { $queueMetadata += "Change set$(if ($changeSetIds.Count -gt 1) { 's' } else { '' }) $(Escape-Html (($changeSetIds | Select-Object -First 5) -join ', '))" }
-    if ($supersededByQueueRowId) { $queueMetadata += "Superseded by queue row $(Escape-Html $supersededByQueueRowId)" }
-    if ($supersededByRunId) { $queueMetadata += "Superseding run $(Escape-Html $supersededByRunId)" }
-    if ($supersededByFullRunId) { $queueMetadata += "Superseding full run $(Escape-Html $supersededByFullRunId)" }
-    if ($queueRowId) { $queueMetadata += "Queue row $(Escape-Html $queueRowId)" }
-    $queueRowHtml = ""
-    if ($queueMetadata.Count -gt 0) {
-      $queueRowHtml = "<div style='margin-top:5px;color:#94a3b8;font-size:10px;'>$($queueMetadata -join ' &middot; ')</div>"
-    }
-
-    $changeRows += @"
-<tr style="background:$rowBackground;">
-  <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;white-space:nowrap;"><span style="display:inline-block;padding:3px 8px;border-radius:999px;background:$changeStatusBackground;color:$changeStatusColor;font-size:11px;font-weight:800;">$(Escape-Html $changeStatusText)</span></td>
-  <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;font-weight:700;">$(Escape-Html $actionLabel)</td>
-  <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;"><div style="font-weight:700;">$(Escape-Html $displayName)</div><div style="margin-top:2px;color:#64748b;font-size:11px;">$(Escape-Html $entityType)</div>$identifierHtml$fieldChangesHtml</td>
-  <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;">$(Escape-Html $result)$errorHistoryHtml$queueRowHtml</td>
-</tr>
-"@
-    $changeIndex += 1
-  }
-
-  $changeCount = @($changeDetails).Count
-  $changeResultsTitle = $(if ($backlogRows -gt 0) { "Queue change and backlog results" } elseif (-not $hasQueueStats) { "Full reconciliation results" } else { "Change results" })
-  if (-not $changeRows) {
-    $fallbackAction = if ($backlogRows -gt 0) { "Queue backlog" } elseif ($hasQueueStats) { "Incremental sync" } else { "Full sync" }
-    $fallbackItem = if ($backlogRows -gt 0) { "$backlogRows unresolved queue change(s)" } elseif ($hasQueueStats -and $queuedRows -le 0) { "No pending changes" } elseif (-not $hasQueueStats -and $Status -eq "completed") { "No Exchange mutations required" } else { "Address book sync" }
-    $fallbackResult = if (-not $hasQueueStats -and $Status -eq "completed") { "All eligible FCUNO contacts, groups, profiles, and memberships already matched Exchange and final certification completed without mutation." } else { $Message }
-    $fallbackStatus = if ($Status -eq "completed") { "Completed" } else { "Failed" }
-    $fallbackStatusColor = if ($Status -eq "completed") { "#166534" } else { "#991b1b" }
-    $fallbackStatusBackground = if ($Status -eq "completed") { "#dcfce7" } else { "#fee2e2" }
-    $changeRows = @"
-<tr>
-  <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;"><span style="display:inline-block;padding:3px 8px;border-radius:999px;background:$fallbackStatusBackground;color:$fallbackStatusColor;font-size:11px;font-weight:800;">$(Escape-Html $fallbackStatus)</span></td>
-  <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;font-weight:700;">$(Escape-Html $fallbackAction)</td>
-  <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;font-weight:700;">$(Escape-Html $fallbackItem)</td>
-  <td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;">$(Escape-Html $fallbackResult)</td>
-</tr>
-"@
-  } elseif ($changeCount -gt $changeIndex) {
-    $remainingChanges = $changeCount - $changeIndex
-    $changeRows += "<tr><td colspan='4' style='padding:10px 8px;color:#64748b;background:#f8fafc;'>$(Escape-Html "$remainingChanges additional result(s) were omitted from this email.")</td></tr>"
-  }
-
-  $detailsRows = ""
-  if ($Details) {
-    foreach ($key in @("runId", "syncMode", "queuedRows", "processedQueueRows", "completedQueueRows", "failedQueueRows", "backlogRows", "retryableBacklogRows", "terminalBacklogRows", "activeBacklogRows", "skippedQueueRows", "supersededQueueRows", "resolvedTerminalQueueRows", "verifiedQueueRows", "fullCertificationCommitted", "fullCertificationIdempotent", "fullCertificationAt", "templateRecipientTruthReconciled", "templateRecipientTruthIdempotent", "templateRecipientTruthUpdatedTemplates", "templateRecipientTruthTotalTemplates", "templateRecipientTruthSendableTemplates", "templateRecipientTruthMissingTemplates", "templateRecipientTruthAmbiguousTemplates", "truthEvidenceRecorded", "truthEvidenceLedgerSequence", "truthEvidenceLedgerHash", "sourceSnapshotHash", "rawSourceSnapshotHash", "truthWorkerVersion", "truthLedgerCheckpointVerified", "truthLedgerHeadSequence", "truthLedgerHeadHash", "truthLedgerHeadPreviousHash", "truthLedgerHeadEventType", "truthLedgerHeadRunId", "truthLedgerEntries", "truthSnapshots", "truthCheckpointPendingQueueRows", "truthCheckpointProcessingQueueRows", "truthCheckpointFailedQueueRows", "truthCheckpointTerminalFailedQueueRows", "currentProjectionCertified", "latestCertificationRunId", "latestCertificationAt", "latestSourceFingerprint", "latestCertificationHasProjectionEvidence", "latestProjectionSnapshotHash", "contacts", "groups", "groupMembers", "invalidContacts", "createdContacts", "updatedContacts", "removedContacts", "preservedInvalidContacts", "skippedInvalidContacts", "createdGroups", "updatedGroups", "removedGroups", "addedMembers", "removedMembers", "notificationDeliveryStatus", "notificationDeliveryAttempted", "notificationDelivered", "notificationRecipientCount", "notificationDeliveredAt", "notificationError")) {
-      $detailValue = Get-DetailValue $Details $key
-      if ($null -ne $detailValue) {
-        $detailsRows += "<tr><td style='padding:6px 12px 6px 0;color:#475569;border-bottom:1px solid #f1f5f9;'>$(Escape-Html (Get-SyncSummaryLabel $key))</td><td style='padding:6px 0;font-weight:700;border-bottom:1px solid #f1f5f9;text-align:right;word-break:break-all;'>$(Escape-Html $detailValue)</td></tr>"
-      }
-    }
-  }
-  if (-not $detailsRows) {
-    $detailsRows = "<tr><td style='padding:4px 0;color:#475569;'>No count details available.</td></tr>"
-  }
-
-  $truthAnchorHtml = ""
-  if ([bool](Get-DetailValue $Details "truthLedgerCheckpointVerified")) {
-    $truthLedgerSequence = Clean-Text (Get-DetailValue $Details "truthLedgerHeadSequence")
-    $truthLedgerHash = Clean-Text (Get-DetailValue $Details "truthLedgerHeadHash")
-    $projectionHash = Clean-Text (Get-DetailValue $Details "sourceSnapshotHash")
-    $projectionLine = ""
-    if ($projectionHash) {
-      $projectionLine = "<div style='margin-top:4px;word-break:break-all;'><strong>Certified FCUNO-to-Exchange projection:</strong> <code>$(Escape-Html $projectionHash)</code></div>"
-    }
-    $anchorBorder = "#bfdbfe"
-    $anchorBackground = "#eff6ff"
-    $anchorColor = "#1e40af"
-    $anchorTitle = "Immutable audit checkpoint recorded."
-    $anchorMeaning = "This proves the latest ledger checkpoint is internally linked and hash-valid; it does not mean every queued change succeeded."
-    if ([bool](Get-DetailValue $Details "currentProjectionCertified")) {
-      $anchorBorder = "#86efac"
-      $anchorBackground = "#f0fdf4"
-      $anchorColor = "#14532d"
-      $anchorTitle = "Current source-of-truth projection certified."
-      $anchorMeaning = "FCUNO is authoritative, and this full run verified Exchange against the exact canonical projection identified below."
-    }
-    $truthAnchorHtml = @"
-<div style="margin:16px 0 0;padding:12px 14px;border:1px solid $anchorBorder;border-radius:10px;background:$anchorBackground;color:$anchorColor;font-size:11px;">
-  <strong>$(Escape-Html $anchorTitle)</strong> $(Escape-Html $anchorMeaning)
-  <div style="margin-top:6px;"><strong>Ledger checkpoint:</strong> sequence $(Escape-Html $truthLedgerSequence)</div>
-  <div style="margin-top:4px;word-break:break-all;"><strong>Checkpoint SHA-256:</strong> <code>$(Escape-Html $truthLedgerHash)</code></div>
-  $projectionLine
-</div>
-"@
-  }
-
-  $metricsHtml = ""
-  if ($hasQueueStats) {
-    $metricsHtml = @"
-<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px 0;margin:16px -8px 0;">
-  <tr>
-    <td style="width:25%;padding:10px;border:1px solid #bfdbfe;border-radius:10px;background:#eff6ff;"><div style="color:#1e40af;font-size:11px;font-weight:800;text-transform:uppercase;">Processed</div><div style="margin-top:3px;color:#1e3a8a;font-size:22px;font-weight:900;">$(Escape-Html ([int](Get-DetailValue $Details "processedQueueRows")))</div></td>
-    <td style="width:25%;padding:10px;border:1px solid #86efac;border-radius:10px;background:#f0fdf4;"><div style="color:#166534;font-size:11px;font-weight:800;text-transform:uppercase;">Completed</div><div style="margin-top:3px;color:#14532d;font-size:22px;font-weight:900;">$(Escape-Html $completedRows)</div></td>
-    <td style="width:25%;padding:10px;border:1px solid #fca5a5;border-radius:10px;background:#fff7f7;"><div style="color:#991b1b;font-size:11px;font-weight:800;text-transform:uppercase;">Failed</div><div style="margin-top:3px;color:#7f1d1d;font-size:22px;font-weight:900;">$(Escape-Html $failedRows)</div></td>
-    <td style="width:25%;padding:10px;border:1px solid #fde047;border-radius:10px;background:#fffdf2;"><div style="color:#854d0e;font-size:11px;font-weight:800;text-transform:uppercase;">Skipped</div><div style="margin-top:3px;color:#713f12;font-size:22px;font-weight:900;">$(Escape-Html $actionableSkippedRows)</div></td>
-  </tr>
-</table>
-"@
-  }
-
-  $followUpHtml = ""
-  if ($failedRows -gt 0 -or $backlogRows -gt 0 -or $Status -ne "completed") {
-    $followUpText = "Review each error below."
-    if ($retryableBacklogRows -gt 0) { $followUpText += " $retryableBacklogRows backlog change(s) remain automatically retryable as shown." }
-    if ($terminalBacklogRows -gt 0) { $followUpText += " $terminalBacklogRows backlog change(s) are terminal and will not retry automatically; correct the cause and requeue them manually." }
-    if ($activeBacklogRows -gt 0) { $followUpText += " $activeBacklogRows backlog change(s) are still processing under an active lease." }
-    if ($backlogRows -le 0) { $followUpText += " Retryable failures show their next run time; terminal validation or retry-limit failures require correction in FCUNO or Exchange." }
-    $followUpHtml = "<div style='margin:16px 0 0;padding:12px 14px;border:1px solid #fdba74;border-radius:10px;background:#fff7ed;color:#9a3412;'><strong>Action required:</strong> $(Escape-Html $followUpText)</div>"
-  } elseif ($actionableSkippedRows -gt 0) {
-    $followUpHtml = "<div style='margin:16px 0 0;padding:12px 14px;border:1px solid #fde047;border-radius:10px;background:#fefce8;color:#854d0e;'><strong>Note:</strong> Skipped changes made no Exchange update. Each skipped reason is shown below.</div>"
-  } elseif ($resolvedTerminalRows -gt 0) {
-    $followUpHtml = "<div style='margin:16px 0 0;padding:12px 14px;border:1px solid #bfdbfe;border-radius:10px;background:#eff6ff;color:#1e40af;'><strong>Resolved:</strong> $resolvedTerminalRows terminal queue failure(s) were superseded only after later Exchange-verified processing of the current FCUNO state or source-fenced full certification. Their exact prior errors and durable histories are listed below.</div>"
-  } elseif ($supersededRows -gt 0) {
-    $followUpHtml = "<div style='margin:16px 0 0;padding:12px 14px;border:1px solid #bfdbfe;border-radius:10px;background:#eff6ff;color:#1e40af;'><strong>Note:</strong> $supersededRows earlier save(s) were safely superseded by the final value and are not listed as separate changes below.</div>"
-  }
-
-  $html = @"
-<div style="margin:0;padding:20px;background:#f1f5f9;font-family:Roboto,Arial,sans-serif;color:#0f172a;line-height:1.45;">
-  <div style="max-width:920px;margin:0 auto;border:1px solid #cbd5e1;border-radius:14px;background:#ffffff;overflow:hidden;">
-    <div style="padding:20px 22px;background:#0f172a;color:#ffffff;">
-      <div style="font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#cbd5e1;">FC Uno Exchange</div>
-      <h2 style="margin:5px 0 0;font-size:22px;">Address book sync</h2>
-    </div>
-    <div style="padding:20px 22px;">
-      <span style="display:inline-block;padding:5px 10px;border:1px solid $statusBorder;border-radius:999px;background:$statusBackground;color:$statusColor;font-size:12px;font-weight:900;">$(Escape-Html $statusText)</span>
-      <p style="margin:12px 0 0;font-size:14px;">$(Escape-Html $Message)</p>
-      <table role="presentation" style="margin-top:12px;border-collapse:collapse;font-size:12px;color:#475569;">
-        <tr><td style="padding:2px 12px 2px 0;font-weight:700;">Requested by</td><td style="padding:2px 0;">$(Escape-Html $requestedBy)</td></tr>
-        <tr><td style="padding:2px 12px 2px 0;font-weight:700;">Requested at</td><td style="padding:2px 0;">$(Escape-Html $startedAt)</td></tr>
-      </table>
-      $metricsHtml
-      $truthAnchorHtml
-      $followUpHtml
-
-      <h3 style="margin:22px 0 8px;font-size:16px;">$(Escape-Html $changeResultsTitle)</h3>
-      <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;border:1px solid #cbd5e1;font-size:12px;">
-          <thead>
-            <tr style="background:#e2e8f0;color:#334155;text-align:left;">
-              <th style="padding:9px 8px;border-bottom:1px solid #cbd5e1;">Status</th>
-              <th style="padding:9px 8px;border-bottom:1px solid #cbd5e1;">Requested change</th>
-              <th style="padding:9px 8px;border-bottom:1px solid #cbd5e1;">Item</th>
-              <th style="padding:9px 8px;border-bottom:1px solid #cbd5e1;">Exchange result</th>
-            </tr>
-          </thead>
-          <tbody>$changeRows</tbody>
-        </table>
-      </div>
-
-      <h3 style="margin:22px 0 8px;font-size:16px;">Summary</h3>
-      <table style="width:100%;max-width:460px;border-collapse:collapse;font-size:12px;">$detailsRows</table>
-      <p style="margin:18px 0 0;color:#94a3b8;font-size:10px;">Sync result statuses and Exchange verification details are recorded for audit and troubleshooting.</p>
-    </div>
-  </div>
-</div>
-"@
-
+  $content = Get-ExchangeSyncEmailContent $Status $Message $Details $WebhookPayload
   try {
-    $subject = "Exchange address book sync: $statusText"
-    if ($hasQueueStats) {
-      $subject += " - $completedRows completed, $failedRows failed, $actionableSkippedRows skipped"
-      if ($resolvedTerminalRows -gt 0) { $subject += ", $resolvedTerminalRows terminal resolved" }
-      if ($backlogRows -gt 0) { $subject += ", $backlogRows backlog ($retryableBacklogRows retryable, $terminalBacklogRows terminal, $activeBacklogRows processing)" }
-    }
-    Send-ExchangeSmtpMail $from @($recipients) $subject $html | Out-Null
+    Send-ExchangeSmtpMail $from @($recipients) $content.Subject $content.Html | Out-Null
     return [pscustomobject]@{
       Status = "delivered"
       Attempted = $true
@@ -5555,6 +5471,192 @@ function Set-ExchangeNotificationDeliveryStats([hashtable]$Details, $Delivery) {
   $Details["notificationError"] = Clean-Text (Get-DetailValue $Delivery "Error")
 }
 
+function Get-ExchangeAlertIncidents($Status, $Message, $Details, [string]$Scope) {
+  $incidents = @{}
+  # Historical per-change failures may have been repaired later in the same
+  # job. A final verified, empty backlog supersedes those historical details.
+  if ((Clean-Text $Status) -eq "completed" -and
+      (Get-DetailValue $Details "truthLedgerCheckpointVerified") -eq $true -and
+      [int](Get-DetailValue $Details "backlogRows") -eq 0 -and
+      [int](Get-DetailValue $Details "failedQueueRows") -eq 0) { return @() }
+  foreach ($change in @(Get-DetailValue $Details "changeDetails")) {
+    if (-not $change) { continue }
+    $queueStatus = (Clean-Text (Get-DetailValue $change "queueStatus")).ToLowerInvariant()
+    $statusText = (Clean-Text (Get-DetailValue $change "status")).ToLowerInvariant()
+    if ($queueStatus -in @("completed", "superseded", "resolved") -or
+        (Get-DetailValue $change "supersededByQueueRowId") -or
+        (Get-DetailValue $change "supersededByFullRunId")) { continue }
+    if ($statusText -notin @("failed", "pending", "processing", "skipped") -and
+        $queueStatus -notin @("failed", "pending", "processing")) { continue }
+    # Skipped historical/superseded details are evidence, not new incidents.
+    if ($statusText -eq "skipped" -and $queueStatus -notin @("failed", "pending", "processing")) { continue }
+
+    $terminal = (Get-DetailValue $change "terminal") -eq $true
+    $retryable = (Get-DetailValue $change "retryable") -eq $true
+    # Retry exhaustion is not proof of bad contact details. Use neutral admin
+    # review advice rather than asking staff to edit a potentially valid entry.
+    $kind = if ($terminal) { "sync_issue" } elseif ($Scope -eq "full") { "verification" } else { "sync_delayed" }
+    $immediate = $terminal -or ($Scope -eq "full" -and -not $retryable)
+    $identity = Clean-Text (Get-DetailValue $change "queueRowId")
+    $entityType = (Clean-Text (Get-DetailValue $change "entityType")).ToLowerInvariant()
+    if (-not $identity -and $entityType -notin @("contact", "group")) {
+      # Full-run operational identifiers include advancing queue positions;
+      # use the stable operation label, not those per-run diagnostics.
+      $identity = Clean-Text (Get-DetailValue $change "displayName")
+    }
+    if (-not $identity) { $identity = Clean-Text (Get-DetailValue $change "identifier") }
+    if (-not $identity) { $identity = Clean-Text (Get-DetailValue $change "displayName") }
+    if (-not $identity) { $identity = "unidentified" }
+    # Do not include attempts, timestamps, run IDs or changing raw exceptions:
+    # the same unresolved contact must not become a 'new' incident each hour.
+    $key = Get-Sha256Hex "$Scope|$kind|$identity"
+    $name = if ($entityType -in @("contact", "group")) { Clean-Text (Get-DetailValue $change "displayName") } else { "" }
+    $incidents[$key] = [pscustomobject]@{ key = $key; kind = $kind; immediate = [bool]$immediate; name = $name }
+  }
+
+  $failed = (Clean-Text $Status).ToLowerInvariant() -ne "completed" -or
+    [int](Get-DetailValue $Details "failedQueueRows") -gt 0 -or
+    [int](Get-DetailValue $Details "backlogRows") -gt 0
+  $terminalCount = [int](Get-DetailValue $Details "terminalBacklogRows")
+  if ($terminalCount -gt @($incidents.Values | Where-Object { $_.kind -eq "sync_issue" -and $_.immediate }).Count) {
+    $key = Get-Sha256Hex "$Scope|sync_issue|unlisted"
+    $incidents[$key] = [pscustomobject]@{ key = $key; kind = "sync_issue"; immediate = $true; name = "" }
+  }
+  $failureStage = Clean-Text (Get-DetailValue $Details "failureStage")
+  if ($failed -and ($incidents.Count -eq 0 -or $failureStage)) {
+    $kind = "sync_issue"
+    $immediate = $true
+    $errorText = Clean-Text $Message
+    if ($errorText -match '(?i)(Module could not be correctly formed|timeout|timed out|temporar|throttl|429|503|connection.*(?:closed|reset)|network|mutation lease)') {
+      $kind = "sync_delayed"
+      # A failed nightly full check needs attention before its next daily run.
+      $immediate = $Scope -eq "full"
+    } elseif ($failureStage -in @("startup", "configuration", "connection") -or
+              $errorText -match '(?i)(unauthori[sz]ed|access denied|authentication|certificate.*expir|invalid.client)') {
+      $kind = "service_access"
+    } elseif ($failureStage -eq "verification" -or $Scope -eq "full") {
+      $kind = "verification"
+    } elseif ([int](Get-DetailValue $Details "backlogRows") -gt 0 -and -not $failureStage) {
+      $kind = "sync_delayed"
+      $immediate = $false
+    }
+    $key = Get-Sha256Hex "$Scope|$kind|service"
+    $incidents[$key] = [pscustomobject]@{ key = $key; kind = $kind; immediate = [bool]$immediate; name = "" }
+  }
+  if ($incidents.Count -gt 1000) {
+    # A widespread outage must not disable notification by exceeding the RPC
+    # payload limit. Group it into one stable incident without retaining PII.
+    $immediate = @($incidents.Values | Where-Object { $_.immediate }).Count -gt 0
+    $kind = if ($immediate) { "sync_issue" } else { "sync_delayed" }
+    return @([pscustomobject]@{
+      key = (Get-Sha256Hex "$Scope|$kind|large_backlog")
+      kind = $kind; immediate = $immediate; name = ""
+    })
+  }
+  return @($incidents.Values | Sort-Object key)
+}
+
+function Invoke-ExchangeSyncNotificationPolicy($Status, $Message, [hashtable]$Details, $WebhookPayload) {
+  # Email is an independently recorded side effect, not a sync outcome. Never
+  # throw into the mutation catch block or replay a notification within a job.
+  $receipt = $null
+  $runKey = ""
+  try {
+    $scope = (Clean-Text (Get-DetailValue $Details "syncMode")).ToLowerInvariant()
+    if (-not $scope) { $scope = Clean-Text $script:CurrentSyncMode }
+    if ($scope -notin @("incremental", "full")) { throw "Alert history requires a known sync scope." }
+    $runId = Clean-Text $script:CurrentQueueRunId
+    $parsedRunId = [guid]::Empty
+    if (-not [guid]::TryParse($runId, [ref]$parsedRunId) -or $parsedRunId -eq [guid]::Empty) {
+      throw "Alert history requires a valid worker run ID."
+    }
+    $runKey = "$scope|$runId"
+    if ($script:ExchangeNotificationRunReceipts.ContainsKey($runKey)) {
+      return $script:ExchangeNotificationRunReceipts[$runKey]
+    }
+    $incidents = @(Get-ExchangeAlertIncidents $Status $Message $Details $scope)
+    $recoveryProven = (Clean-Text $Status) -eq "completed" -and $incidents.Count -eq 0 -and
+      (Get-DetailValue $Details "truthLedgerCheckpointVerified") -eq $true -and
+      [int](Get-DetailValue $Details "backlogRows") -eq 0 -and
+      [int](Get-DetailValue $Details "failedQueueRows") -eq 0
+    if ($scope -eq "full") {
+      $recoveryProven = $recoveryProven -and (Get-DetailValue $Details "fullCertificationCommitted") -eq $true -and
+        (Get-DetailValue $Details "templateRecipientTruthReconciled") -eq $true
+    }
+    $observationComplete = (Get-DetailValue $Details "truthLedgerCheckpointVerified") -eq $true -and
+      -not (Clean-Text (Get-DetailValue $Details "failureStage"))
+    if ($scope -eq "full" -and (Clean-Text $Status) -eq "completed" -and -not $recoveryProven) {
+      $observationComplete = $false
+    }
+    $observed = Invoke-SupabaseRest "POST" "rpc/observe_outlook_exchange_alert" @{
+      p_run_id = $runId
+      p_scope = $scope
+      p_incidents = @($incidents | ForEach-Object { @{ key = $_.key; kind = $_.kind; immediate = $_.immediate } })
+      p_recovery_proven = [bool]$recoveryProven
+      # A normally finalized run knows which incidents still exist, even when
+      # one contact needs attention. A partial/connection failure does not.
+      p_observation_complete = [bool]$observationComplete
+    }
+    $shouldNotify = Get-DetailValue $observed "shouldNotify"
+    if ($shouldNotify -isnot [bool]) { throw "Alert history returned no trustworthy decision." }
+    $Details["notificationDecisionReason"] = Clean-Text (Get-DetailValue $observed "reason")
+    if (-not $shouldNotify) {
+      $receipt = New-ExchangeNotificationDeliveryResult "not_required" $false $false
+    } else {
+      $claimId = Clean-Text (Get-DetailValue $observed "claimId")
+      $parsedClaimId = [guid]::Empty
+      if (-not [guid]::TryParse($claimId, [ref]$parsedClaimId) -or $parsedClaimId -eq [guid]::Empty) {
+        throw "Alert history returned an invalid delivery claim."
+      }
+      $eligibleKeys = @(Get-DetailValue $observed "incidentKeys")
+      $eligible = @($incidents | Where-Object { $_.key -cin $eligibleKeys })
+      if ($eligible.Count -eq 0 -or $eligible.Count -ne $eligibleKeys.Count) {
+        throw "Alert history did not match the currently observed issues."
+      }
+      $kinds = @($eligible.kind | Sort-Object -Unique)
+      # One compact neutral summary covers a mixed incident without silently
+      # acknowledging issues omitted by a higher-priority category's wording.
+      $kind = if ($kinds.Count -eq 1) { $kinds[0] } else { "sync_issue" }
+      $Details["notificationIssueKind"] = $kind
+      $Details["notificationAffectedNames"] = @($eligible | Where-Object { $_.name } | ForEach-Object { $_.name })
+      $Details["notificationAddressBookUrl"] = $ExchangeNotificationAddressBookUrl
+      $receipt = Invoke-ExchangeSyncNotificationSafely $Status $Message $Details $WebhookPayload
+      # Validate before acknowledging the claim; malformed transport receipts
+      # must never permanently silence an incident.
+      Set-ExchangeNotificationDeliveryStats $Details $receipt
+      $receiptSaved = $false
+      for ($attempt = 1; $attempt -le 3; $attempt += 1) {
+        try {
+          $completed = Invoke-SupabaseRest "POST" "rpc/complete_outlook_exchange_alert" @{
+            p_scope = $scope; p_claim_id = $claimId; p_delivered = [bool]$receipt.Delivered
+          }
+          $accepted = Get-DetailValue $completed "accepted"
+          $acknowledgedDelivery = Get-DetailValue $completed "delivered"
+          if ($accepted -isnot [bool] -or -not $accepted -or
+              $acknowledgedDelivery -isnot [bool] -or $acknowledgedDelivery -ne $receipt.Delivered) {
+            throw "Alert delivery claim was not consistently acknowledged."
+          }
+          $receiptSaved = $true
+          break
+        } catch {
+          if ($attempt -lt 3) { Start-Sleep -Seconds $attempt }
+        }
+      }
+      $Details["notificationHistorySaved"] = $receiptSaved
+      if (-not $receiptSaved) { Write-Warning "Exchange alert delivery receipt could not be saved; the email was not resent by this job." }
+    }
+  } catch {
+    $policyError = Clean-Text $_.Exception.Message
+    Write-Warning ("Exchange notification policy could not complete: {0}" -f $policyError)
+    $Details["notificationDecisionReason"] = "policy_unavailable"
+    # Without an atomic history claim, do not create an uncontrolled hourly
+    # email loop. Preserve the real failure and this delivery error in status.
+    if (-not $receipt) { $receipt = New-ExchangeNotificationDeliveryResult "failed" $false $false 0 "" $policyError }
+  }
+  if ($runKey) { $script:ExchangeNotificationRunReceipts[$runKey] = $receipt }
+  return $receipt
+}
+
 function Save-SyncStatusAfterNotification($Status, $Message, [hashtable]$Details) {
   $lastError = ""
   for ($saveAttempt = 1; $saveAttempt -le 3; $saveAttempt += 1) {
@@ -5631,7 +5733,7 @@ function Test-IncrementalSyncNotificationRequired($Outcome) {
   if (-not $Outcome) {
     throw "An incremental sync outcome is required to decide whether a notice should be sent."
   }
-  return [bool]$Outcome.AlwaysNotify
+  return (Clean-Text $Outcome.Status) -ne "completed"
 }
 
 function Test-FullSyncNotificationRequired($Status, $Details) {
@@ -5644,20 +5746,7 @@ function Test-FullSyncNotificationRequired($Status, $Details) {
     return $true
   }
 
-  [decimal]$mutationCount = 0
-  foreach ($key in @(
-    "createdContacts",
-    "updatedContacts",
-    "removedContacts",
-    "createdGroups",
-    "updatedGroups",
-    "removedGroups",
-    "addedMembers",
-    "removedMembers"
-  )) {
-    $mutationCount += [int](Get-DetailValue $Details $key)
-  }
-  return $mutationCount -gt 0
+  return $false
 }
 
 function Set-IncrementalBacklogFromTruthCheckpoint([hashtable]$Stats) {
@@ -6486,6 +6575,7 @@ try {
   $script:SyncLockAcquired = $true
   Save-SyncStatus "running" "Exchange sync is running."
 
+  $script:ExchangeSyncStage = "configuration"
   Import-ExchangeOnlineManagementModule
 
   $appId = Get-AutomationSetting "EXCHANGE_APP_ID"
@@ -6500,40 +6590,31 @@ try {
   [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($pfxBase64))
   $securePassword = ConvertTo-SecureString $pfxPassword -AsPlainText -Force
 
-  Connect-ExchangeOnline -AppId $appId -CertificateFilePath $pfxPath -CertificatePassword $securePassword -Organization $organization -ShowBanner:$false -ErrorAction Stop
-  $script:ExchangeOnlineConnected = $true
+  $script:ExchangeSyncStage = "connection"
+  Connect-ExchangeOnlineWithRetry -AppId $appId -CertificateFilePath $pfxPath -CertificatePassword $securePassword -Organization $organization
   Renew-ExchangeSyncLockIfDue -Force
 
   if ($syncMode -ne "full") {
+    $script:ExchangeSyncStage = "synchronization"
     $details = Get-StatsObject (Invoke-IncrementalExchangeSync)
+    $script:ExchangeSyncStage = "verification"
     $outcome = Complete-IncrementalSyncOutcomeWithCheckpoint $details
-    if (Test-IncrementalSyncNotificationRequired $outcome) {
-      $notificationDelivery = Invoke-ExchangeSyncNotificationSafely `
-        $outcome.Status `
-        $outcome.Message `
-        $details `
-        $webhookPayload
-    } else {
-      $notificationDelivery = New-ExchangeNotificationDeliveryResult `
-        "not_required" `
-        $false `
-        $false `
-        0 `
-        "" `
-        ""
-    }
+    $notificationDelivery = Invoke-ExchangeSyncNotificationPolicy `
+      $outcome.Status $outcome.Message $details $webhookPayload
     Set-ExchangeNotificationDeliveryStats $details $notificationDelivery
     Save-SyncStatusAfterNotification $outcome.Status $outcome.Message $details | Out-Null
     Write-Output ("Exchange incremental sync summary: {0}" -f ($details | ConvertTo-Json -Depth 8 -Compress))
     return
   }
 
+  $script:ExchangeSyncStage = "synchronization"
   $details = Get-StatsObject (Invoke-FullExchangeSync)
+  $script:ExchangeSyncStage = "verification"
   if ([int]$details.failedQueueRows -gt 0) {
     $message = "Exchange full reconciliation failed with $([int]$details.failedQueueRows) validation or verification error(s)."
     Save-SyncStatus "failed" $message $details
     Add-ExchangeTruthLedgerEvidence $details $false | Out-Null
-    $notificationDelivery = Invoke-ExchangeSyncNotificationSafely "failed" $message $details $webhookPayload
+    $notificationDelivery = Invoke-ExchangeSyncNotificationPolicy "failed" $message $details $webhookPayload
     Set-ExchangeNotificationDeliveryStats $details $notificationDelivery
     Save-SyncStatusAfterNotification "failed" $message $details | Out-Null
   } else {
@@ -6543,21 +6624,7 @@ try {
       $details `
       $true `
       (Get-DetailValue $details "sourceSnapshotHash") | Out-Null
-    if (Test-FullSyncNotificationRequired "completed" $details) {
-      $notificationDelivery = Invoke-ExchangeSyncNotificationSafely `
-        "completed" `
-        $message `
-        $details `
-        $webhookPayload
-    } else {
-      $notificationDelivery = New-ExchangeNotificationDeliveryResult `
-        "not_required" `
-        $false `
-        $false `
-        0 `
-        "" `
-        ""
-    }
+    $notificationDelivery = Invoke-ExchangeSyncNotificationPolicy "completed" $message $details $webhookPayload
     Set-ExchangeNotificationDeliveryStats $details $notificationDelivery
     Save-SyncStatusAfterNotification "completed" $message $details | Out-Null
   }
@@ -6565,6 +6632,7 @@ try {
   return
 } catch {
   $syncError = $_
+  $details["failureStage"] = $script:ExchangeSyncStage
   try {
     Save-SyncStatus "failed" $syncError.Exception.Message $details
   } catch {
@@ -6580,7 +6648,7 @@ try {
       Write-Warning ("Could not attach a verified FCUNO Exchange truth-ledger checkpoint to the failure notice: {0}" -f $_.Exception.Message)
     }
   }
-  $notificationDelivery = Invoke-ExchangeSyncNotificationSafely `
+  $notificationDelivery = Invoke-ExchangeSyncNotificationPolicy `
     "failed" `
     $syncError.Exception.Message `
     $details `
@@ -6591,8 +6659,8 @@ try {
   }
   throw
 } finally {
-  if ($script:ExchangeOnlineConnected -and (Get-Module -Name ExchangeOnlineManagement)) {
-    Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue
+  if ($script:ExchangeOnlineConnected) {
+    Disconnect-ExchangeOnlineSafely
   }
   Release-ExchangeSyncLock
 }

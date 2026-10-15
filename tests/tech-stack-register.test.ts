@@ -100,7 +100,7 @@ test("Tech Stack documents recovery limits and separates dated external checks f
   assert.match(pageSource, /A CLOUD RUN SPEND CAP DOES NOT CAP STORAGE CHARGES/)
   assert.match(pageSource, /CLOUD RUN MONTHLY SPEND CAP HKD77\.50: CONFIGURED, NOT CURRENTLY ENFORCED/)
   assert.match(pageSource, /MAY PAUSE NEW BACKUP JOBS UNTIL MANUALLY LIFTED/)
-  assert.match(pageSource, /EIGHT PHYSICAL RESTORE POINTS LISTED FOR SEPTEMBER 17–24/)
+  assert.match(pageSource, /EIGHT PHYSICAL RESTORE POINTS LISTED FOR OCTOBER 7–14/)
   assert.match(pageSource, /PITR IS NOT ENABLED/)
   assert.match(pageSource, /MANAGED DATABASE BACKUPS EXCLUDE STORAGE OBJECT BYTES/)
   assert.match(pageSource, /NO RESTORE WAS RUN/)
@@ -110,6 +110,14 @@ test("Tech Stack documents recovery limits and separates dated external checks f
   const version = /\$ExchangeTruthWorkerVersion = "([^"]+)"/.exec(runbook)?.[1]
   assert.ok(version)
   assert.ok(pageSource.includes(version.toUpperCase()), "Repository worker version has drifted from the Tech Stack register")
+  assert.match(pageSource, /EXCHANGE DATED LIVE CHECK — 2026-10-14/)
+  assert.match(pageSource, /DAILY 06:10 HKT \+ ON DEMAND/)
+  assert.match(pageSource, /THIS PAGE DOES NOT RECHECK AZURE AT LOAD TIME/)
+  assert.match(pageSource, /HEALTHY RUNS, INCLUDING SUCCESSFUL CHANGES, AND VERIFIED RECOVERY ARE SILENT/)
+  assert.match(pageSource, /ACCESS\/TERMINAL ISSUES AND FULL-VERIFICATION FAILURES CAN ALERT IMMEDIATELY/)
+  assert.doesNotMatch(pageSource, /ALL FAILURES SEND DETAILED NOTICES/)
+  assert.match(pageSource, /NOT A HOSTED-ARTIFACT OR RESTORE PROOF/)
+  assert.match(pageSource, /ALL WARNING-LEVEL RESULTS ARE CURRENTLY MUTED/)
   for (const { path } of vercelConfiguration.crons) {
     assert.ok(pageSource.includes(`"${path}"`), `Missing readable cron description for ${path}`)
   }

@@ -6,7 +6,7 @@ import {
   readSpcEnquiryMeta,
 } from "@/lib/spcEnquiryText"
 import { displaySupplierName, supplierKey } from "@/lib/spcSupplierKeys"
-import { listActiveSpcUserOptions, type SpcUserOption } from "@/lib/spcUsers"
+import { listActiveSpcUserOptions, listManagedSpcUsers, type SpcUserOption } from "@/lib/spcUsers"
 import { cleanSpcImo } from "@/lib/spcVesselIdentity"
 
 export type SpcFixtureStatus = "pending" | "completed" | "cancelled"
@@ -44,6 +44,8 @@ export type SpcFixture = {
 }
 
 export type SpcFixtureInput = {
+  expectedUpdatedAt?: string
+  expectedStatus?: string
   fixtureDate?: string
   supplierTrader?: string
   buyerTrader?: string
@@ -439,29 +441,21 @@ export async function listSpcFixtures(session: SpcSession, limit = 5000) {
   return sortFixtures(((data || []) as unknown as SpcFixtureRow[]).map(mapFixture))
 }
 
-export async function ensurePendingSpcFixtureForEnquiry(
+// Prepare every fallible lookup before the atomic STEM RPC performs any writes.
+// This function deliberately cannot upsert a fixture or reset a completed row.
+export async function buildPendingSpcFixtureForEnquiry(
   enquiry: SpcFixtureEnquiryRow,
-  session: SpcSession,
-  request: Request,
 ) {
-  const context = createSpcAuditContext(session, request, "spc-fixtures")
-  const supabase = createSpcAuditedSupabaseClient(context)
-  const users = await listActiveSpcUserOptions()
+  const users = (await listManagedSpcUsers()).filter((user) => user.isActive)
   const meta = readSpcEnquiryMeta(enquiry.notes)
-  const supplierTrader = findUserByUsername(users, meta.stemSupplierTraderUsername)
+  const supplierTrader = users.find((user) =>
+    user.isSupplierTrader && sameUsername(user.username, meta.stemSupplierTraderUsername),
+  )
   const buyerTrader = findUserByUsername(users, enquiry.created_by_username)
+  if (!supplierTrader) throw new Error("Select a valid supplier trader.")
+  if (!buyerTrader) throw Object.assign(new Error("The enquiry owner is no longer an active user."), { code: "42501" })
   const text = `${enquiry.product || ""} / ${formatSpcEnquiry(enquiry)}`
   const parsed = parseSpcEnquiryText(formatSpcEnquiry(enquiry))
-
-  const { data: existing, error: existingError } = await supabase
-    .from("spc_fixtures")
-    .select("id, fixture_status, vessel_imo")
-    .eq("enquiry_id", enquiry.id)
-    .maybeSingle()
-
-  if (existingError) throw existingError
-  const existingFixture = existing as { fixture_status?: string; vessel_imo?: string | null } | null
-  if (existingFixture?.fixture_status === "completed") return
 
   const initialSupplierName = normalizeSupplierField(meta.fixtureSupplier || enquiry.supplier_name)
   const initialPrimarySupplier = primarySupplierName(initialSupplierName)
@@ -479,7 +473,7 @@ export async function ensurePendingSpcFixtureForEnquiry(
     account: buyerTrader?.office || null,
     earliest_eta: optionalString(meta.eta || parsed.eta || enquiry.delivery_date),
     vessel_name: optionalString(enquiry.vessel_name || parsed.vesselName || enquiry.title),
-    vessel_imo: cleanSpcImo(meta.imo || parsed.imo) || existingFixture?.vessel_imo || null,
+    vessel_imo: cleanSpcImo(meta.imo || parsed.imo) || null,
     hsfo: optionalString(meta.hsfo || parsed.hsfo || extractInitialFuel(text, ["hsfo", "ifo"])),
     vlsfo: optionalString(meta.vlsfo || parsed.vlsfo || extractInitialFuel(text, ["vlsfo", "lsfo"])),
     lsmgo: optionalString(meta.lsmgo || parsed.lsmgo || extractInitialFuel(text, ["lsmgo", "mgo"])),
@@ -489,14 +483,7 @@ export async function ensurePendingSpcFixtureForEnquiry(
     barging: optionalString(meta.barging),
   }
 
-  if (!payload.supplier_trader_username) throw new Error("Supplier trader is required.")
-  if (!payload.buyer_trader_username) throw new Error("Buyer trader is required.")
-
-  const { error } = await supabase
-    .from("spc_fixtures")
-    .upsert(payload, { onConflict: "enquiry_id" })
-
-  if (error) throw error
+  return payload
 }
 
 async function loadFixtureRow(
@@ -508,40 +495,11 @@ async function loadFixtureRow(
     .select("*")
     .eq("id", id)
     .single()
+  if (error?.code === "PGRST116") {
+    throw Object.assign(new Error("This fixture is no longer available. Refresh and review the latest fixtures."), { code: "40001" })
+  }
   if (error) throw error
   return data as unknown as SpcFixtureRow
-}
-
-async function loadMappedFixture(
-  supabase: ReturnType<typeof createSpcAuditedSupabaseClient>,
-  id: string,
-) {
-  const { data, error } = await supabase
-    .from("spc_fixtures")
-    .select(`
-      *,
-      enquiry:spc_enquiries!spc_fixtures_enquiry_id_fkey(
-        id,
-        enquiry_number,
-        title,
-        vessel_name,
-        port,
-        product,
-        quantity,
-        delivery_date,
-        supplier_name,
-        status,
-        notes,
-        created_by_username,
-        created_by_display_name,
-        created_at,
-        updated_at
-      )
-    `)
-    .eq("id", id)
-    .single()
-  if (error) throw error
-  return mapFixture(data as unknown as SpcFixtureRow)
 }
 
 export async function updateSpcFixture(
@@ -554,7 +512,14 @@ export async function updateSpcFixture(
   const fixtureId = cleanString(id)
   if (!fixtureId) throw new Error("Fixture id is required.")
 
-  const context = createSpcAuditContext(session, request, "spc-fixtures")
+  const expectedUpdatedAt = cleanString(input.expectedUpdatedAt)
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(expectedUpdatedAt)
+    || !Number.isFinite(Date.parse(expectedUpdatedAt)) || !["pending", "completed"].includes(input.expectedStatus || "")) {
+    throw Object.assign(new Error("Refresh this page before saving the fixture."), { code: "22023" })
+  }
+  const context = createSpcAuditContext(session, request, "spc-fixtures", {
+    action: action === "complete" ? "complete-fixture" : "save-fixture", targetType: "fixture", targetId: fixtureId,
+  })
   const supabase = createSpcAuditedSupabaseClient(context)
   const existing = await loadFixtureRow(supabase, fixtureId)
 
@@ -563,7 +528,7 @@ export async function updateSpcFixture(
     session.role !== "SUPPLIER TRADER" &&
     session.role !== "ADMIN"
   ) {
-    throw new Error("Only supplier traders and admins can edit this new stem.")
+    throw Object.assign(new Error("Only supplier traders and admins can edit this new stem."), { code: "42501" })
   }
 
   const users = await listActiveSpcUserOptions()
@@ -607,11 +572,8 @@ export async function updateSpcFixture(
     if (missing.length > 0) throw new Error(`Complete ${missing.join(", ")} before completing.`)
   }
 
-  const now = new Date().toISOString()
-  const completed = action === "complete"
   const primarySupplier = activeFuelKeys.map((key) => gradeValue(supplierName, key)).find(Boolean) || cleanString(supplierName)
   const payload = {
-    fixture_status: completed ? "completed" : existing.fixture_status,
     fixture_date: fixtureDate,
     supplier_trader_user_id: supplierTrader?.id || existing.supplier_trader_user_id,
     supplier_trader_username: supplierTrader?.username || existing.supplier_trader_username,
@@ -630,51 +592,47 @@ export async function updateSpcFixture(
     supplier_key: primarySupplier ? supplierKey(primarySupplier) : null,
     price,
     barging,
-    completed_at: completed ? existing.completed_at || now : existing.completed_at,
-    completed_by_username: completed ? session.username : existing.completed_by_username,
-    completed_by_display_name: completed ? session.displayName || session.username : existing.completed_by_display_name,
-    updated_at: now,
   }
-
-  const { error } = await supabase
-    .from("spc_fixtures")
-    .update(payload)
-    .eq("id", fixtureId)
-
+  const { data, error } = await supabase.rpc("update_spc_fixture_with_enquiry", {
+    p_fixture_id: fixtureId, p_actor_username: session.username,
+    p_expected_updated_at: expectedUpdatedAt, p_expected_status: input.expectedStatus,
+    p_action: action, p_fixture: payload, p_primary_supplier: primarySupplier || null,
+  })
   if (error) throw error
-
-  if (primarySupplier) {
-    const { error: enquiryError } = await supabase
-      .from("spc_enquiries")
-      .update({ supplier_name: primarySupplier, updated_at: now })
-      .eq("id", existing.enquiry_id)
-    if (enquiryError) throw enquiryError
+  const saved = data as unknown as SpcFixtureRow | null
+  if (!saved || Array.isArray(saved) || saved.id !== fixtureId || saved.enquiry_id !== existing.enquiry_id
+    || saved.fixture_status !== (action === "complete" ? "completed" : existing.fixture_status)
+    || typeof saved.updated_at !== "string" || !Number.isFinite(Date.parse(saved.updated_at))
+    || saved.enquiry?.id !== existing.enquiry_id) {
+    throw new Error("The saved fixture response was unavailable. Refresh and review the fixture before trying again.")
   }
-
-  return loadMappedFixture(supabase, fixtureId)
+  return mapFixture(saved)
 }
 
 export async function deleteSpcFixture(
   id: string,
+  input: Pick<SpcFixtureInput, "expectedUpdatedAt" | "expectedStatus">,
   session: SpcSession,
   request: Request,
 ) {
   const fixtureId = cleanString(id)
   if (!fixtureId) throw new Error("Fixture id is required.")
 
-  const context = createSpcAuditContext(session, request, "spc-fixtures")
-  const supabase = createSpcAuditedSupabaseClient(context)
-  const existing = await loadFixtureRow(supabase, fixtureId)
-
-  if (existing.fixture_status === "pending" && !sameUsername(session.username, existing.supplier_trader_username)) {
-    throw new Error("Only the assigned supplier trader can edit this new stem.")
+  const expectedUpdatedAt = cleanString(input.expectedUpdatedAt)
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(expectedUpdatedAt)
+    || !Number.isFinite(Date.parse(expectedUpdatedAt)) || !["pending", "completed", "cancelled"].includes(input.expectedStatus || "")) {
+    throw Object.assign(new Error("Refresh this page before deleting the fixture."), { code: "22023" })
   }
-
-  const { error } = await supabase
-    .from("spc_fixtures")
-    .delete()
-    .eq("id", fixtureId)
-
+  const context = createSpcAuditContext(session, request, "spc-fixtures", {
+    action: "delete-fixture", targetType: "fixture", targetId: fixtureId,
+  })
+  const supabase = createSpcAuditedSupabaseClient(context)
+  const { data, error } = await supabase.rpc("update_spc_fixture_with_enquiry", {
+    p_fixture_id: fixtureId, p_actor_username: session.username,
+    p_expected_updated_at: expectedUpdatedAt, p_expected_status: input.expectedStatus,
+    p_action: "delete", p_fixture: null, p_primary_supplier: null,
+  })
   if (error) throw error
+  if (data?.id !== fixtureId) throw new Error("The delete response was unavailable. Refresh and review the fixture before trying again.")
   return fixtureId
 }

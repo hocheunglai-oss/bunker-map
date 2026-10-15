@@ -7,11 +7,12 @@ import * as taskStore from "../lib/taskCalendarStore"
 
 const task = (id = "a") => ({ id, sourceRow: 0, scheduleType: "Monthly", daysOfMonth: Array.from({ length: 31 }, (_, i) => i + 1), months: [], notify: ["DT", "JZ"], cc: ["DT"], task: "Synthetic task", remark: "Synthetic only" })
 type Handler = (request: Request, context?: { params: Promise<{ key: string }> }) => Promise<Response>
-function harness(options: { permission?: "view" | "edit" | "none"; signedIn?: boolean; tasks?: unknown[]; readError?: boolean; unresolved?: string[] } = {}) {
+function harness(options: { permission?: "view" | "edit" | "none"; signedIn?: boolean; tasks?: unknown[]; readError?: boolean; unresolved?: string[]; holdFirstDelivery?: Promise<void> } = {}) {
   const permission = options.permission ?? "edit"
   const session = { authenticated: options.signedIn !== false }
   let row = { payload: { tasks: options.tasks ?? [task()], deletedTaskIds: [] }, updated_at: "2026-10-07T00:00:00.000Z" }
   let writes = 0
+  let failReads = options.readError ?? false
   const deliveries: Record<string, unknown>[] = []
   const deliveredIds = new Set<string>()
   const client = { from(table: string) {
@@ -22,7 +23,7 @@ function harness(options: { permission?: "view" | "edit" | "none"; signedIn?: bo
       select() { return query }, eq(field: string, value: unknown) { if (field === "key") assert.equal(value, "task-calendar"); if (field === "updated_at") expected = String(value); return query },
       update(value: Record<string, unknown>) { changed = value; return query },
       async maybeSingle() {
-        if (options.readError) return { data: null, error: new Error("Synthetic database unavailable") }
+        if (failReads) return { data: null, error: new Error("Synthetic database unavailable") }
         if (!changed) return { data: structuredClone(row), error: null }
         if (expected !== row.updated_at) return { data: null, error: null }
         writes += 1
@@ -50,9 +51,11 @@ function harness(options: { permission?: "view" | "edit" | "none"; signedIn?: bo
       loadCalendarStaffDirectory: async () => staff,
       resolveCalendarStaffRecipients: (codes: string[]) => ({ recipients: Array.from(new Set(codes.filter((code) => !(options.unresolved || []).includes(code)).map((code) => staff.find((entry) => entry.code === code)?.email).filter(Boolean))), unresolved: codes.filter((code) => (options.unresolved || []).includes(code)) }),
     },
-    "@/lib/calendarDelivery": { deliverCalendarReminder: async (value: Record<string, unknown>) => {
+    "@/lib/calendarDelivery": { getCalendarReminderDelivery: async (value: { recordId: string }) => deliveredIds.has(value.recordId) ? { status: "already_delivered", sent: 1 } : null, deliverCalendarReminder: async (value: Record<string, unknown>) => {
       if (deliveredIds.has(String(value.recordId))) return { status: "already_delivered", sent: 0 }
-      deliveredIds.add(String(value.recordId)); deliveries.push(value); return { status: "delivered", sent: 1 }
+      deliveredIds.add(String(value.recordId)); deliveries.push(value)
+      if (deliveries.length === 1) await options.holdFirstDelivery
+      return { status: "delivered", sent: 1 }
     } },
   }
   function load(path: string) {
@@ -68,6 +71,7 @@ function harness(options: { permission?: "view" | "edit" | "none"; signedIn?: bo
   const reminder = load("../app/api/task-calendar/daily-reminder/route.ts")
   return {
     writes: () => writes, deliveries, payload: () => row.payload,
+    failReads() { failReads = true },
     async request(method: string, body?: unknown) {
       const response = await store[method](new Request("https://example.test/api/office-calendar-store/task-calendar", { method, ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }) }), { params: Promise.resolve({ key: "task-calendar" }) })
       return { status: response.status, body: await response.json() }
@@ -164,4 +168,67 @@ test("unresolved recipients do not silently get omitted or permit partial task d
   assert.equal(response.status, 500)
   assert.match(response.body.failed[0].reason, /JZ/)
   assert.deepEqual(app.deliveries, [])
+})
+
+test("a task deleted during an earlier reminder delivery is not emailed from the old snapshot", async () => {
+  let release!: () => void
+  const app = harness({ tasks: [task("a"), task("b")], holdFirstDelivery: new Promise<void>((resolve) => { release = resolve }) })
+  const before = await app.request("GET")
+  const pending = app.remind()
+  while (!app.deliveries.length) await new Promise<void>((resolve) => setImmediate(resolve))
+  try {
+    assert.equal((await app.request("PATCH", { protocolVersion: 1, operation: "delete", taskId: "b", expectedTaskVersion: before.body.taskVersions.b })).status, 200)
+  } finally { release() }
+  const result = await pending
+  assert.equal(result.status, 200)
+  assert.deepEqual(app.deliveries.map((delivery) => delivery.recordId), ["a"])
+  assert.deepEqual(result.body.skipped, [{ id: "b", reason: "Task was deleted before this reminder was sent." }])
+})
+
+test("a task edited during delivery uses its current recipients and content", async () => {
+  let release!: () => void
+  const app = harness({ tasks: [task("a"), task("b")], holdFirstDelivery: new Promise<void>((resolve) => { release = resolve }) })
+  const before = await app.request("GET")
+  const pending = app.remind()
+  while (!app.deliveries.length) await new Promise<void>((resolve) => setImmediate(resolve))
+  try {
+    assert.equal((await app.request("PATCH", { protocolVersion: 1, operation: "update", task: { ...task("b"), notify: ["OL"], cc: ["JZ"], task: "Current task", remark: "Current remark" }, expectedTaskVersion: before.body.taskVersions.b })).status, 200)
+  } finally { release() }
+  const result = await pending
+  assert.equal(result.status, 200)
+  assert.equal(app.deliveries.length, 2)
+  assert.equal(app.deliveries[1].recordId, "b")
+  assert.deepEqual(app.deliveries[1].to, ["ol@example.test"])
+  assert.deepEqual(app.deliveries[1].cc, ["jz@example.test"])
+  assert.equal(app.deliveries[1].subject, "***** Current task")
+  assert.match(String(app.deliveries[1].html), /Current remark/)
+})
+
+test("a task rescheduled during delivery is checked again for today's occurrence", async () => {
+  let release!: () => void
+  const app = harness({ tasks: [task("a"), task("b")], holdFirstDelivery: new Promise<void>((resolve) => { release = resolve }) })
+  const before = await app.request("GET")
+  const pending = app.remind()
+  while (!app.deliveries.length) await new Promise<void>((resolve) => setImmediate(resolve))
+  const otherWeekday = (new Date(`${taskData.getHongKongTaskDate()}T00:00:00Z`).getUTCDay() + 1) % 7
+  try {
+    assert.equal((await app.request("PATCH", { protocolVersion: 1, operation: "update", task: { ...task("b"), scheduleType: "Weekly", dayOfWeek: otherWeekday, daysOfMonth: [] }, expectedTaskVersion: before.body.taskVersions.b })).status, 200)
+  } finally { release() }
+  const result = await pending
+  assert.equal(result.status, 200)
+  assert.deepEqual(app.deliveries.map((delivery) => delivery.recordId), ["a"])
+  assert.deepEqual(result.body.skipped, [{ id: "b", reason: "Task schedule changed; no reminder is due for this date." }])
+})
+
+test("a current-task read failure never falls back to the old due-task snapshot", async () => {
+  let release!: () => void
+  const app = harness({ tasks: [task("a"), task("b")], holdFirstDelivery: new Promise<void>((resolve) => { release = resolve }) })
+  const pending = app.remind()
+  while (!app.deliveries.length) await new Promise<void>((resolve) => setImmediate(resolve))
+  app.failReads()
+  release()
+  const result = await pending
+  assert.equal(result.status, 500)
+  assert.deepEqual(app.deliveries.map((delivery) => delivery.recordId), ["a"])
+  assert.deepEqual(result.body.failed, [{ id: "b", reason: "The current task could not be checked. This reminder was not sent." }])
 })

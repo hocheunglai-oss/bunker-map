@@ -4,6 +4,7 @@ import test from "node:test"
 import { transformSync } from "esbuild"
 import * as ccinfoSave from "../lib/ccinfoSave"
 import * as pricingWrites from "../lib/priceSetterLegacyWrites"
+import * as groupWrites from "../lib/outlookGroupWriteGuard"
 
 function fixture(permission = "edit") {
   const requests: Request[] = []
@@ -21,6 +22,7 @@ function fixture(permission = "edit") {
     // Exercise both real guards together while isolating only external I/O.
     "@/lib/priceSetterLegacyWrites": pricingWrites,
     "@/lib/ccinfoSave": ccinfoSave,
+    "@/lib/outlookGroupWriteGuard": groupWrites,
   }
   const loadedModule: { exports: Record<string, (request: Request) => Promise<Response>> } = { exports: {} }
   const code = transformSync(readFileSync(new URL("../app/api/admin/supabase/route.ts", import.meta.url), "utf8"), { loader: "ts", format: "cjs", target: "node24" }).code

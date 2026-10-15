@@ -13,7 +13,9 @@ const engineOutput = compile("../lib/phonebookCarddavReconcile.ts")
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`
 const path = (n: number) => `/book/bunker-map-${id(n)}.vcf`
 const vcard = (name = "PRIVATE NAME") => `BEGIN:VCARD\r\nVERSION:3.0\r\nFN:${name}\r\nTEL:PRIVATE PHONE\r\nEND:VCARD\r\n`
-const card = () => ({ vcard: vcard(), etag: '"original"' })
+const card = (contactId?: string) => ({ vcard: contactId
+  ? vcard().replace("VERSION:3.0\r\n", `VERSION:3.0\r\nUID:bunker-map-${contactId}\r\nX-BUNKER-MAP-CONTACT-ID:${contactId}\r\n`)
+  : vcard(), etag: '"original"' })
 type Row = Record<string, any>
 type Call = { method: string; path: string; init: RequestInit }
 
@@ -24,7 +26,7 @@ function fixture(options: {
   const contacts: Row[] = Array.from({ length: options.count ?? 2 }, (_, n) => ({
     id: id(n + 1), full_name: `PRIVATE CONTACT ${n + 1}`, company: null, position: null,
   }))
-  const remote = new Map<string, { vcard: string; etag: string }>(contacts.map((_c, i) => [path(i + 1), card()]))
+  const remote = new Map<string, { vcard: string; etag: string }>(contacts.map((_c, i) => [path(i + 1), card(id(i + 1))]))
   const queue: Row[] = []
   const backups: Row[] = []
   const calls: Call[] = []
@@ -87,7 +89,7 @@ function fixture(options: {
           const selected = rows.filter((r) => filters.every((filter) => filter(r))).slice(start, end)
           if (operation === "delete") for (const row of selected) rows.splice(rows.indexOf(row), 1)
           if (operation === "update") for (const row of selected) Object.assign(row, values)
-          let data = structuredClone(single ? selected[0] || null : selected)
+          const data = structuredClone(single ? selected[0] || null : selected)
           if (options.corruptBackup && table === "phonebook_carddav_quarantine" && single) (data as Row).vcard += "CORRUPTED"
           return Promise.resolve({ data, error: null, count: selected.length }).then(resolve, reject)
         },
@@ -163,11 +165,78 @@ test("missing current contacts are recreated without deleting healthy contacts",
 
 test("orphan deletions retain full backups and acknowledge durable delete queue", async () => {
   const f = fixture()
-  f.remote.set(path(3), card())
+  f.remote.set(path(3), card(id(3)))
   await f.enqueue(id(3))
   assert.equal((await f.run()).verified, true)
   assert.equal(f.backups[0].reason, "orphan")
   assert.equal(f.queue.length, 0)
+})
+
+test("an interrupted bulk source deletion drains its durable queue across bounded runs", async () => {
+  const f = fixture({ count: 100 })
+  const deleted = f.contacts.splice(0, 21)
+  for (const contact of deleted) await f.enqueue(contact.id)
+  const first = await f.run()
+  assert.equal(first.removed, 10)
+  assert.equal(first.pending, 11)
+  assert.equal(first.verified, false)
+  const second = await f.run()
+  assert.equal(second.total, 79)
+  assert.equal(second.pending, 1)
+  const third = await f.run()
+  assert.equal(third.verified, true)
+  assert.equal(second.saved, 79)
+  assert.equal(second.total, 79)
+  assert.equal(f.queue.length, 0)
+  assert.equal(f.backups.length, 21)
+  assert.ok(f.backups.every((backup) => backup.deleted_at))
+})
+
+test("draining authorized deletions does not bypass the unrelated-extra safety limit", async () => {
+  const f = fixture({ count: 100 })
+  const deleted = f.contacts.splice(0, 21)
+  for (const contact of deleted) await f.enqueue(contact.id)
+  for (let i = 0; i < 6; i++) f.remote.set(`/book/extra-${i}.vcf`, card())
+  for (let i = 0; i < 3; i++) await f.run()
+  assert.equal(f.queue.length, 0)
+  assert.equal(f.backups.length, 21)
+  assert.equal(f.remote.size, 85)
+  assert.ok([...f.remote.keys()].filter((key) => key.includes("extra-")).length === 6)
+  const result = await f.run()
+  assert.equal(result.blocked, "removal-safety-limit")
+  assert.equal(result.removed, 0)
+})
+
+test("queued deletion rejects a canonical filename containing another contact identity", async () => {
+  for (const replacement of [card(), card(id(2)), {
+    ...card(id(1)), vcard: card(id(1)).vcard.replace("END:VCARD", `UID:bunker-map-${id(1)}\r\nEND:VCARD`),
+  }]) {
+    const f = fixture()
+    f.contacts.splice(0, 1)
+    f.remote.set(path(1), replacement)
+    await f.enqueue(id(1))
+    const result = await f.run()
+    assert.equal(result.failed, 1)
+    assert.equal(result.pending, 1)
+    assert.equal(f.calls.filter((call) => call.method === "DELETE").length, 0)
+    assert.equal(f.backups.length, 0)
+  }
+})
+
+test("queued deletions retain the card when recovery proof or the current source changes", async () => {
+  for (const options of [{ backupFails: true }, { corruptBackup: true }, {
+    onFetch: (call: Call, f: ReturnType<typeof fixture>) => {
+      if (call.method === "GET" && call.path === path(1)) f.contacts.push({ id: id(1), full_name: "RESTORED" })
+    },
+  }]) {
+    const f = fixture(options)
+    f.contacts.splice(0, 1)
+    await f.enqueue(id(1))
+    await f.run().catch(() => undefined)
+    assert.equal(f.calls.filter((call) => call.method === "DELETE").length, 0)
+    assert.equal(f.remote.size, 2)
+    assert.equal(f.queue.length, 1)
+  }
 })
 
 test("backup failure or corrupted readback prevents every deletion", async () => {

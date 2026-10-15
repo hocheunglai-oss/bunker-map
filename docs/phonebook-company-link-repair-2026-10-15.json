@@ -1,0 +1,36 @@
+{
+  "status": "applied_and_read_back",
+  "dateHkt": "2026-10-15",
+  "projectRef": "gglyugbrnyvyfktgwert",
+  "operationId": "49c86801-8738-47d6-b256-8e8c66fcf80b",
+  "auditLogId": "38c0c218-d296-402b-96cb-ab48cd8fb339",
+  "actor": "codex-maintenance",
+  "action": "approved_missing_phonebook_company",
+  "humanDecision": "The user confirmed that the existing contact's company name is correct; do not reassign it to a similarly named company.",
+  "change": "Added one missing company directory entry using only the confirmed name and a stable new identity. No contact or existing company row was updated.",
+  "approvedSqlSha256": "a4a6cbdbef2fbb773776cfe13c8228111b18750ccf698cd705fde233d212a7ca",
+  "approvedSqlHandling": "The exact guarded one-off SQL is retained locally as docs/approved-banle-company-link-2026-10-15.sql. It is not a migration, is already applied, must not be included in automated release execution, and intentionally refuses a replay. Keep the data-bearing SQL out of a published code-only patch.",
+  "verification": {
+    "isolatedNativePostgresVersion": "17.6",
+    "nativeTestGroupsPassed": 3,
+    "nativeFailureAndReplayChecks": [
+      "Current hosted-schema equivalent and pending company guards both preserve every contact row and every existing company row.",
+      "A stale source version refuses the repair.",
+      "A missing audit record or durable CardDAV enqueue rolls back the entire insertion.",
+      "Replay refuses without creating a duplicate."
+    ],
+    "hostedMatchingCompanyCount": 1,
+    "hostedUnresolvedCompanyLinks": 0,
+    "hostedContactCountBeforeAndAfter": 5128,
+    "targetContactUnchanged": true,
+    "separateExistingCompanyUnchanged": true,
+    "durableTargetContactQueueRows": 1,
+    "auditAndBackupTransactionMarkerVerifiedBeforeCommit": true
+  },
+  "limits": [
+    "This is one explicitly approved business-data correction, not an application deployment or schema migration.",
+    "No Azure job, Outlook recipient, email, WhatsApp message or CardDAV network operation was manually dispatched.",
+    "Queued normal phone synchronization is not proof of on-device refresh; no phone contact was added or deleted by this correction.",
+    "The older PR #61 audit statement about one unresolved company link is historical; this dated receipt records its resolution."
+  ]
+}

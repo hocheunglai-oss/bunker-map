@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 import { validateCalendarEmailList } from "@/lib/calendarRecipients"
-import { deliverCalendarReminder } from "@/lib/calendarDelivery"
+import { deliverCalendarReminder, getCalendarReminderDelivery } from "@/lib/calendarDelivery"
 import { getHongKongDateKey } from "@/lib/eventCalendarDates"
 import { fcunoConnectionPolicy } from "@/config/fcunoConnections"
 
@@ -57,12 +57,18 @@ export async function GET(request: Request) {
   }
 
   try {
+    const occurrenceDate = getHongKongDateKey()
+    const dryRun = new URL(request.url).searchParams.get("dryRun") === "1"
+    if (!dryRun) {
+      const previous = await getCalendarReminderDelivery({ kind: "event-daily", occurrenceDate, recordId: "daily-link" })
+      if (previous) return NextResponse.json({ success: previous.status !== "in_progress", ...previous }, { status: previous.status === "in_progress" ? 202 : 200 })
+    }
     const recipients = validateCalendarEmailList(process.env.EVENT_CALENDAR_EMAIL_RECIPIENTS || "")
     if (!recipients.length) return NextResponse.json({ message: "Daily event reminder recipients are not configured." }, { status: 500 })
     const email = buildLinkReminderEmail()
-    if (new URL(request.url).searchParams.get("dryRun") === "1") return NextResponse.json({ success: true, dryRun: true, recipients: recipients.length, occurrenceDate: getHongKongDateKey() })
+    if (dryRun) return NextResponse.json({ success: true, dryRun: true, recipients: recipients.length, occurrenceDate })
     const delivery = await deliverCalendarReminder({
-      kind: "event-daily", occurrenceDate: getHongKongDateKey(), recordId: "daily-link",
+      kind: "event-daily", occurrenceDate, recordId: "daily-link",
       to: recipients,
       subject: email.subject,
       html: email.html,

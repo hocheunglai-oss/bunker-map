@@ -8,7 +8,9 @@ function load(file: string,start: string,end: string,result: string) {
   const text=source(file), from=text.indexOf(start), to=text.indexOf(end,from)
   assert.ok(from>=0&&to>from,`Missing bounded production declarations in ${file}`)
   const code=transformSync(text.slice(from,to),{loader:"ts",format:"cjs",target:"node24"}).code
-  return new Function(`${code}; return ${result};`)()
+  const validator=source("scripts/validate-backup.mjs")
+  const diagnostics=validator.slice(validator.indexOf("function addError"),validator.indexOf("function isPresentPrimaryKeyValue"))
+  return new Function(`${diagnostics}\n${code}; return ${result};`)()
 }
 
 test("actual exporter, health and offline validator require receipts from proven capability, not a sparse maximum migration",()=>{

@@ -118,7 +118,21 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          npx --no-install tsx --test tests/outlook-contact-validation.test.ts 2>&1 | tee outlook-contact-tests.tap
+          npx --no-install tsx --test tests/outlook-contact-validation.test.ts tests/outlook-group*.test.ts 2>&1 | tee outlook-contact-tests.tap
+
+      - name: Verify atomic SPC STEM fixture application and permissions
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/spc-stem-api.test.ts tests/spc-fixture-api.test.ts 2>&1 | tee spc-stem-tests.tap
+
+      - name: Verify streaming backup validation at full inventory scale
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          FCUNO_BACKUP_SCALE_TEST=1 node --test tests/backup-validation-stream.test.mjs 2>&1 | tee backup-stream-tests.tap
 
       - name: Verify phonebook delivery, retry and failure reporting
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -133,6 +147,13 @@ jobs:
         run: |
           set -o pipefail
           npx --no-install tsx --test tests/client-storage.test.ts tests/outlook-exchange-sync-trigger.test.ts tests/outlook-recipient-map-continuity.test.ts 2>&1 | tee session-trigger-tests.tap
+
+      - name: Preserve reviewed live Exchange worker and isolated retry/notification regressions
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:exchange-worker 2>&1 | tee exchange-worker-tests.txt
 
       - name: Audit production dependencies
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -177,8 +198,11 @@ jobs:
             ccinfo-table-tests.tap
             country-pricing-tests.tap
             outlook-contact-tests.tap
+            spc-stem-tests.tap
+            backup-stream-tests.tap
             phonebook-sync-tests.tap
             session-trigger-tests.tap
+            exchange-worker-tests.txt
             security-audit-production.json
             security-audit-full.json
             npm-signature-audit.txt

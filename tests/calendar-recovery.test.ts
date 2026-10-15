@@ -3,9 +3,11 @@ import { readFileSync } from "node:fs"
 import { afterEach, beforeEach, mock, test } from "node:test"
 import { transformSync } from "esbuild"
 import { createClient } from "@supabase/supabase-js"
-import { loadEventCalendarHistory, type CalendarAuditRow } from "../lib/eventCalendarRecovery"
+import { loadEventCalendarHistory, readRecoverableHolidaySource, type CalendarAuditRow } from "../lib/eventCalendarRecovery"
 import * as eventStore from "../lib/eventCalendarStore"
 import { EVENT_CALENDAR_PROTOCOL_VERSION } from "../lib/eventCalendarProtocol"
+import { getVerifiedPublicHolidays, holidayBaseline } from "../lib/holidayCalendar"
+import { planHolidayReconciliation } from "../lib/eventCalendarImport"
 
 const at = "2026-10-07T02:00:00.000Z"
 const event = (id: string, title = id) => ({ id, title, startDate: "2026-10-08", endDate: "2026-10-08", people: ["OL"], uncertainPeople: [], tags: [], eventType: "Unclassified" })
@@ -75,11 +77,11 @@ test("history read errors fail closed instead of passing a partial recovery set"
 })
 
 const routeCode = transformSync(readFileSync(new URL("../app/api/event-calendar/recover-missing/route.ts", import.meta.url), "utf8"), { loader: "ts", format: "cjs", target: "node24" }).code
-function recoveryRoute(options: { permissionFailure?: string; auditPermissionFailure?: boolean; historyComplete?: boolean; historyError?: boolean } = {}) {
+function recoveryRoute(options: { permissionFailure?: string; auditPermissionFailure?: boolean; historyComplete?: boolean; historyError?: boolean; historyEvents?: unknown[] } = {}) {
   let payload: Record<string, unknown> = { events: [event("keep", "LATEST SAVED TITLE")], deletedEventIds: ["deleted"], people: ["OL"], emailRecipientsText: "office@example.test" }
   const permissions: string[] = [], writes: unknown[] = []
   let historyReads = 0, clients = 0
-  const history: CalendarAuditRow[] = [{ ...audit(1), after_row: { key: "event-calendar", payload: { events: [event("keep", "STALE TITLE"), event("deleted"), event("recover"), { ...event("past"), startDate: "2026-10-01", endDate: "2026-10-01" }] } } }]
+  const history: CalendarAuditRow[] = [{ ...audit(1), after_row: { key: "event-calendar", payload: { events: options.historyEvents || [event("keep", "STALE TITLE"), event("deleted"), event("recover"), { ...event("past"), startDate: "2026-10-01", endDate: "2026-10-01" }] } } }]
   const db = { from() { const query = { select() { return query }, eq() { return query }, async maybeSingle() { return { data: { payload }, error: null } } }; return query } }
   const modules: Record<string, unknown> = {
     "next/server": { NextResponse: { json: Response.json.bind(Response) } },
@@ -88,7 +90,7 @@ function recoveryRoute(options: { permissionFailure?: string; auditPermissionFai
     "@/lib/eventCalendarStore": { ...eventStore, async mutateEventCalendarStore(_db: unknown, mutation: eventStore.CalendarMutation) { writes.push(mutation); payload = eventStore.applyEventCalendarMutation(payload, mutation); return payload } },
     "@/lib/eventCalendarProtocol": { EVENT_CALENDAR_PROTOCOL_VERSION },
     "@/lib/calendarServiceClient": { createCalendarServiceClient() { clients += 1; return db } },
-    "@/lib/eventCalendarRecovery": { async loadEventCalendarHistory() { historyReads += 1; if (options.historyError) throw new Error("History unavailable"); return { rows: history, historyComplete: options.historyComplete !== false, historyScanned: 1, oldestChecked: history[0].occurred_at } } },
+    "@/lib/eventCalendarRecovery": { readRecoverableHolidaySource, async loadEventCalendarHistory() { historyReads += 1; if (options.historyError) throw new Error("History unavailable"); return { rows: history, historyComplete: options.historyComplete !== false, historyScanned: 1, oldestChecked: history[0].occurred_at } } },
   }
   const loaded = { exports: {} as { GET(): Promise<Response>; POST(request: Request): Promise<Response> } }
   new Function("require", "module", "exports", routeCode)((name: string) => { assert.ok(Object.hasOwn(modules, name), `Unexpected dependency ${name}`); return modules[name] }, loaded, loaded.exports)
@@ -125,4 +127,75 @@ test("recovery stops on history failure with no writes", async () => {
   const app = recoveryRoute({ historyError: true })
   assert.equal((await app.request()).status, 500)
   assert.deepEqual(app.writes, [])
+})
+
+test("recovery preserves valid holiday provenance so an unchanged recovered import needs no manual review", async () => {
+  const reference = getVerifiedPublicHolidays([2027], ["US"])
+  const original = reference.events[0]
+  const app = recoveryRoute({ historyEvents: [original] })
+  const result = await app.request()
+  assert.equal(result.status, 200)
+  assert.equal(result.body.restoredCount, 1)
+  const recovered = result.body.payload.events.find((entry: { id: string }) => entry.id === original.id)
+  assert.deepEqual(recovered.holidaySource, original.holidaySource)
+  const plan = planHolidayReconciliation([recovered], [original], { coverage: reference.coverage })
+  assert.deepEqual(plan, { additions: [], updates: [], removals: [], preserved: [], complete: true })
+  assert.equal((await app.request()).body.restoredCount, 0)
+})
+
+test("recovering a manually changed holiday keeps its original baseline and requires review", async () => {
+  const reference = getVerifiedPublicHolidays([2027], ["HK"])
+  const original = reference.events[0]
+  const changed = { ...original, title: "MANUAL HOLIDAY WORDING", people: ["OL"] }
+  const app = recoveryRoute({ historyEvents: [changed] })
+  const result = await app.request()
+  assert.equal(result.status, 200)
+  const recovered = result.body.restoredEvents[0]
+  assert.deepEqual(recovered.holidaySource, original.holidaySource)
+  assert.equal(recovered.title, changed.title)
+  assert.deepEqual(recovered.people, ["OL"])
+  const plan = planHolidayReconciliation([recovered], [original], { coverage: reference.coverage })
+  assert.deepEqual(plan.updates, [])
+  assert.deepEqual(plan.removals, [])
+  assert.equal(plan.complete, false)
+  assert.equal(plan.preserved[0].reviewRequired, true)
+})
+
+test("recovery whitelists recognized holiday metadata and never treats invalid metadata as verified", async () => {
+  const original = getVerifiedPublicHolidays([2027], ["US"]).events[0]
+  const safe = recoveryRoute({ historyEvents: [{ ...original, holidaySource: { ...original.holidaySource, unrelated: "not provenance" } }] })
+  const result = await safe.request()
+  assert.deepEqual(result.body.restoredEvents[0].holidaySource, original.holidaySource)
+  for (const change of [
+    { country: "XX" }, { year: 2099 }, { identity: "tw-2027-new-year" },
+    { sourceUrls: ["https://unverified.example.test/holidays"] },
+    { deletionIds: ["public-holiday-hk-2027-01-01"] },
+    { baseline: "not-json" }, { baseline: JSON.stringify({ startDate: "2027-02-30" }) },
+  ]) {
+    const app = recoveryRoute({ historyEvents: [{ ...original, holidaySource: { ...original.holidaySource, ...change } }] })
+    const recovered = await app.request()
+    assert.equal(recovered.status, 200)
+    assert.equal(recovered.body.restoredCount, 1)
+    assert.equal(Object.hasOwn(recovered.body.restoredEvents[0], "holidaySource"), false)
+  }
+})
+
+test("recovering a retired holiday retains the older provenance needed for safe reconciliation", async () => {
+  const reference = getVerifiedPublicHolidays([2027], ["US"])
+  const original = reference.events[0]
+  const retired = {
+    ...original, id: "public-holiday-us-2027-next-new-year-observed", startDate: "2027-12-31", endDate: "2027-12-31",
+    title: "PUBLIC HOLIDAY - USA (FEDERAL) - NEW YEAR'S DAY 2028 (OBSERVED)",
+    holidaySource: { ...original.holidaySource, identity: "us-2027-next-new-year-observed", revision: "2026-10-07.1",
+      deletionIds: ["public-holiday-us-2027-next-new-year-observed", "public-holiday-us-2027-12-31"], baseline: "" },
+  }
+  retired.holidaySource.baseline = holidayBaseline(retired)
+  const app = recoveryRoute({ historyEvents: [retired] })
+  const result = await app.request()
+  assert.equal(result.status, 200)
+  const recovered = result.body.restoredEvents[0]
+  assert.deepEqual(recovered.holidaySource, retired.holidaySource)
+  const plan = planHolidayReconciliation([recovered], reference.events, { coverage: reference.coverage })
+  assert.deepEqual(plan.removals, [retired.id])
+  assert.deepEqual(plan.preserved, [])
 })

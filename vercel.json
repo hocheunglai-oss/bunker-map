@@ -8,8 +8,24 @@
       "schedule": "0 0 * * 1-5"
     },
     {
+      "path": "/api/event-calendar/daily-reminder",
+      "schedule": "15 0 * * 1-5"
+    },
+    {
+      "path": "/api/event-calendar/daily-reminder",
+      "schedule": "30 0 * * 1-5"
+    },
+    {
       "path": "/api/task-calendar/daily-reminder",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/task-calendar/daily-reminder",
+      "schedule": "15 0 * * *"
+    },
+    {
+      "path": "/api/task-calendar/daily-reminder",
+      "schedule": "30 0 * * *"
     },
     {
       "path": "/api/backups/bunker-map-drive",

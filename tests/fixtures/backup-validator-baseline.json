@@ -1,0 +1,10 @@
+{
+  "schema": "fcuno.backup-validator-test-baseline/v1",
+  "repository": "hocheunglai-oss/bunker-map",
+  "commit": "b3b6fe34d16107a269b981074bfe1ee0b2614119",
+  "sourcePath": "scripts/validate-backup.mjs",
+  "fixturePath": "validate-backup.pre-streaming-b3b6fe3.txt",
+  "sourceSha256": "3c9762e9f7661d2d8719f6491a8436e9c2c33d740ec9010679867acb113a2148",
+  "sourceBytes": 97282,
+  "provenance": "Exact git blob from the PR61 pre-streaming validator, including the ccPorts polymorphic-parent fix. Committed fixture needs no Git history or network in CI. Tests rewrite only the relative backupPricingSchema import when executing a temporary copy."
+}

@@ -4,11 +4,12 @@ import {
   getDueTaskCalendarTasks,
   getHongKongTaskDate,
   getTaskScheduleText,
+  isTaskDueOnDate,
   readTaskCalendarTasks,
   TaskCalendarTask,
 } from "@/data/taskCalendar"
 import { loadCalendarStaffDirectory, resolveCalendarStaffRecipients } from "@/lib/calendarStaff"
-import { deliverCalendarReminder } from "@/lib/calendarDelivery"
+import { deliverCalendarReminder, getCalendarReminderDelivery } from "@/lib/calendarDelivery"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 
 const SHARED_STORE_KEY = "task-calendar"
@@ -80,9 +81,31 @@ export async function GET(request: Request) {
     const storedTasks = readTaskCalendarTasks(data?.payload ?? null)
     const occurrenceDate = getHongKongTaskDate()
     const dueTasks = getDueTaskCalendarTasks(occurrenceDate, storedTasks)
-    const staff = dueTasks.length ? await loadCalendarStaffDirectory(supabase) : []
-    for (const task of dueTasks) {
+    let staff: Awaited<ReturnType<typeof loadCalendarStaffDirectory>> | undefined
+    for (const scheduledTask of dueTasks) {
       try {
+        if (!dryRun) {
+          const previous = await getCalendarReminderDelivery({ kind: "task", occurrenceDate, recordId: scheduledTask.id }, { supabase })
+          if (previous) {
+            skipped.push({ id: scheduledTask.id, reason: previous.status === "already_delivered" ? "Already sent for this date." : "Another run is handling this reminder." })
+            continue
+          }
+        }
+        staff ??= await loadCalendarStaffDirectory(supabase)
+        // A preceding delivery may take time. Re-read each task at submission
+        // so a deletion or edit during this run can stop or correct its email.
+        const { data: latest, error: latestError } = await supabase
+          .from("office_calendar_store").select("payload").eq("key", SHARED_STORE_KEY).maybeSingle()
+        if (latestError) throw new Error("The current task could not be checked. This reminder was not sent.")
+        const task = readTaskCalendarTasks(latest?.payload ?? null).find((candidate) => candidate.id === scheduledTask.id)
+        if (!task) {
+          skipped.push({ id: scheduledTask.id, reason: "Task was deleted before this reminder was sent." })
+          continue
+        }
+        if (!isTaskDueOnDate(task, occurrenceDate)) {
+          skipped.push({ id: task.id, reason: "Task schedule changed; no reminder is due for this date." })
+          continue
+        }
         const notify = resolveCalendarStaffRecipients(task.notify, staff)
         const copied = resolveCalendarStaffRecipients(task.cc, staff)
         const unresolved = Array.from(new Set([...notify.unresolved, ...copied.unresolved]))
@@ -100,7 +123,7 @@ export async function GET(request: Request) {
         }
         sent.push({ id: task.id, subject: email.subject, to: to.length, cc: cc.length })
       } catch (error) {
-        failed.push({ id: task.id, reason: error instanceof Error ? error.message : "This task reminder could not be delivered." })
+        failed.push({ id: scheduledTask.id, reason: error instanceof Error ? error.message : "This task reminder could not be delivered." })
       }
     }
 

@@ -4,6 +4,7 @@ import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, use
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
+import { phonebookCompanyPatch, validPhonebookCompanyVersion } from "@/lib/phonebookCompanySave"
 import {
   enqueuePhonebookSync,
   loadPhonebookSyncScope,
@@ -47,6 +48,7 @@ type Contact = {
 
 type Company = {
   id: string
+  updated_at?: string
   name: string
   other_name: string | null
   phone: string | null
@@ -559,6 +561,8 @@ export default function PhonebookPage() {
   const [companyModalOpen, setCompanyModalOpen] = useState(false)
   const [companyDraft, setCompanyDraft] = useState<CompanyDraft>(null)
   const [companySaving, setCompanySaving] = useState(false)
+  const companySaveTokenRef = useRef<string | null>(null)
+  const companyLoadTokenRef = useRef<string | null>(null)
   const [contactSyncing, setContactSyncing] = useState(false)
   const [contactSyncLabel, setContactSyncLabel] = useState("")
   const [carddavCounts, setCarddavCounts] = useState<CarddavCounts | null>(null)
@@ -637,6 +641,7 @@ export default function PhonebookPage() {
   function normalizeLoadedCompanies(companyData: Partial<Company>[]) {
     return companyData.map((company) => ({
       id: company.id || "",
+      updated_at: validPhonebookCompanyVersion(company.updated_at) ? company.updated_at : undefined,
       name: company.name?.toUpperCase?.() || company.name || "",
       other_name: company.other_name?.toUpperCase?.() || company.other_name || null,
       phone: company.phone?.toUpperCase?.() || company.phone || null,
@@ -1468,7 +1473,8 @@ export default function PhonebookPage() {
   }
 
   function addCompany() {
-    if (saving || contactSaveTokenRef.current) return
+    if (saving || contactSaveTokenRef.current || companySaving || companySaveTokenRef.current) return
+    companyLoadTokenRef.current = null
     setCreatingCompany(true)
     setCompanyDraft({
       id: `new-company-${Date.now()}`,
@@ -1513,9 +1519,12 @@ export default function PhonebookPage() {
   }
 
   async function openCompanyModal(company: Company) {
-    if (saving || contactSaveTokenRef.current) return
+    if (saving || contactSaveTokenRef.current || companySaving || companySaveTokenRef.current) return
+    const loadToken = crypto.randomUUID()
+    companyLoadTokenRef.current = loadToken
     setCompanyDraft({
       ...company,
+      updated_at: undefined,
       country: normalizeCountryName(company.country) || null,
       tel_country: company.tel_country || getCountryCode(company.country) || null,
     })
@@ -1528,6 +1537,7 @@ export default function PhonebookPage() {
       .eq("id", company.id)
       .single()
 
+    if (companyLoadTokenRef.current !== loadToken) return
     if (error || !data) {
       setMessage("Unable to load company details.")
       return
@@ -1546,6 +1556,8 @@ export default function PhonebookPage() {
   }
 
   function closeCompanyModal() {
+    if (companySaving || companySaveTokenRef.current) return
+    companyLoadTokenRef.current = null
     setCompanyModalOpen(false)
     setCompanyDraft(null)
     setCompanySaving(false)
@@ -1562,7 +1574,12 @@ export default function PhonebookPage() {
   }
 
   async function saveCompany() {
-    if (!companyDraft) return
+    if (!companyDraft || companySaving || companySaveTokenRef.current) return
+    if (!creatingCompany && !companyDraft.updated_at) {
+      setMessage("Company details are still loading. Reopen the company if loading does not finish.")
+      return
+    }
+    companySaveTokenRef.current = crypto.randomUUID()
     setCompanySaving(true)
     setMessage("")
     const originalCompany = creatingCompany ? null : companyById.get(companyDraft.id) || null
@@ -1605,19 +1622,31 @@ export default function PhonebookPage() {
       notes: companyDraft.notes?.trim().toUpperCase() || null,
     }
 
-    const query = creatingCompany
-      ? supabase.from("phonebook_companies").insert(payload).select("*").single()
-      : supabase
-          .from("phonebook_companies")
-          .update(payload)
-          .eq("id", companyDraft.id)
-          .select("*")
-          .single()
-
-    const { data, error } = await query
+    let data: Company | null = null
+    let savedContactIds: string[] = []
+    let error: { message: string } | null = null
+    try {
+      if (creatingCompany) {
+        const result = await supabase.from("phonebook_companies").insert(payload).select("*").single()
+        data = result.data as Company | null
+        error = result.error
+      } else {
+        const response = await fetch("/api/phonebook/company", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: companyDraft.id, expectedUpdatedAt: companyDraft.updated_at, patch: phonebookCompanyPatch(payload) }),
+        })
+        const result = await response.json()
+        if (!response.ok || !result.company || !Array.isArray(result.contactIds)) throw new Error(result.message || "The save could not be verified. Reopen the company before retrying.")
+        data = result.company as Company
+        savedContactIds = result.contactIds
+      }
+    } catch (failure) {
+      error = { message: failure instanceof Error ? failure.message : "The save was not confirmed. Your edits are still here; reopen the company before retrying." }
+    }
 
     if (error || !data) {
-      setMessage("Unable to save company.")
+      setMessage(error?.message || "Unable to save company.")
+      companySaveTokenRef.current = null
       setCompanySaving(false)
       return
     }
@@ -1638,30 +1667,13 @@ export default function PhonebookPage() {
       return next.sort((a, b) => a.name.localeCompare(b.name))
     })
 
-    const affectedContacts = !creatingCompany && previousCompanyName
-      ? await loadCompanyContactsFromSupabase(previousCompanyName)
-      : []
-    let syncedContactIds = affectedContacts.map((contact) => contact.id)
-
-    if (!creatingCompany && previousCompanyName !== payload.name && affectedContacts.length > 0) {
-      const contactIds = affectedContacts.map((contact) => contact.id)
-      const nextContacts = affectedContacts.map((contact) => {
+    const syncedContactIds = savedContactIds
+    if (!creatingCompany && previousCompanyName !== payload.name) {
+      const contactIds = savedContactIds
+      const nextContacts = contacts.filter((contact) => contactIds.includes(contact.id)).map((contact) => {
         const nextContact = { ...contact, company: payload.name }
         return { ...nextContact, search_text: buildContactSearchText(nextContact) }
       })
-
-      const updates = nextContacts.map((contact) =>
-        supabase
-          .from("phonebook_contacts")
-          .update({ company: payload.name, search_text: contact.search_text })
-          .eq("id", contact.id),
-      )
-      const results = await Promise.all(updates)
-      if (results.some((result) => result.error)) {
-        setMessage("Company saved, but linked contacts could not be renamed.")
-        setCompanySaving(false)
-        return
-      }
 
       setContacts((prev) => {
         if (selectedCompany && normalizeCompanyKey(selectedCompany) !== normalizeCompanyKey(previousCompanyName)) {
@@ -1690,13 +1702,10 @@ export default function PhonebookPage() {
     }
 
     setCompanyDraft(data as Company)
+    companySaveTokenRef.current = null
     setCompanySaving(false)
     setCompanyModalOpen(false)
     setCreatingCompany(false)
-
-    if (!creatingCompany && previousCompanyName === payload.name) {
-      syncedContactIds = affectedContacts.map((contact) => contact.id)
-    }
 
     if (syncedContactIds.length > 0) {
       await syncPhoneContacts(false, syncedContactIds, {
@@ -1707,7 +1716,7 @@ export default function PhonebookPage() {
   }
 
   async function deleteCompany() {
-    if (!companyDraft || creatingCompany) return
+    if (!companyDraft || creatingCompany || companySaving || companySaveTokenRef.current) return
     if (!confirm(`Delete ${companyDraft.name || "this company"}?`)) return
     const companyNameToDelete = companyDraft.name
     const companyContacts = await loadCompanyContactsFromSupabase(companyNameToDelete)
@@ -1908,33 +1917,32 @@ export default function PhonebookPage() {
         } else if (entry.action === "update" && entry.before && entry.after) {
           const beforeCompany = entry.before as Company
           const afterCompany = entry.after as Company
-          const { error } = await supabase.from("phonebook_companies").update(beforeCompany).eq("id", afterCompany.id)
-          if (error) throw error
+          if (!afterCompany.updated_at) throw new Error("Reopen this company to reverse an older change safely.")
+          const response = await fetch("/api/phonebook/company", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: afterCompany.id, expectedUpdatedAt: afterCompany.updated_at, patch: phonebookCompanyPatch(beforeCompany) }),
+          })
+          const result = await response.json()
+          if (!response.ok || !result.company || !Array.isArray(result.contactIds)) throw new Error(result.message || "The undo could not be verified. Reopen the company.")
+          const restoredCompany = result.company as Company
           refreshContactCachesInBackground()
           setCompanies((prev) =>
-            prev.map((item) => (item.id === afterCompany.id ? beforeCompany : item)).sort((a, b) => a.name.localeCompare(b.name)),
+            prev.map((item) => (item.id === afterCompany.id ? restoredCompany : item)).sort((a, b) => a.name.localeCompare(b.name)),
           )
           if (beforeCompany.name !== afterCompany.name) {
-            const affected = await loadCompanyContactsFromSupabase(afterCompany.name)
-            for (const contact of affected) {
-              const reverted = { ...contact, company: beforeCompany.name, search_text: buildContactSearchText({ ...contact, company: beforeCompany.name }) }
-              const { error: contactError } = await supabase
-                .from("phonebook_contacts")
-                .update({ company: reverted.company, search_text: reverted.search_text })
-                .eq("id", contact.id)
-              if (contactError) throw contactError
-            }
+            const affectedIds = new Set<string>(result.contactIds)
             setContacts((prev) => {
               if (selectedCompany && normalizeCompanyKey(selectedCompany) !== normalizeCompanyKey(afterCompany.name)) {
                 return prev
               }
               return prev.map((contact) =>
-                normalizeCompanyKey(contact.company) === normalizeCompanyKey(afterCompany.name)
+                affectedIds.has(contact.id)
                   ? { ...contact, company: beforeCompany.name, search_text: buildContactSearchText({ ...contact, company: beforeCompany.name }) }
                   : contact,
               )
             })
-            await syncPhoneContacts(false, affected.map((contact) => contact.id), {
+            if (selectedCompany === afterCompany.name) setSelectedCompany(restoredCompany.name)
+            await syncPhoneContacts(false, result.contactIds, {
               successMessage: "Undone and synced.",
               failureMessage: "Undone locally, but CardDAV sync failed.",
             })
@@ -2843,7 +2851,7 @@ export default function PhonebookPage() {
           </section>
         </div>
 
-        {message && !contactModalOpen && (
+        {message && !contactModalOpen && !companyModalOpen && (
           <div style={{ color: message.startsWith("Unable") ? "var(--fc-admin-danger-text)" : "var(--fc-admin-success-text)", fontWeight: 700 }}>
             {message}
           </div>
@@ -2858,15 +2866,15 @@ export default function PhonebookPage() {
             aria-modal="true"
             aria-label={creatingCompany ? "New company" : "Company details"}
           >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "16px" }}>
-              <div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px", marginBottom: "16px" }}>
+              <div style={{ minWidth: 0, overflowWrap: "anywhere" }}>
                 <div style={{ color: "var(--fc-admin-link)", fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "6px" }}>Company</div>
                 <div style={{ fontSize: "24px", fontWeight: 800, lineHeight: 1.15 }}>{companyDraft.name || "(No Name)"}</div>
               </div>
               <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
                 <button
                   onClick={() => void saveCompany()}
-                  disabled={companySaving}
+                  disabled={companySaving || (!creatingCompany && !companyDraft.updated_at)}
                   style={{
                     ...buttonStyle,
                     background: "var(--fc-admin-success-bg)",
@@ -2880,6 +2888,7 @@ export default function PhonebookPage() {
                 {!creatingCompany ? (
                   <button
                     onClick={() => void deleteCompany()}
+                    disabled={companySaving}
                     style={{
                       ...buttonStyle,
                       background: "var(--fc-admin-danger-bg)",
@@ -2891,13 +2900,14 @@ export default function PhonebookPage() {
                     Delete
                   </button>
                 ) : null}
-                <button onClick={closeCompanyModal} style={{ ...buttonStyle, minWidth: "84px" }}>
+                <button onClick={closeCompanyModal} disabled={companySaving} style={{ ...buttonStyle, minWidth: "84px" }}>
                   Close
                 </button>
               </div>
             </div>
 
-            <div style={{ display: "grid", gap: "12px" }}>
+            {message ? <div role="status" style={{ color: "var(--fc-error, #b00020)", marginBottom: "12px" }}>{message}</div> : null}
+            <fieldset disabled={companySaving || (!creatingCompany && !companyDraft.updated_at)} style={{ display: "grid", gap: "12px", border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <div style={modalSectionStyle}>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "12px" }}>
                       <div>
@@ -2955,7 +2965,7 @@ export default function PhonebookPage() {
                   </div>
                 </div>
               </div>
-            </div>
+            </fieldset>
           </div>
         </div>
       ) : null}

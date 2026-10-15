@@ -83,7 +83,10 @@ test("future fixtures snapshot IMO while legacy fixtures remain on vessel-name f
     assert.match(sql, /spc_fixtures_vessel_imo_idx/)
   }
   assert.doesNotMatch(fixtureImoMigration, /\bupdate\s+public\.spc_fixtures\b/i)
-  assert.match(fixturesLibrary, /vessel_imo: cleanSpcImo\(meta\.imo \|\| parsed\.imo\) \|\| existingFixture\?\.vessel_imo \|\| null/)
+  // Fresh fixtures snapshot the enquiry IMO. Existing fixtures are preserved by
+  // the atomic STEM RPC, rather than rebuilt through the former upsert path.
+  assert.match(fixturesLibrary, /vessel_imo: cleanSpcImo\(meta\.imo \|\| parsed\.imo\) \|\| null/)
+  assert.match(fixturesLibrary, /export async function buildPendingSpcFixtureForEnquiry/)
   assert.match(fixturesLibrary, /vesselImo: row\.vessel_imo/)
   assert.match(historyLibrary, /\.eq\("vessel_imo", imo\)/)
   assert.match(historyLibrary, /spcVesselIdentityKeysFromValues\([\s\S]*?row\.vessel_imo,[\s\S]*?\)/)

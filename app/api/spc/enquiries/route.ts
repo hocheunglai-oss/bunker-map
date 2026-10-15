@@ -32,20 +32,18 @@ const ISO_CURSOR_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/
 
 function errorResponse(error: unknown, fallback: string) {
+  const code = error && typeof error === "object" && "code" in error ? error.code : ""
   const message =
     error instanceof Error
       ? error.message
       : error && typeof error === "object" && "message" in error && typeof error.message === "string"
         ? error.message
         : fallback
-  const status =
-    message === "Unauthorized"
-      ? 401
-      : message === "Forbidden"
-        ? 403
-        : message.includes("required") || message.startsWith("Select a valid")
-          ? 400
-          : 500
+  let status = 500
+  if (message === "Unauthorized") status = 401
+  else if (message === "Forbidden" || code === "42501") status = 403
+  else if (code === "40001") status = 409
+  else if (code === "22023" || message.includes("required") || message.startsWith("Select a valid")) status = 400
   return NextResponse.json({ message }, { status })
 }
 
@@ -208,6 +206,8 @@ export async function PATCH(request: Request) {
       lostReason?: unknown
       supplierTraderUsername?: unknown
       supplierTraderDisplayName?: unknown
+      expectedUpdatedAt?: unknown
+      stemRequestId?: unknown
       fixture?: unknown
     }
     const id = typeof payload.id === "string" ? payload.id.trim() : ""
@@ -229,6 +229,7 @@ export async function PATCH(request: Request) {
           lsmgo: typeof fixture.lsmgo === "string" ? fixture.lsmgo : "",
           price: typeof fixture.price === "string" ? fixture.price : "",
           barging: typeof fixture.barging === "string" ? fixture.barging : "",
+          expectedUpdatedAt: typeof payload.expectedUpdatedAt === "string" ? payload.expectedUpdatedAt : "",
         },
         session,
         request,
@@ -303,6 +304,8 @@ export async function PATCH(request: Request) {
           typeof payload.supplierTraderUsername === "string" ? payload.supplierTraderUsername : "",
         supplierTraderDisplayName:
           typeof payload.supplierTraderDisplayName === "string" ? payload.supplierTraderDisplayName : "",
+        expectedUpdatedAt: typeof payload.expectedUpdatedAt === "string" ? payload.expectedUpdatedAt : "",
+        stemRequestId: typeof payload.stemRequestId === "string" ? payload.stemRequestId : "",
       },
       session,
       request,

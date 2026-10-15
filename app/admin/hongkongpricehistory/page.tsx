@@ -39,6 +39,7 @@ function average(values: Array<number | null>) {
 
 const pageShellStyle: React.CSSProperties = {
   minHeight: "100vh",
+  minWidth: 0,
   background:
     "var(--fc-admin-page-bg)",
   padding: "24px",
@@ -48,6 +49,7 @@ const pageShellStyle: React.CSSProperties = {
 
 const outerPanelStyle: React.CSSProperties = {
   maxWidth: "920px",
+  minWidth: 0,
   margin: "0 auto",
   background:
     "var(--fc-admin-panel-bg)",
@@ -444,8 +446,15 @@ export default function HongKongPriceHistoryPage() {
           {history.needsReload ? <p role="status" style={{ padding: "14px" }}>History is not verified. Reload saved history before making changes.</p> : loading ? (
             <p style={{ margin: 0, padding: "14px", color: "var(--fc-admin-panel-text)" }}>Loading history...</p>
           ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div role="region" aria-label="Hong Kong price history table" tabIndex={0} style={{ overflowX: "auto", maxWidth: "100%", overscrollBehaviorX: "contain", WebkitOverflowScrolling: "touch", outlineOffset: "-2px" }}>
+              <table aria-label="Hong Kong price history" style={{ width: "100%", minWidth: showDeleteButtons ? "572px" : "460px", borderCollapse: "collapse", tableLayout: "fixed", overflowWrap: "anywhere" }}>
+                <colgroup>
+                  <col style={{ width: "144px" }} />
+                  <col style={{ width: "100px" }} />
+                  <col style={{ width: "108px" }} />
+                  <col style={{ width: "108px" }} />
+                  {showDeleteButtons && <col style={{ width: "112px" }} />}
+                </colgroup>
                 <thead>
                   <tr style={{ background: "var(--fc-table-head-bg)", color: "var(--fc-admin-panel-text)" }}>
                     {["Date", "HSFO", "VLSFO", "MGO", ...(showDeleteButtons ? ["Delete"] : [])].map((label) => (

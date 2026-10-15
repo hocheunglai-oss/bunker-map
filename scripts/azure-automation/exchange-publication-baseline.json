@@ -1,0 +1,29 @@
+{
+  "schema": "fcuno.exchange-publication-baseline/v1",
+  "verifiedAt": "2026-10-14T11:32:46Z",
+  "retrievedAt": "2026-10-14T11:21:47.594Z",
+  "workerVersion": "fcuno-exchange-runbook/2026-10-09.1",
+  "sourceSha256": "7fbbff302cc843e231ca6b53a5490a9781839f7a84919117773ad4b2eeb030a4",
+  "sourcePath": "scripts/azure-automation/sync-fcuno-outlook-addressbook.ps1",
+  "productionOrigin": "https://fcuno.com",
+  "supabaseProject": "gglyugbrnyvyfktgwert",
+  "azure": {
+    "subscriptionId": "360bfcdd-bb34-4281-ae3c-a3a0fae65eef",
+    "tenantId": "70011d0d-19b4-4a61-8195-ab1fd987c20f",
+    "resourceGroup": "fcuno-tools",
+    "automationAccount": "fcuno-exchange-sync",
+    "runbook": "Sync-FCUno-OutlookAddressBook",
+    "runtimeEnvironment": "FCUNO-PowerShell-7-6",
+    "runtimeVersion": "7.6",
+    "exchangeModuleVersion": "3.10.1"
+  },
+  "migration": {
+    "version": "20261007065554",
+    "name": "outlook_exchange_alert_delivery",
+    "path": "supabase/migrations/20261007065554_outlook_exchange_alert_delivery.sql",
+    "sourceSha256": "f3b90975f4590f3fdbb7f18f7d384a6fcdfa33907862ea9c90288a880624b405",
+    "installedStatementMd5": "e2cbd5f1c97caf4aa4840dab078032e8",
+    "installedStatementLength": 11282,
+    "alreadyInstalled": true
+  }
+}

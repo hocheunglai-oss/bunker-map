@@ -21,14 +21,19 @@ export type PhonebookSyncHarness = {
   contactWriteFailure: "reject" | "commit-reject" | null
   deferContactWrite: boolean
   releaseContactWrite: (() => void) | null
+  companySaveStatus?: number
+  deferCompanySave?: boolean
+  releaseCompanySave?: () => void
+  companyReadPlan?: boolean[]
+  releaseCompanyReads?: Array<() => void>
 }
 declare global { interface Window { __phonebookSyncHarness: PhonebookSyncHarness } }
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
 export function installPhonebookSyncHarness() {
   const companies: Row[] = [
-    { id: "synthetic-company-a", name: "ALPHA SHIPPING", source_key: "company-a", country: "HONG KONG", tel_country: "852", tel_no_1: "22334455" },
-    { id: "synthetic-company-b", name: "BETA SHIPPING", source_key: "company-b", country: "SINGAPORE", tel_country: "65", tel_no_1: "61234567" },
+    { id: "synthetic-company-a", name: "ALPHA SHIPPING", source_key: "company-a", country: "HONG KONG", tel_country: "852", tel_no_1: "22334455", updated_at: "2026-10-14T00:00:00.123456Z" },
+    { id: "synthetic-company-b", name: "BETA SHIPPING", source_key: "company-b", country: "SINGAPORE", tel_country: "65", tel_no_1: "61234567", updated_at: "2026-10-14T00:00:00.123456Z" },
   ]
   const contacts: Row[] = [
     { id: "synthetic-contact-a", full_name: "ALICE TEST", company: "ALPHA SHIPPING", company_source_id: "company-a", favorite: false, mobile_1: "+85291112222", personal_email: "alice@example.test" },
@@ -46,6 +51,18 @@ export function installPhonebookSyncHarness() {
     if (url.origin !== window.location.origin) throw new Error(`External request blocked by local fixture: ${url.origin}`)
     const json = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } })
     if (url.pathname === "/api/phonebook/bootstrap" && method === "GET") return json({ companies: harness.companies, contactCount: harness.contacts.length })
+    if (url.pathname === "/api/phonebook/company" && method === "POST" && body) {
+      if (harness.deferCompanySave) await new Promise<void>((resolve) => { harness.releaseCompanySave = resolve })
+      harness.releaseCompanySave = undefined
+      if (harness.companySaveStatus) return json({ message: "This company changed or was removed. Your edits are still here; reopen it before saving again." }, harness.companySaveStatus)
+      const company = harness.companies.find((row) => row.id === body.id)
+      if (!company || company.updated_at !== body.expectedUpdatedAt) return json({ message: "Company changed; reopen before saving." },409)
+      const previousName = company.name
+      const affected = harness.contacts.filter((row) => row.company === previousName || row.company_source_id === company.source_key)
+      Object.assign(company, body.patch, { updated_at: "2026-10-14T00:00:01.123456Z" })
+      affected.forEach((row) => { row.company = company.name })
+      return json({ company: clone(company), contactIds: affected.map((row) => row.id) })
+    }
     if (url.pathname === "/api/phonebook/carddav-sync" && method === "GET") return json({ savedContactCount: harness.contacts.length, carddavContactCount: harness.contacts.length, carddavTotalCount: harness.contacts.length + 5, carddavOtherCount: 5, carddavMatchedCount: harness.contacts.length, carddavMissingCount: 0, carddavOrphanCount: 0, ...harness.countOverrides, checkedAt: new Date().toISOString() })
     if (url.pathname === "/api/phonebook/contacts" && method === "GET") {
       if (harness.malformedContacts) return json({})
@@ -103,6 +120,9 @@ class Query implements PromiseLike<QueryResult> {
     const matches = (row: Row) => operation.filters.every(({ field, value, operator }) => operator === "in" ? (value as unknown[]).includes(row[field]) : row[field] === value)
     if (operation.method === "GET") {
       const result = clone(rows.filter(matches))
+      if (operation.table === "phonebook_companies" && this.singular && harness.companyReadPlan?.shift()) {
+        await new Promise<void>((resolve) => { (harness.releaseCompanyReads ||= []).push(resolve) })
+      }
       return { data: this.singular ? result[0] || null : result, error: null }
     }
     harness.operations.push(operation)

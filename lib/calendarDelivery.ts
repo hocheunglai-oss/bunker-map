@@ -17,8 +17,9 @@ type CalendarDelivery = {
 }
 type Dependencies = { supabase: SupabaseClient; send: typeof sendCalendarEmail; now?: () => Date; preflight?: () => void }
 export type CalendarDeliveryResult = { status: "delivered" | "already_delivered" | "in_progress"; sent: number }
+type CalendarDeliveryIdentity = Pick<CalendarDelivery, "kind" | "occurrenceDate" | "recordId" | "recordVersion">
 
-export function calendarDeliveryKey(input: CalendarDelivery) {
+export function calendarDeliveryKey<T extends CalendarDeliveryIdentity>(input: T) {
   // Changing task wording/recipients during a day must not resend its occurrence.
   // Event-change emails instead identify the exact saved version/batch.
   const occurrence = input.kind === "event-change" ? input.recordVersion : input.occurrenceDate
@@ -26,12 +27,28 @@ export function calendarDeliveryKey(input: CalendarDelivery) {
   return `calendar-email:${createHash("sha256").update(JSON.stringify([input.kind, input.recordId, occurrence])).digest("hex")}`
 }
 
+/** Read the receipt before resolving recipients or SMTP configuration on retries. */
+export async function getCalendarReminderDelivery(input: CalendarDeliveryIdentity, dependencies?: Pick<Dependencies, "supabase" | "now">): Promise<CalendarDeliveryResult | null> {
+  const db = dependencies?.supabase || createCalendarServiceClient()
+  const prior = await db.from("office_calendar_store").select("payload").eq("key", calendarDeliveryKey(input)).maybeSingle()
+  if (prior.error) throw new Error("Calendar email delivery history is unavailable. No duplicate email was sent.")
+  if (!prior.data) return null
+  const previous = prior.data.payload
+  if (!previous || previous.version !== 1) throw new Error("Calendar email delivery history is unavailable. No duplicate email was sent.")
+  if (previous.status === "sent") return { status: "already_delivered", sent: Number(previous.recipientCount) || 0 }
+  const now = dependencies?.now || (() => new Date())
+  if (previous.status === "claimed" && Number.isFinite(Date.parse(previous.claimedAt)) && now().getTime() - Date.parse(previous.claimedAt) < 120000) return { status: "in_progress", sent: 0 }
+  throw new Error("This email's delivery could not be confirmed. Automatic resend is paused to avoid duplicates; ask an administrator to check Sent Items.")
+}
+
 export async function deliverCalendarReminder(input: CalendarDelivery, dependencies?: Dependencies): Promise<CalendarDeliveryResult> {
+  const db = dependencies?.supabase || createCalendarServiceClient()
+  const now = dependencies?.now || (() => new Date())
+  const previous = await getCalendarReminderDelivery(input, { supabase: db, now })
+  if (previous) return previous
   const to = [...new Set(input.to.map((email) => email.toLowerCase()))]
   const cc = [...new Set((input.cc || []).map((email) => email.toLowerCase()))].filter((email) => !to.includes(email))
   if (!to.length || [...to, ...cc].some((email) => !isValidEmailAddress(email))) throw new Error("Calendar email recipients are incomplete or invalid.")
-  const db = dependencies?.supabase || createCalendarServiceClient()
-  const now = dependencies?.now || (() => new Date())
   const send = dependencies?.send || sendCalendarEmail
   if (dependencies) dependencies.preflight?.()
   else if (getEmailNoticeConfigStatus().missing.length) throw new Error("Calendar email delivery is not configured. No email was sent.")
@@ -43,12 +60,9 @@ export async function deliverCalendarReminder(input: CalendarDelivery, dependenc
   const claim = await db.from("office_calendar_store").insert({ key, payload, updated_at: at })
   if (claim.error) {
     if (claim.error.code !== "23505") throw new Error("Could not record this email attempt. No email was sent.")
-    const prior = await db.from("office_calendar_store").select("payload").eq("key", key).maybeSingle()
-    if (prior.error || !prior.data?.payload || prior.data.payload.version !== 1) throw new Error("Calendar email delivery history is unavailable. No duplicate email was sent.")
-    const previous = prior.data.payload
-    if (previous.status === "sent") return { status: "already_delivered", sent: Number(previous.recipientCount) || 0 }
-    if (previous.status === "claimed" && Number.isFinite(Date.parse(previous.claimedAt)) && now().getTime() - Date.parse(previous.claimedAt) < 120000) return { status: "in_progress", sent: 0 }
-    throw new Error("This email's delivery could not be confirmed. Automatic resend is paused to avoid duplicates; ask an administrator to check Sent Items.")
+    const raced = await getCalendarReminderDelivery(input, { supabase: db, now })
+    if (raced) return raced
+    throw new Error("Calendar email delivery history is unavailable. No duplicate email was sent.")
   }
 
   async function record(status: "sent" | "uncertain") {
