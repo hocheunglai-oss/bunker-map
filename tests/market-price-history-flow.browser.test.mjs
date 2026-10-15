@@ -59,7 +59,7 @@ try {
     await context.route("**/*",route=>{if(new URL(route.request().url()).origin===origin)return route.continue();blocked.push(route.request().url());return route.abort()})
     const button=name=>page.getByRole("button",{name,exact:true})
     const field=name=>page.getByRole("textbox",{name,exact:true})
-    const historyRows=()=>page.locator('table:not([aria-label]) tbody tr')
+    const historyRows=()=>page.getByRole('table',{name:`${title} price history`,exact:true}).locator('tbody tr')
     const firstPrice=()=>historyRows().first().locator("td").nth(1).innerText()
     async function ready(){await page.waitForFunction(()=>{const b=[...document.querySelectorAll("button")].find(b=>b.textContent==="Add As Latest");return b&&!b.disabled})}
     async function fill(day,hsfo="0") {

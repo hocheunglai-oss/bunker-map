@@ -16,6 +16,7 @@ import {
 import { loadGoogleApis } from "@/lib/googleApis"
 import { buildGoogleDriveFolderLookupQuery } from "@/lib/queryEscaping"
 import { pricingBackupSchemaFromInventory, pricingBackupSchemaVersion, type PricingBackupSchemaVersion } from "@/lib/backupPricingSchema.mjs"
+import { streamReferencedTruthSnapshots } from "@/lib/backupTruthSnapshotExport"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -1305,25 +1306,22 @@ async function buildBackupFile(
         "outlookExchangeTruthSnapshots",
         isFirstSection,
         async (appendRows) => {
-          await streamTableRows(
-            supabase,
-            {
-              key: "outlookExchangeTruthSnapshots",
-              table: "outlook_exchange_truth_snapshots",
-              order: [{ column: "snapshot_sha256", ascending: true }],
-            },
-            async (rows) => {
-              const referenced = (
-                rows as Array<Record<string, unknown>>
-              ).filter((row) => {
+          await streamReferencedTruthSnapshots({
+            readSnapshot: (hash) => supabase
+              .from("outlook_exchange_truth_snapshots")
+              .select("*")
+              .eq("snapshot_sha256", hash)
+              .limit(1),
+            snapshotHashes: referencedSnapshotHashes,
+            retryRead: retrySupabaseRead,
+            appendRows: async (rows) => {
+              for (const row of rows as Array<Record<string, unknown>>) {
                 const hash = String(row.snapshot_sha256 || "")
-                if (!referencedSnapshotHashes.has(hash)) return false
                 seenSnapshotHashes.add(hash)
-                return true
-              })
-              await appendRows(referenced)
-            }
-          )
+              }
+              await appendRows(rows)
+            },
+          })
         },
         sections,
         counts
