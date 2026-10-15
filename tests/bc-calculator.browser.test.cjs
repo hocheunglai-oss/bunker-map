@@ -13,7 +13,7 @@ const tailwind = require("@tailwindcss/postcss")
 const root = path.resolve(__dirname, "..")
 const id = "00000000-0000-0000-0000-000000000001"
 const timestamp = "2026-10-15T01:00:00.000Z"
-const screenshotDirectory = process.env.BC_SCREENSHOT_DIR || "/tmp/bc-calculator-table-verification"
+const screenshotDirectory = process.env.BC_SCREENSHOT_DIR || "/tmp/bc-calculator-clear-verification"
 const untouchedTable = { title: "UNCHANGED TABLE", info: "", blocks: [], table: [["Supplier", "Remarks"], ["Synthetic supplier", "Preserve this table"]], column_widths: [65, 35], table_row_updates: ["", timestamp] }
 
 async function main() {
@@ -138,6 +138,16 @@ async function main() {
       const openCalculator = async () => { await page.getByText("BC CALCULATOR", { exact: true }).first().click(); await calculator().waitFor() }
       const input = (name) => calculator().getByRole("spinbutton", { name, exact: true })
       const value = async (name, next) => input(name).fill(next)
+      const clear = () => calculator().getByRole("button", { name: "CLEAR", exact: true })
+      const assertCleared = async () => {
+        assert.deepEqual(await calculator().locator("input").evaluateAll((nodes) => nodes.map((node) => node.value)), Array(11).fill(""))
+        assert.deepEqual(await calculator().locator("output").allTextContents(), ["—", "—", "—"])
+        await calculator().getByText("BC · —", { exact: true }).waitFor()
+        await calculator().getByText("TOTAL QUANTITY · 0", { exact: true }).waitFor()
+        await calculator().getByText("TOTAL MARGIN · 0", { exact: true }).waitFor()
+        await calculator().getByText("BASE BC · —", { exact: true }).waitFor()
+        assert.equal(await clear().isDisabled(), true, "CLEAR disables when all fields are empty")
+      }
       const tableRegion = () => calculator().getByRole("region", { name: "BC INPUT TABLE — SCROLL HORIZONTALLY TO VIEW ALL GRADES", exact: true })
       const fieldOrder = [
         "GRADE 1 QUANTITY", "GRADE 2 QUANTITY", "GRADE 3 QUANTITY",
@@ -199,6 +209,7 @@ async function main() {
       await openCalculator()
       if (engine === "chromium") {
         await calculator().getByText("BC · —", { exact: true }).waitFor()
+        assert.equal(await clear().isDisabled(), true, "initial empty calculator cannot be cleared again")
         assert.equal(await calculator().getByRole("spinbutton").count(), 11, "three grade quantity/buy/sell inputs plus two lumpsum inputs")
         assert.equal(await calculator().getByRole("spinbutton", { name: /LUMPSUM QUANTITY/ }).count(), 0)
         await value("GRADE 1 QUANTITY", "200")
@@ -243,6 +254,7 @@ async function main() {
         holdNextPatch = true
         await calculator().getByRole("button", { name: "SAVE CALCULATOR", exact: true }).click()
         await waitHeld()
+        assert.equal(await clear().isDisabled(), true, "CLEAR cannot erase the draft while a save is pending")
         assert.equal(JSON.parse(heldPatch.body.summary).sections[0].bc_calculator.grades[0].sell, "950")
         await value("GRADE 1 FINAL PRICE", "960")
         const firstFinished = page.waitForResponse((response) => response.request().method() === "PATCH")
@@ -299,6 +311,51 @@ async function main() {
         await saveCalculator()
       }
 
+      // Exercise CLEAR through real page state and persistence in each engine.
+      for (const [name, next] of [
+        ["GRADE 3 QUANTITY", "25"], ["GRADE 3 INITIAL PRICE", "500"], ["GRADE 3 FINAL PRICE", "700"],
+        ["LUMPSUM INITIAL PRICE", "100"], ["LUMPSUM FINAL PRICE", "400"],
+      ]) await value(name, next)
+      await saveCalculator()
+      assert.ok((await calculator().locator("input").evaluateAll((nodes) => nodes.map((node) => node.value))).every(Boolean), "all 11 fields contain values before CLEAR")
+      await value("GRADE 1 FINAL PRICE", "941")
+      failNextPatch = true
+      await calculator().getByRole("button", { name: "SAVE CALCULATOR", exact: true }).click()
+      await calculator().getByText("COULD NOT SAVE. YOUR VALUES ARE STILL HERE; TRY AGAIN.", { exact: true }).waitFor()
+      const beforeClear = structuredClone(record)
+      const beforeClearWrites = writes.length
+      await clear().click()
+      await assertCleared()
+      await assertFocusedVisible("GRADE 1 QUANTITY", `${engine} CLEAR returns focus to the first quantity`)
+      await calculator().getByText("UNSAVED CHANGES", { exact: true }).waitFor()
+      assert.equal(await calculator().getByText("COULD NOT SAVE. YOUR VALUES ARE STILL HERE; TRY AGAIN.", { exact: true }).count(), 0, "CLEAR resets the previous save error")
+      await page.waitForTimeout(80)
+      assert.equal(writes.length, beforeClearWrites, "CLEAR changes only the draft and never autosaves")
+      assert.deepEqual(record, beforeClear, "CLEAR does not mutate persisted values")
+      await page.getByRole("button", { name: "GENERAL INFORMATION", exact: true }).click()
+      await page.getByText("OTHER TAB", { exact: true }).click()
+      await openCalculator()
+      await assertCleared()
+      assert.equal(writes.length, beforeClearWrites, "tab switching retains the cleared draft without writing")
+      await saveCalculator()
+      const emptyValues = { grades: Array.from({ length: 3 }, () => ({ quantity: "", buy: "", sell: "" })), lumpsumBuy: "", lumpsumSell: "" }
+      assert.deepEqual(stored().sections[0].bc_calculator, emptyValues, "normal SAVE persists the cleared inputs")
+      assert.deepEqual(stored().sections[1], JSON.parse(beforeClear.summary).sections[1], "clearing leaves unrelated tab information intact")
+      preserved()
+      await page.reload()
+      await openCalculator()
+      await assertCleared()
+      await calculator().getByText("SAVED", { exact: true }).waitFor()
+      await page.screenshot({ path: path.join(screenshotDirectory, `${engine}-cleared-saved.png`), fullPage: true })
+      console.log(`PASS: ${engine} CLEAR resets all inputs, BC, totals and save error; focuses the first quantity; never autosaves; survives tab changes; explicit Save/reload preserves emptiness and unrelated data`)
+
+      for (const [name, next] of [
+        ["GRADE 1 QUANTITY", "200"], ["GRADE 1 INITIAL PRICE", "886"], ["GRADE 1 FINAL PRICE", "940"],
+        ["GRADE 2 QUANTITY", "75"], ["GRADE 2 INITIAL PRICE", "1200"], ["GRADE 2 FINAL PRICE", "1320"],
+      ]) await value(name, next)
+      await result("59.4", 2)
+      await saveCalculator()
+
       for (const width of [1440, 320, 390]) {
         await page.setViewportSize({ width, height: width > 500 ? 1100 : 844 })
         for (const colorScheme of ["light", "dark"]) {
@@ -318,18 +375,23 @@ async function main() {
             const inputs = [...region.querySelectorAll("input")].map((node) => ({ width: node.getBoundingClientRect().width }))
             const headers = [...table.querySelectorAll('th[scope="row"]')].map((node) => ({ text: node.textContent, left: node.getBoundingClientRect().left, position: getComputedStyle(node).position }))
             const settings = document.querySelector('[aria-label="CCINFO settings"]')?.getBoundingClientRect()
-            const obstructedLabels = settings ? [...region.querySelectorAll("input, th, output")].filter((node) => {
+            const obstructedLabels = settings ? [...region.querySelectorAll("input, th, output, button")].filter((node) => {
               const bounds = node.getBoundingClientRect()
               return settings.left < bounds.right && settings.right > bounds.left && settings.top < bounds.bottom && settings.bottom > bounds.top
             }).map((node) => node.getAttribute("aria-label") || node.textContent.trim()) : []
             const styles = getComputedStyle(region)
             const copy = region.innerText
-            return { scrollWidth: document.documentElement.scrollWidth, width: innerWidth, regionLeft: rect.left, regionRight: rect.right, inputs, obstructedLabels, text: styles.color, panelBackground: getComputedStyle(table).backgroundColor, tableWidth: table.getBoundingClientRect().width, scrollContainerWidth: scrollRegion.clientWidth, tableScrollWidth: scrollRegion.scrollWidth, scrollContainerLeft: scrollBounds.left, headers, copy }
+            const actions = [...region.querySelectorAll("button")].map((node) => { const bounds = node.getBoundingClientRect(); return { label: node.textContent, left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom, width: bounds.width, height: bounds.height } })
+            return { scrollWidth: document.documentElement.scrollWidth, width: innerWidth, regionLeft: rect.left, regionRight: rect.right, inputs, obstructedLabels, actions, text: styles.color, panelBackground: getComputedStyle(table).backgroundColor, tableWidth: table.getBoundingClientRect().width, scrollContainerWidth: scrollRegion.clientWidth, tableScrollWidth: scrollRegion.scrollWidth, scrollContainerLeft: scrollBounds.left, headers, copy }
           })
           assert.ok(geometry.scrollWidth <= width + 1, `${engine} ${width}px ${colorScheme}: no horizontal page overflow (${geometry.scrollWidth}px)`)
           assert.ok(geometry.regionLeft >= -1 && geometry.regionRight <= width + 1)
           assert.ok(geometry.inputs.every((item) => item.width >= 95), "all grade and lumpsum inputs are readable")
           assert.equal(geometry.copy, geometry.copy.toUpperCase(), "all visible calculator copy is uppercase")
+          assert.deepEqual(geometry.actions.map((action) => action.label), ["SAVE CALCULATOR", "CLEAR"])
+          assert.ok(geometry.actions.every((action) => action.left >= geometry.regionLeft && action.right <= geometry.regionRight + 1 && action.width >= 60 && action.height >= 35), "SAVE and CLEAR remain readable and contained")
+          assert.ok(geometry.actions[0].right <= geometry.actions[1].left || geometry.actions[0].bottom <= geometry.actions[1].top, "CLEAR wraps without overlapping SAVE on narrow phones")
+          assert.equal(await clear().isEnabled(), true, "populated calculator offers CLEAR")
           assert.deepEqual(geometry.headers.map((header) => header.text), ["QUANTITY", "INITIAL PRICE", "FINAL PRICE", "BC"])
           assert.ok(geometry.headers.every((header) => header.position === "sticky" && Math.abs(header.left - geometry.scrollContainerLeft) < 2), "row labels stick to the scrolling container's left edge")
           assert.equal(await calculator().locator("h3").count(), 0, "spreadsheet replaces the four grade cards")

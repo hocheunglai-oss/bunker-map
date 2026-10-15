@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { BC_FACTOR, calculateBc, normalizeBcCalculator, type BcCalculatorValues } from "@/lib/bcCalculator"
+import { BC_FACTOR, calculateBc, emptyBcCalculator, normalizeBcCalculator, type BcCalculatorValues } from "@/lib/bcCalculator"
 
 type Props = {
   value: BcCalculatorValues | undefined
@@ -31,6 +31,7 @@ export default function BcCalculator({ value, savedValue, saving, onChange, onSa
   const result = calculateBc(draft)
   const dirty = JSON.stringify(draft) !== JSON.stringify(normalizeBcCalculator(savedValue))
   const isSaving = saving || status === "saving"
+  const hasValues = draft.grades.some((grade) => Boolean(grade.quantity || grade.buy || grade.sell)) || Boolean(draft.lumpsumBuy || draft.lumpsumSell)
   const setGrade = (index: number, field: "quantity" | "buy" | "sell", next: string) => {
     onChange({ ...draft, grades: draft.grades.map((grade, gradeIndex) => gradeIndex === index ? { ...grade, [field]: next } : grade) as BcCalculatorValues["grades"] })
   }
@@ -114,6 +115,16 @@ export default function BcCalculator({ value, savedValue, saving, onChange, onSa
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <button type="button" onClick={() => void save()} disabled={!dirty || !result.valid || isSaving} style={{ border: 0, borderRadius: 999, padding: "9px 18px", background: "var(--fc-admin-primary-button-bg)", color: "var(--fc-admin-primary-button-text)", fontWeight: 700, cursor: "pointer", opacity: !dirty || !result.valid || isSaving ? 0.55 : 1 }}>SAVE CALCULATOR</button>
+        <button
+          type="button"
+          onClick={(event) => {
+            onChange(emptyBcCalculator())
+            setStatus("idle")
+            event.currentTarget.closest("section")?.querySelector<HTMLInputElement>("input")?.focus()
+          }}
+          disabled={!hasValues || isSaving}
+          style={{ border: "1px solid var(--fc-admin-button-border)", borderRadius: 999, padding: "9px 18px", background: "var(--fc-admin-button-bg)", color: "var(--fc-admin-button-text)", fontWeight: 700, cursor: "pointer", opacity: !hasValues || isSaving ? 0.55 : 1 }}
+        >CLEAR</button>
         <span role="status" style={{ fontSize: 12, color: status === "error" && dirty ? "var(--fc-admin-danger-border)" : "var(--fc-admin-muted)" }}>{isSaving ? "SAVING…" : !dirty ? "SAVED" : status === "error" ? "COULD NOT SAVE. YOUR VALUES ARE STILL HERE; TRY AGAIN." : "UNSAVED CHANGES"}</span>
       </div>
     </section>
