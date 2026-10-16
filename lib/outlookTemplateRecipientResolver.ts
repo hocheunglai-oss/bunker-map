@@ -1,6 +1,7 @@
 import "server-only"
 
 import { createClient } from "@supabase/supabase-js"
+import { isCertifiedRecipientProjectionAvailable } from "@/lib/outlookRecipientMapAvailability"
 
 export type OutlookTemplateRecipientField = "to" | "cc" | "bcc"
 export type OutlookTemplateRecipientKind = "contact" | "group" | "external" | "unresolved"
@@ -99,7 +100,6 @@ type ResolverCandidate = {
 const MIN_CERTIFICATION_MAX_AGE_SECONDS = 120
 const DEFAULT_CERTIFICATION_MAX_AGE_SECONDS = 36 * 60 * 60
 const MAX_CERTIFICATION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
-const CLOCK_SKEW_MS = 5 * 60 * 1000
 
 function requireEnv(name: string) {
   const value = process.env[name]
@@ -388,32 +388,6 @@ function resolveField(
   })
 }
 
-function isHealthyTruthState(
-  value: TruthVerification,
-  nowMs = Date.now(),
-  maxAgeSeconds = certificationMaxAgeSeconds(),
-) {
-  const queue = value.queue || {}
-  const certifiedAtMs = Date.parse(cleanText(value.latestCertificationAt))
-  const certificationAgeMs = nowMs - certifiedAtMs
-  return (
-    value.valid === true &&
-    value.integrityValid === true &&
-    value.ledgerValid === true &&
-    value.snapshotsValid === true &&
-    value.referencesValid === true &&
-    value.operationallyConsistent === true &&
-    value.latestCertificationHasProjectionEvidence === true &&
-    Number(queue.pending || 0) === 0 &&
-    Number(queue.processing || 0) === 0 &&
-    Number(queue.failed || 0) === 0 &&
-    Number(queue.terminalFailed || 0) === 0 &&
-    Number.isFinite(certifiedAtMs) &&
-    certificationAgeMs >= -CLOCK_SKEW_MS &&
-    certificationAgeMs <= maxAgeSeconds * 1000
-  )
-}
-
 export async function loadOutlookTemplateRecipientResolver(): Promise<OutlookTemplateRecipientResolver> {
   const supabase = getServiceClient()
   const { data: verificationData, error: verificationError } = await supabase.rpc(
@@ -422,9 +396,9 @@ export async function loadOutlookTemplateRecipientResolver(): Promise<OutlookTem
   if (verificationError) throw verificationError
 
   const verification = (verificationData || {}) as TruthVerification
-  if (!isHealthyTruthState(verification)) {
+  if (!isCertifiedRecipientProjectionAvailable(verification, Date.now(), certificationMaxAgeSeconds())) {
     throw new Error(
-      "The certified FCUNO-to-Exchange projection is not current and settled. Recipient resolution is disabled.",
+      "The certified FCUNO-to-Exchange recipient map is unavailable or no longer safely current. Recipient resolution is disabled.",
     )
   }
 

@@ -12,14 +12,17 @@ import {
   saveSpcSupplierContacts,
   saveSpcSupplier,
 } from "@/lib/spcSuppliers"
-import type { SaveSpcSupplierBargesInput, SaveSpcSupplierContactsInput, SaveSpcSupplierInput } from "@/lib/spcSupplierTypes"
+import type { SaveSpcSupplierBargesInput, SaveSpcSupplierContactsInput, SaveSpcSupplierInput, SpcSupplierMutation } from "@/lib/spcSupplierTypes"
 import { timedJson } from "@/lib/serverTiming"
 
 export const dynamic = "force-dynamic"
 
-function statusForMessage(message: string) {
+function statusForMessage(message: string, code?: unknown) {
   if (message === "Unauthorized") return 401
   if (message === "Forbidden") return 403
+  if (code === "42501") return 403
+  if (code === "40001") return 409
+  if (code === "22023") return 400
   if (message.includes("required") || message.includes("not found")) return 400
   return 500
 }
@@ -82,11 +85,20 @@ export async function PATCH(request: Request) {
       contacts?: unknown
       key?: unknown
       supplier?: unknown
+      requestId?: unknown
+      expectedVersions?: unknown
+    }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)
+      || !["save", "delete", "save-barges", "save-contacts"].includes(String(payload.action))) {
+      return NextResponse.json({ message: "Invalid supplier action." }, { status: 400 })
     }
     const context = createSpcAuditContext(session, request, "spc-suppliers")
     if (payload.action === "delete") {
       const key = typeof payload.key === "string" ? payload.key : ""
-      const dataset = await deleteSpcSupplier(key, context)
+      const dataset = await deleteSpcSupplier(key, context, {
+        requestId: payload.requestId,
+        expectedVersions: payload.expectedVersions,
+      } as SpcSupplierMutation)
       return NextResponse.json(dataset, {
         headers: {
           "Cache-Control": "private, no-store",
@@ -135,6 +147,7 @@ export async function PATCH(request: Request) {
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to save supplier."
-    return NextResponse.json({ message }, { status: statusForMessage(message) })
+    const code = error && typeof error === "object" && "code" in error ? error.code : undefined
+    return NextResponse.json({ message }, { status: statusForMessage(message, code) })
   }
 }

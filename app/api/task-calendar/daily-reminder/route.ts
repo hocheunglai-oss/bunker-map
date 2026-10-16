@@ -81,7 +81,6 @@ export async function GET(request: Request) {
     const storedTasks = readTaskCalendarTasks(data?.payload ?? null)
     const occurrenceDate = getHongKongTaskDate()
     const dueTasks = getDueTaskCalendarTasks(occurrenceDate, storedTasks)
-    let staff: Awaited<ReturnType<typeof loadCalendarStaffDirectory>> | undefined
     for (const scheduledTask of dueTasks) {
       try {
         if (!dryRun) {
@@ -91,7 +90,6 @@ export async function GET(request: Request) {
             continue
           }
         }
-        staff ??= await loadCalendarStaffDirectory(supabase)
         // A preceding delivery may take time. Re-read each task at submission
         // so a deletion or edit during this run can stop or correct its email.
         const { data: latest, error: latestError } = await supabase
@@ -106,6 +104,9 @@ export async function GET(request: Request) {
           skipped.push({ id: task.id, reason: "Task schedule changed; no reminder is due for this date." })
           continue
         }
+        // Resolve only from current active staff immediately before submission.
+        // An earlier email may have awaited SMTP while an account changed.
+        const staff = await loadCalendarStaffDirectory(supabase)
         const notify = resolveCalendarStaffRecipients(task.notify, staff)
         const copied = resolveCalendarStaffRecipients(task.cc, staff)
         const unresolved = Array.from(new Set([...notify.unresolved, ...copied.unresolved]))

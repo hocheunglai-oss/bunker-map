@@ -12,7 +12,8 @@ export type CalendarMutation = {
   confirmEmailRecipientsClear?: boolean
 }
 
-const MAX_MUTATION_EVENTS = 500
+export const EVENT_CALENDAR_MAX_MUTATION_EVENTS = 500
+export const EVENT_CALENDAR_MAX_BATCH_MUTATIONS = 10
 const MAX_EVENT_ID_LENGTH = 200
 const MAX_EVENT_TITLE_LENGTH = 5000
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
@@ -136,8 +137,8 @@ function validateStringArray(value: unknown, field: string, index: number) {
 
 function validatedIncomingEvents(value: unknown) {
   if (!Array.isArray(value)) return []
-  if (value.length > MAX_MUTATION_EVENTS) {
-    throw new EventCalendarValidationError(`A single calendar change cannot contain more than ${MAX_MUTATION_EVENTS} events.`)
+  if (value.length > EVENT_CALENDAR_MAX_MUTATION_EVENTS) {
+    throw new EventCalendarValidationError(`A single calendar change cannot contain more than ${EVENT_CALENDAR_MAX_MUTATION_EVENTS} events.`)
   }
 
   const ids = new Set<string>()
@@ -175,6 +176,11 @@ function validatedIncomingEvents(value: unknown) {
     }
     return event
   })
+}
+
+/** The recovery reader uses the exact mutation rules before offering a row. */
+export function validateEventCalendarEvent(value: unknown) {
+  return validatedIncomingEvents([value])[0]
 }
 
 function expectedEventVersions(value: unknown) {
@@ -402,7 +408,7 @@ export async function mutateEventCalendarStoreBatch(
   mutations: CalendarMutation[],
   expectedStoreVersion?: string,
 ) {
-  if (!mutations.length || mutations.length > 10) throw new EventCalendarValidationError("Invalid calendar batch.")
+  if (!mutations.length || mutations.length > EVENT_CALENDAR_MAX_BATCH_MUTATIONS) throw new EventCalendarValidationError("Invalid calendar batch.")
   for (let attempt = 0; attempt < 32; attempt += 1) {
     const { data: current, error: readError } = await supabase
       .from("office_calendar_store")

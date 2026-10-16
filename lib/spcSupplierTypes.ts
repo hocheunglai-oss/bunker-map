@@ -48,6 +48,17 @@ export type SpcSupplierContact = {
   source: "sheet" | "override"
 }
 
+export type SpcSupplierEditVersions = {
+  details: string
+  barges: string | null
+  contacts: string | null
+}
+
+export type SpcSupplierMutation = {
+  requestId: string
+  expectedVersions?: Partial<SpcSupplierEditVersions>
+}
+
 export type SpcSupplierRecord = {
   key: string
   name: string
@@ -58,6 +69,7 @@ export type SpcSupplierRecord = {
   contacts: SpcSupplierContact[]
   searchText: string
   updatedAt: string
+  editVersions: SpcSupplierEditVersions
 }
 
 export type SpcSupplierDataset = {
@@ -75,15 +87,16 @@ export type SpcSupplierDataset = {
     contactRows: number
   }
   warnings?: string[]
+  mutation?: { requestId: string; replayed: boolean }
 }
 
-export type SaveSpcSupplierInput = {
+export type SaveSpcSupplierInput = SpcSupplierMutation & {
   key?: string
   name: string
   info: SpcSupplierInfoInput
 }
 
-export type SaveSpcSupplierBargesInput = {
+export type SaveSpcSupplierBargesInput = SpcSupplierMutation & {
   supplierKey: string
   barges: Array<{
     id?: string
@@ -94,7 +107,7 @@ export type SaveSpcSupplierBargesInput = {
   }>
 }
 
-export type SaveSpcSupplierContactsInput = {
+export type SaveSpcSupplierContactsInput = SpcSupplierMutation & {
   supplierKey: string
   contacts: Array<{
     id?: string

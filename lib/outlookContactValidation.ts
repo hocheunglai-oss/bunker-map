@@ -7,6 +7,23 @@ export type OutlookContactFields = {
   last_name: string | null
 }
 
+export type OutlookCreatedContact = OutlookContactFields & {
+  id: string
+  source_card: string | null
+  vcard: string | null
+  properties: Record<string, unknown> | null
+}
+
+/** A lost INSERT reply is success only after the exact intended row is read. */
+export function isCreatedOutlookContact(value: unknown, intended: OutlookCreatedContact): value is OutlookCreatedContact {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const row = value as Record<string, unknown>
+  const fields = ["id", "source_card", "display_name", "primary_email", "source_book", "nickname", "first_name", "last_name", "vcard"] as const
+  if (fields.some(field => row[field] !== intended[field])) return false
+  if (!row.properties || typeof row.properties !== "object" || Array.isArray(row.properties)) return false
+  return JSON.stringify(row.properties) === JSON.stringify(intended.properties)
+}
+
 function cleanText(value: string) {
   return value.replace(/\s+/g, " ").trim()
 }

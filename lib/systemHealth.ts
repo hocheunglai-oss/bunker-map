@@ -68,6 +68,9 @@ const BACKUP_FILE_NAME_PATTERN =
   /^bunker-map-backup-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.json$/
 const DEFAULT_CALENDAR_ID = "fcb.bunker@gmail.com"
 const CHECK_TIMEOUT_MS = 12_000
+// Allow the scoped 20-second RPC deadline to report a result before the UI
+// checker gives up. This does not skip or cache any integrity verification.
+const OUTLOOK_TRUTH_CHECK_TIMEOUT_MS = 25_000
 const BACKUP_CHECK_TIMEOUT_MS = 180_000
 const SUPABASE_HEALTH_PAGE_SIZE = 1_000
 
@@ -3030,21 +3033,23 @@ async function checkExchangeTruth(): Promise<HealthCheckResult> {
     "Exchange truth verification"
   )
   const queue = asRecord(checkpoint.queue, "Exchange truth queue status")
-  const pending = getNumber(queue.pending)
-  const processing = getNumber(queue.processing)
-  const failed = getNumber(queue.failed)
-  const terminalFailed = getNumber(queue.terminalFailed)
+  const verificationQueue = asRecord(verification.queue || {}, "Exchange truth verification queue status")
+  const pending = Math.max(getNumber(queue.pending), getNumber(verificationQueue.pending))
+  const processing = Math.max(getNumber(queue.processing), getNumber(verificationQueue.processing))
+  const failed = Math.max(getNumber(queue.failed), getNumber(verificationQueue.failed))
+  const terminalFailed = Math.max(getNumber(queue.terminalFailed), getNumber(verificationQueue.terminalFailed))
   const latestCertificationAt = String(
     checkpoint.latestCertificationAt || ""
   )
   const latestCertificationTimestamp = latestCertificationAt
     ? new Date(latestCertificationAt).getTime()
     : Number.NaN
+  const certificationAgeMs = Date.now() - latestCertificationTimestamp
   const certificationAgeHours = Number.isFinite(latestCertificationTimestamp)
-    ? Math.round((Date.now() - latestCertificationTimestamp) / 36_000) / 100
+    ? Math.round(certificationAgeMs / 36_000) / 100
     : null
 
-  const integrityValid =
+  const individuallyValid =
     checkpoint.checkpointValid === true &&
     verification.valid === true &&
     verification.integrityValid === true &&
@@ -3054,47 +3059,73 @@ async function checkExchangeTruth(): Promise<HealthCheckResult> {
     verification.firstInvalidLedgerSequence == null &&
     verification.firstInvalidSnapshotSha256 == null &&
     verification.firstInvalidReferenceLedgerSequence == null &&
-    String(verification.headSequence || "") ===
-      String(checkpoint.headSequence || "") &&
-    String(verification.headSha256 || "") ===
-      String(checkpoint.headSha256 || "") &&
     getNumber(checkpoint.headSequence) > 0 &&
-    /^[0-9a-f]{64}$/.test(String(checkpoint.headSha256 || ""))
-  const hasProjectionEvidence =
+    getNumber(verification.headSequence) > 0 &&
+    /^[0-9a-f]{64}$/.test(String(checkpoint.headSha256 || "")) &&
+    /^[0-9a-f]{64}$/.test(String(verification.headSha256 || ""))
+  const headSequenceMoved = individuallyValid &&
+    String(verification.headSequence) !== String(checkpoint.headSequence)
+  const integrityValid = individuallyValid && !headSequenceMoved &&
+    String(verification.headSha256) === String(checkpoint.headSha256)
+  const hasIndividualProjectionEvidence =
     checkpoint.latestCertificationHasProjectionEvidence === true &&
     verification.latestCertificationHasProjectionEvidence === true &&
+    /^[0-9a-f]{64}$/.test(String(checkpoint.latestSourceFingerprint || "")) &&
+    checkpoint.latestProjectionSnapshotSha256 === checkpoint.latestSourceFingerprint &&
+    /^[0-9a-f]{64}$/.test(String(verification.latestSourceFingerprint || "")) &&
     verification.latestProjectionSnapshotSha256 ===
-      verification.latestSourceFingerprint
+      verification.latestSourceFingerprint &&
+    Boolean(checkpoint.latestCertificationRunId) &&
+    Boolean(verification.latestCertificationRunId) &&
+    Number.isFinite(latestCertificationTimestamp) &&
+    Number.isFinite(Date.parse(String(verification.latestCertificationAt || "")))
+  const hasProjectionEvidence = hasIndividualProjectionEvidence &&
+    checkpoint.latestSourceFingerprint === verification.latestSourceFingerprint &&
+    checkpoint.latestCertificationRunId === verification.latestCertificationRunId &&
+    latestCertificationTimestamp === Date.parse(String(verification.latestCertificationAt || ""))
   const operationallyConsistent =
     verification.operationallyConsistent === true
   const certificationStale =
-    certificationAgeHours === null ||
-    certificationAgeHours > EXCHANGE_CERTIFICATION_WARNING_AGE_HOURS
+    !Number.isFinite(certificationAgeMs) ||
+    certificationAgeMs < -5 * 60 * 1000 ||
+    certificationAgeMs > EXCHANGE_CERTIFICATION_WARNING_AGE_HOURS * 60 * 60 * 1000 ||
+    Date.now() - Date.parse(String(verification.latestCertificationAt || "")) < -5 * 60 * 1000 ||
+    Date.now() - Date.parse(String(verification.latestCertificationAt || "")) > EXCHANGE_CERTIFICATION_WARNING_AGE_HOURS * 60 * 60 * 1000
   const hasFailedWork = failed > 0 || terminalFailed > 0
   const hasInFlightWork = pending > 0 || processing > 0
+  // These RPCs use separate read snapshots. A committed sync between them can
+  // advance a valid head; that is uncertainty, not proof of corruption.
+  const verificationRefreshing = headSequenceMoved && hasIndividualProjectionEvidence &&
+    !hasFailedWork && !certificationStale
 
   let status: HealthStatus = "ok"
-  let message = "Exchange truth checkpoint is valid and the projection is current"
-  if (!integrityValid) {
+  let message = "Address book verified and up to date"
+  if (verificationRefreshing) {
+    status = "warning"
+    message = "Checking the latest address book changes. Please check again shortly."
+  } else if (!integrityValid) {
     status = "error"
-    message = "Latest Exchange truth checkpoint failed verification"
+    message = "Cannot verify the address book. An administrator should check it."
   } else if (!hasProjectionEvidence) {
     status = "error"
-    message = "Latest Exchange certification has no projection evidence"
-  } else if (!operationallyConsistent || hasFailedWork) {
+    message = "Cannot verify the address book's last successful sync. An administrator should check it."
+  } else if (hasFailedWork || (!operationallyConsistent && !hasInFlightWork)) {
     status = "error"
     message = hasFailedWork
-      ? "Exchange truth checkpoint is valid but delivery has failed queue rows"
-      : "Exchange truth is cryptographically valid but not operationally consistent"
-  } else if (
-    hasInFlightWork ||
-    certificationStale
-  ) {
+      ? "Some address book changes failed to sync. An administrator should check them."
+      : "Cannot confirm the address book is fully synced. An administrator should check it."
+  } else if (certificationStale) {
     status = "warning"
-    message = hasInFlightWork
-      ? "Exchange truth checkpoint is valid while delivery work is still in progress"
-      : "Exchange truth checkpoint is valid but its full certification is older than expected"
+    message = "Address book verification is out of date. An administrator should check the sync."
+  } else if (hasInFlightWork) {
+    status = "warning"
+    message = "Address book updating. Existing verified recipients remain available."
   }
+
+  // Pending/processing is ordinary delivery, not a new incident or recovery.
+  // Preserve an existing incident until a verified settled result resolves it.
+  const normalDeliveryInProgress = integrityValid && hasProjectionEvidence &&
+    !hasFailedWork && !certificationStale && hasInFlightWork
 
   return {
     status,
@@ -3105,6 +3136,7 @@ async function checkExchangeTruth(): Promise<HealthCheckResult> {
       snapshotsValid: verification.snapshotsValid === true,
       referencesValid: verification.referencesValid === true,
       operationallyConsistent,
+      ...(normalDeliveryInProgress || verificationRefreshing ? { notificationEligible: false, incidentResolved: false } : {}),
       headSequence: getNumber(checkpoint.headSequence),
       headSha256: String(checkpoint.headSha256 || ""),
       headEventType: String(checkpoint.headEventType || ""),
@@ -3122,6 +3154,7 @@ async function checkExchangeTruth(): Promise<HealthCheckResult> {
       failed,
       terminalFailed,
       projectionCurrent:
+        integrityValid &&
         hasProjectionEvidence &&
         operationallyConsistent &&
         pending === 0 &&
@@ -3237,11 +3270,12 @@ export async function getSystemHealth(options: { backupGapObserver?: BackupGapOb
     runCheck("drive-file-content-backup", "Drive File Content Backup", () => checkDriveFileContentBackup(observer), 45_000, observer),
     runCheck("calendar", "Google Calendar", checkGoogleCalendar),
     runCheck("contacts", "Google Contacts", checkGoogleContacts),
-    runCheck("exchange-truth", "Exchange Truth Chain", checkExchangeTruth),
+    runCheck("exchange-truth", "Exchange Truth Chain", checkExchangeTruth, OUTLOOK_TRUTH_CHECK_TIMEOUT_MS),
     runCheck(
       "outlook-template-recipient-truth",
       "Outlook Template Recipient Truth",
-      checkOutlookTemplateRecipientTruth
+      checkOutlookTemplateRecipientTruth,
+      OUTLOOK_TRUTH_CHECK_TIMEOUT_MS,
     ),
     runCheck("exchange", "Exchange Sync", checkExchangeConfig),
     runCheck("email-notice", "Notice Email", checkEmailNoticeConfig),

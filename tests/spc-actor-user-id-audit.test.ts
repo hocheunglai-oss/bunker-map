@@ -37,6 +37,7 @@ const supplierSource = readFileSync(
   new URL("../lib/spcSuppliers.ts", import.meta.url),
   "utf8",
 )
+const supplierMigration = readFileSync(new URL("../supabase/migrations/20261016021125_atomic_spc_supplier_store.sql", import.meta.url), "utf8")
 
 for (const [name, sql] of [
   ["baseline", baseline],
@@ -57,7 +58,11 @@ test("SPC audited writes propagate only the server-session UUID", () => {
   assert.match(auditSource, /"x-bunker-audit-actor-user-id": context\.actorUserId/)
   assert.match(auditSource, /actor_user_id: context\.actorUserId/)
   assert.match(speedBoardRoute, /actor_user_id: context\.actorUserId/)
-  assert.match(supplierSource, /actor_user_id: context\.actorUserId/)
+  assert.match(supplierSource, /headers: createSpcAuditHeaders\(context\)/)
+  assert.match(supplierSource, /supabase\.rpc\("compare_and_swap_spc_supplier_store"/)
+  assert.match(supplierMigration, /id::text=headers->>'x-bunker-audit-actor-user-id'/)
+  assert.match(supplierMigration, /insert into public\.audit_logs\(actor_user_id,[\s\S]*?values\(actor_row\.id,/)
+  assert.match(supplierMigration, /audit_row\.actor_user_id is distinct from actor_row\.id/)
 })
 
 test("the SPC audit API returns stable attribution without replacing legacy actor fields", () => {

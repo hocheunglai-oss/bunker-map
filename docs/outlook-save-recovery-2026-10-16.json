@@ -1,0 +1,51 @@
+{
+  "date": "2026-10-16",
+  "status": "local fixes frozen; production release and live verification owned by the release coordinator",
+  "scope": [
+    "Retain one contact creation intent ID across precommit errors, lost acknowledgements and failed readback; acknowledge only the exact committed intended row.",
+    "Keep conflicting template drafts and their baseline after successful or failed server reads; pause autosave until explicit server reload or field-level draft reapplication.",
+    "Use the existing approved certified-map availability helper for template saves; align the actual SQL write trigger with normal pending/processing delivery.",
+    "Render the signed-out address-book message instead of waiting forever for an authenticated-only data load."
+  ],
+  "preserved": [
+    "No email uniqueness, automatic contact merge, contact deletion or hosted contact mutation.",
+    "Template writes remain EDIT-only; recipient evidence, canonical revision comparison, audit and backup fence remain enforced.",
+    "Actual failed/terminal sync rows, missing integrity/projection evidence, mismatched fingerprints and stale/future certification remain blocking.",
+    "Template deletion still waits for an in-flight target save, aborts an old confirmation after a conflict, and does not flush unrelated failed drafts."
+  ],
+  "database_policy": {
+    "migration": "20261016021744_keep_certified_template_writes_available_during_sync.sql",
+    "sha256": "01744f05d34c766a5c27312f673bb7ae31120bfbb89f54e842528fd8c763f476",
+    "certification_age_limit_hours": 36,
+    "future_clock_grace_minutes": 5,
+    "canonical_advisory_lock_and_row_evidence_trigger": "unchanged",
+    "trigger_function_execution_acl": "still revoked from PUBLIC, anon, authenticated and service_role",
+    "data_backfill": "none",
+    "application_environment": "The app retains its existing configurable age bound. A stricter app bound still wins; the database independently refuses certification older than 36 hours."
+  },
+  "verification": {
+    "focused_typescript_tests": { "passed": 26, "failed": 0, "skipped": 0 },
+    "actual_api_library_resolver_sql_and_existing_delete_sql": { "passed": 14, "failed": 0, "skipped": 0 },
+    "native_postgresql_17_6": { "passed": 4, "failed": 0, "skipped": 0, "includes": ["old trigger RED reproduction", "new INSERT/UPDATE with actual audit and durable backup mutations", "staleness/integrity/failure rejection", "trigger-only ACL", "waiting writer serialization", "statement cancellation with no committed revision/audit/fence change"] },
+    "typecheck": "full tsc --noEmit --incremental false passed in the shared candidate",
+    "lint": "zero errors; six pre-existing address-book warnings, no new warning",
+    "browser": {
+      "engines": ["isolated Chromium", "isolated WebKit"],
+      "widths": [320, 390, 1440],
+      "themes": ["light", "dark"],
+      "auth_states": ["signed in with synthetic edit access", "signed out"],
+      "contexts_passed": 48,
+      "template_behavior": "failed and successful conflict checks retain draft; explicit reapply preserves unrelated colleague fields; deliberate reload discards only after verified success; existing deletion regressions pass",
+      "contact_behavior": "lost committed reply and readback outage recover exactly one contact; existing edit/cancel/delete/undo/membership regressions pass",
+      "layout": "no horizontal overflow in every matrix context; 320 dark WebKit, 390 light Chromium, desktop and signed-out screenshots inspected for clipping, contrast and overlap",
+      "screenshots_private_directory": "/private/tmp/fcuno-outlook-recovery-visual-IMQ8Ii",
+      "personal_browser": "not navigated or changed; all automated contexts closed"
+    }
+  },
+  "limitations": [
+    "These tests use synthetic local data. No Azure job, Exchange delivery, hosted contact/template write, email or live backup was triggered.",
+    "The separate live verification-RPC statement-timeout finding is being handled by the release coordinator. This receipt does not claim current hosted Outlook template recovery.",
+    "Native Outlook clients and physical phones were not used; mobile WebKit and Chromium are local rendering/interaction verification, not device certification.",
+    "Contact intent idempotency is retained within an open creation form. A deliberate cancel/reload starts a new intent; this does not introduce a durable browser-independent creation request ledger."
+  ]
+}

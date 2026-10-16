@@ -1419,10 +1419,13 @@ export default function EventCalendarPage() {
       }
       const restoredIds = normalizeStoredEvents(payload.restoredEvents).map((event) => event.id)
       if (restoredIds.length) void syncCanonicalGoogleCalendar(restoredIds)
-      setRecoveryStatus((payload.restoredCount
+      setRecoveryStatus([payload.restoredCount
           ? `Recovered ${payload.restoredCount} missing events`
-          : "No missing future events found"
-        ) + (payload.historyComplete === false ? ". Only part of the audit history was checked; older events may need administrator review." : ""))
+          : "No missing future events found",
+        payload.remainingCount ? `${payload.remainingCount} more ${payload.remainingCount === 1 ? "event remains" : "events remain"}; run recovery again` : "",
+        payload.skippedInvalidCount ? `${payload.skippedInvalidCount} invalid historical ${payload.skippedInvalidCount === 1 ? "record was" : "records were"} skipped; ask an administrator to review them` : "",
+        payload.historyComplete === false ? "Only part of the audit history was checked; older events may need administrator review" : "",
+      ].filter(Boolean).join(". "))
     } catch (error) {
       setRecoveryStatus(error instanceof Error ? error.message : "Could not recover missing events.")
     } finally {
@@ -1682,7 +1685,7 @@ export default function EventCalendarPage() {
                     </div>
                   )}
                   {recoveryStatus && (
-                    <div style={{ marginTop: "5px", padding: "7px 9px", color: "var(--fc-admin-muted)", fontSize: "11px", fontWeight: 700 }}>
+                    <div role="status" aria-label="Calendar recovery result" style={{ marginTop: "5px", padding: "7px 9px", color: "var(--fc-admin-muted)", fontSize: "11px", fontWeight: 700 }}>
                       {recoveryStatus}
                     </div>
                   )}
