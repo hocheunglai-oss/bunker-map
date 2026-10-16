@@ -1,10 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 import { canAccessSpcPage } from "@/lib/spcPages"
+import { parseSpcStatisticsReport } from "@/lib/spcStatisticsReport"
 import type {
   SpcChartPoint,
   SpcHitRateRow,
@@ -77,7 +78,7 @@ function MonthlyVolumeChart({
         <h2>GRAPH 1 · MONTHLY VOLUME</h2>
         <span>{lastYear} / {selectedYear}</span>
       </div>
-      <div className="spc-stat-monthly-chart">
+      <div className="spc-stat-monthly-chart" role="region" aria-label="Monthly volume by month" tabIndex={0}>
         {points.map((point) => (
           <div className="spc-stat-month" key={point.month}>
             <div className="spc-stat-month-bars">
@@ -114,7 +115,7 @@ function WorkloadTable({ rows, windowLabel }: { rows: SpcWorkloadRow[]; windowLa
   return (
     <section className="spc-panel spc-stat-table-panel">
       <div className="spc-panel-header"><h2>TABLE 1 · SPC WORKLOAD</h2><span>{windowLabel}</span></div>
-      <div className="spc-table-wrap">
+      <div className="spc-table-wrap" role="region" aria-label="SPC workload" tabIndex={0}>
         <table className="spc-table spc-stat-table">
           <thead><tr><th>PERIOD</th><th>ENQUIRIES</th><th>DAYS</th><th>AVG / DAY</th></tr></thead>
           <tbody>
@@ -138,7 +139,7 @@ function HitRateTable({ title, rows, windowLabel }: { title: string; rows: SpcHi
   return (
     <section className="spc-panel spc-stat-table-panel">
       <div className="spc-panel-header"><h2>{title}</h2><span>{windowLabel}</span></div>
-      <div className="spc-table-wrap">
+      <div className="spc-table-wrap" role="region" aria-label={title} tabIndex={0}>
         <table className="spc-table spc-stat-table">
           <thead><tr><th>NAME</th><th>ENQUIRIES</th><th>FIXTURES</th><th>HIT RATE</th></tr></thead>
           <tbody>
@@ -162,7 +163,7 @@ function SupplierTraderCountTable({ rows, windowLabel }: { rows: SpcChartPoint[]
   return (
     <section className="spc-panel spc-stat-table-panel">
       <div className="spc-panel-header"><h2>TABLE 4 · FIXTURES BY SUPPLIER TRADER</h2><span>{windowLabel}</span></div>
-      <div className="spc-table-wrap">
+      <div className="spc-table-wrap" role="region" aria-label="Fixtures by supplier trader" tabIndex={0}>
         <table className="spc-table spc-stat-table">
           <thead><tr><th>SUPPLIER TRADER</th><th>FIXTURES</th></tr></thead>
           <tbody>
@@ -182,32 +183,9 @@ function SupplierTraderCountTable({ rows, windowLabel }: { rows: SpcChartPoint[]
 
 export default function SpcStatisticsPage() {
   const router = useRouter()
-  const { loading: authLoading, authenticated, permissions } = useSpcAuth()
-  const [year] = useState(hongKongYear)
-  const [statistics, setStatistics] = useState<SpcStatisticsPayload | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState("")
-
+  const { loading: authLoading, authenticated, permissions, username, role, office } = useSpcAuth()
   const canView = authenticated && canAccessSpcPage(permissions, "spc-statistics", "view")
   const hasPermissionSnapshot = Object.prototype.hasOwnProperty.call(permissions, "spc-statistics")
-
-  const loadData = useCallback(async (forceRefresh = false) => {
-    if (!canView) return
-    setLoading(true)
-    setMessage("")
-    try {
-      const params = new URLSearchParams({ year: String(year) })
-      if (forceRefresh) params.set("refresh", "1")
-      const response = await fetch(`/api/spc/statistics?${params.toString()}`, { cache: "no-store" })
-      const data = (await response.json()) as SpcStatisticsPayload & { message?: string }
-      if (!response.ok) throw new Error(data.message || "Failed to load SPC statistics.")
-      setStatistics(data)
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message.toUpperCase() : "FAILED TO LOAD SPC STATISTICS.")
-    } finally {
-      setLoading(false)
-    }
-  }, [canView, year])
 
   useEffect(() => {
     document.title = "SPC STATISTICS"
@@ -218,13 +196,57 @@ export default function SpcStatisticsPage() {
     if (!authLoading && authenticated && hasPermissionSnapshot && !canView) router.replace("/spc")
   }, [authLoading, authenticated, canView, hasPermissionSnapshot, router])
 
-  useEffect(() => {
-    void loadData()
-  }, [loadData])
-
   if (authLoading || !authenticated || !hasPermissionSnapshot || !canView) {
     return <div className="spc-loading">LOADING...</div>
   }
+
+  return <StatisticsPanel key={JSON.stringify([username, role, office, permissions["spc-statistics"]])} />
+}
+
+function StatisticsPanel() {
+  const [year] = useState(hongKongYear)
+  const [statistics, setStatistics] = useState<SpcStatisticsPayload | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [message, setMessage] = useState("")
+  const request = useRef<AbortController | null>(null)
+  const loadData = useCallback(async (owner: AbortController, forceRefresh: boolean) => {
+    const ownsRequest = () => request.current === owner && !owner.signal.aborted
+    try {
+      const params = new URLSearchParams({ year: String(year) })
+      if (forceRefresh) params.set("refresh", "1")
+      const response = await fetch(`/api/spc/statistics?${params.toString()}`, { cache: "no-store", signal: owner.signal })
+      if (!ownsRequest()) return
+      if (response.status === 401 || response.status === 403) {
+        setStatistics(null)
+        setMessage("YOUR ACCESS TO STATISTICS COULD NOT BE VERIFIED. PLEASE SIGN IN AGAIN OR CHECK YOUR ACCESS.")
+        return
+      }
+      if (!response.ok) throw new Error("Statistics unavailable")
+      const data: unknown = await response.json()
+      if (!ownsRequest()) return
+      setStatistics(parseSpcStatisticsReport(data, year))
+    } catch {
+      if (ownsRequest()) setMessage("STATISTICS COULD NOT BE VERIFIED. PLEASE REFRESH TO RETRY.")
+    } finally {
+      if (ownsRequest()) { setLoading(false); request.current = null }
+    }
+  }, [year])
+
+  function refreshData() {
+    request.current?.abort()
+    const owner = new AbortController()
+    request.current = owner
+    setLoading(true)
+    setMessage("")
+    void loadData(owner, true)
+  }
+
+  useEffect(() => {
+    const owner = new AbortController()
+    request.current = owner
+    const initialLoad = window.setTimeout(() => void loadData(owner, false), 0)
+    return () => { window.clearTimeout(initialLoad); request.current?.abort(); request.current = null }
+  }, [loadData])
 
   const windowLabel = statistics?.windowLabel || "LAST 90 DAYS"
 
@@ -233,16 +255,21 @@ export default function SpcStatisticsPage() {
       <div className="spc-statistics-page">
         <div className="spc-stat-toolbar">
           <div className="spc-stat-controls">
-            <button type="button" className="spc-fixture-refresh-button" onClick={() => void loadData(true)} disabled={loading}>
+            <button type="button" className="spc-fixture-refresh-button" onClick={refreshData} disabled={loading}>
               {loading ? "REFRESHING..." : "REFRESH"}
             </button>
           </div>
         </div>
 
-        {message ? <div className="spc-alert is-error">{message}</div> : null}
+        {message ? <div className="spc-alert is-error" role="alert">{message}</div> : null}
+        {statistics ? <p className="spc-stat-verified" role="status">
+          {message ? "PREVIOUSLY VERIFIED" : loading ? "REFRESHING — SHOWING PREVIOUSLY VERIFIED" : "VERIFIED"}
+          {" · "}{statistics.windowStartDate}{" TO "}{statistics.windowEndDate}
+          {" · "}{new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Hong_Kong", dateStyle: "medium", timeStyle: "short" }).format(new Date(statistics.generatedAt))}{" HKT"}
+        </p> : null}
 
-        {loading && !statistics ? (
-          <div className="spc-loading">LOADING STATISTICS...</div>
+        {!statistics ? (
+          <div className="spc-loading" role="status">{loading ? "LOADING STATISTICS..." : "STATISTICS UNAVAILABLE. PLEASE REFRESH TO RETRY."}</div>
         ) : (
           <>
             <MonthlyVolumeChart

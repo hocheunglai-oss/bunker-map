@@ -482,7 +482,7 @@ function getUserProfileMap(userProfiles: SpcUserProfileAssignment[]) {
   }, {})
 }
 
-function getStoredSpcRole(row: SpcUserRow, userRoleMap: Record<string, string> = {}) {
+function getStoredSpcRole(row: Pick<SpcUserRow, "id" | "username" | "role">, userRoleMap: Record<string, string> = {}) {
   return normaliseSpcRole(userRoleMap[row.id] || userRoleMap[`username:${row.username.toLowerCase()}`] || row.role)
 }
 
@@ -1080,6 +1080,29 @@ export async function listSpcUserReferenceOptions(
       if (roleOrder !== 0) return roleOrder
       return a.displayName.localeCompare(b.displayName)
     })
+}
+
+// Statistics receives these non-secret fields in the same database snapshot as
+// its enquiries/fixtures. Reuse the canonical stored-assignment parsers and
+// precedence rather than inventing a second role/office attribution policy.
+export function projectSpcUserReferenceOptions(
+  rows: Array<Pick<SpcUserRow, "id" | "username" | "display_name" | "role" | "is_active">>,
+  assignments: unknown,
+): SpcUserOption[] {
+  const roles = getUserRoleMap(parseUserRoleStore(assignments))
+  const profiles = getUserProfileMap(parseUserProfileStore(assignments))
+  return rows.map((row) => ({
+    id: row.id,
+    username: row.username,
+    displayName: row.display_name || row.username,
+    role: getStoredSpcRole(row, roles),
+    office: (profiles[row.id] || profiles[`username:${row.username.toLowerCase()}`])?.office || SPC_DEFAULT_OFFICES[0],
+    isActive: row.is_active !== false,
+  })).sort((a, b) => {
+    const activeOrder = Number(b.isActive) - Number(a.isActive)
+    if (activeOrder !== 0) return activeOrder
+    return a.role.localeCompare(b.role) || a.displayName.localeCompare(b.displayName)
+  })
 }
 
 export async function listManagedSpcOffices() {

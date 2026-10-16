@@ -3,7 +3,7 @@ import { createActiveSpcTraderResolver } from "@/lib/spcActiveTraders"
 import { createSpcAuditContext, createSpcAuditedSupabaseClient } from "@/lib/spcAudit"
 import { normaliseSpcRole } from "@/lib/spcPages"
 import { displaySupplierName } from "@/lib/spcSupplierKeys"
-import { listSpcUserReferenceOptions, type SpcUserOption } from "@/lib/spcUsers"
+import { projectSpcUserReferenceOptions, type SpcUserOption } from "@/lib/spcUsers"
 
 type FuelKey = "hsfo" | "vlsfo" | "lsmgo"
 
@@ -38,12 +38,6 @@ type SpcStatisticsFixtureRow = {
     created_by_display_name: string
     created_at: string
   } | null
-}
-
-type SpcStatisticsAuditRow = {
-  actor_id: string | null
-  request_context: Record<string, unknown> | null
-  enquiry_number: string | null
 }
 
 export type SpcChartPoint = {
@@ -129,15 +123,6 @@ function isImportedEnquiry(enquiryNumber: string | null | undefined) {
   return upperText(enquiryNumber).startsWith("SPCIMP-")
 }
 
-function isSpcBuyerEnquiryAudit(row: SpcStatisticsAuditRow) {
-  return cleanText(row.actor_id).toLowerCase().startsWith("spc:")
-    && cleanText(row.request_context?.pageId) === "spc-buyer-enquiries"
-}
-
-function auditEnquiryNumber(row: SpcStatisticsAuditRow) {
-  return cleanText(row.enquiry_number)
-}
-
 function hongKongYear() {
   const value = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Hong_Kong",
@@ -164,10 +149,6 @@ function hongKongDateParts(date = new Date()) {
 function hongKongDateString(date = new Date()) {
   const parts = hongKongDateParts(date)
   return `${parts.year}-${parts.month}-${parts.day}`
-}
-
-function yearEndDate(year: number) {
-  return `${year}-12-31`
 }
 
 function last90DayWindow() {
@@ -361,96 +342,105 @@ function hitRateRows(enquiryCounts: Map<string, number>, fixtureCounts: Map<stri
     .sort((a, b) => b.hitRate - a.hitRate || b.fixtures - a.fixtures || b.enquiries - a.enquiries || a.label.localeCompare(b.label))
 }
 
-async function loadFixtures(
-  supabase: ReturnType<typeof createSpcAuditedSupabaseClient>,
-  firstYear: number,
-  lastYear: number,
-) {
-  const { data, error } = await supabase
-    .from("spc_fixtures")
-    .select(`
-      id,
-      fixture_status,
-      fixture_date,
-      supplier_trader_username,
-      supplier_trader_display_name,
-      buyer_trader_username,
-      buyer_trader_display_name,
-      account,
-      vessel_name,
-      hsfo,
-      vlsfo,
-      lsmgo,
-      supplier_name,
-      supplier_key,
-      created_at,
-      enquiry:spc_enquiries!spc_fixtures_enquiry_id_fkey(
-        enquiry_number,
-        created_by_username,
-        created_by_display_name,
-        created_at
-      )
-    `)
-    .eq("fixture_status", "completed")
-    .gte("fixture_date", `${firstYear}-01-01`)
-    .lte("fixture_date", yearEndDate(lastYear))
-    .order("fixture_date", { ascending: true })
-    .range(0, 4999)
+type StatisticsSourceBounds = { firstFixtureYear: number; lastFixtureYear: number; windowStart: string; windowEnd: string }
+type StatisticsUserRow = { id: string; username: string; display_name: string | null; role: string; is_active: boolean }
+type StatisticsSource = { fixtures: SpcStatisticsFixtureRow[]; enquiries: SpcStatisticsEnquiryRow[]; users: StatisticsUserRow[]; buyerEnquiryNumbers: string[]; roles: Array<Record<string, string | null>>; profiles: Array<Record<string, string | null>> }
 
-  if (error) throw error
-  return (data || []) as unknown as SpcStatisticsFixtureRow[]
+const statisticsSourceFields = {
+  fixtures: ["id", "fixture_status", "fixture_date", "supplier_trader_username", "supplier_trader_display_name", "buyer_trader_username", "buyer_trader_display_name", "account", "vessel_name", "hsfo", "vlsfo", "lsmgo", "supplier_name", "supplier_key", "created_at", "enquiry"],
+  enquiries: ["id", "enquiry_number", "title", "created_by_username", "created_by_display_name", "created_at"],
+  users: ["id", "username", "display_name", "role", "is_active"],
+  roles: ["userId", "username", "role"],
+  profiles: ["userId", "username", "office"],
+} as const
+const sourceFailure = () => new Error("SPC statistics source is incomplete or invalid. Refresh again; no partial totals were produced.")
+
+function sourceObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw sourceFailure()
+  return value as Record<string, unknown>
+}
+function exactSourceFields(row: Record<string, unknown>, fields: readonly string[]) {
+  if (Object.keys(row).length !== fields.length || fields.some((key) => !Object.prototype.hasOwnProperty.call(row, key))) throw sourceFailure()
+}
+function sourceText(value: unknown, nullable = false) {
+  if ((nullable && value === null) || typeof value === "string") return
+  throw sourceFailure()
+}
+function sourceTime(value: unknown) {
+  if (typeof value !== "string" || !Number.isFinite(new Date(value).getTime())) throw sourceFailure()
+}
+function sourceId(value: unknown) {
+  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) throw sourceFailure()
 }
 
-async function loadEnquiries(
-  supabase: ReturnType<typeof createSpcAuditedSupabaseClient>,
-  startIso: string,
-  endIso: string,
-) {
-  const { data, error } = await supabase
-    .from("spc_enquiries")
-    .select("id,enquiry_number,title,created_by_username,created_by_display_name,created_at")
-    .gte("created_at", startIso)
-    .lte("created_at", endIso)
-    .order("created_at", { ascending: true })
-    .range(0, 4999)
-
-  if (error) throw error
-  return (data || []) as unknown as SpcStatisticsEnquiryRow[]
-}
-
-async function loadSpcBuyerEnquiryNumbers(
-  supabase: ReturnType<typeof createSpcAuditedSupabaseClient>,
-) {
-  const enquiryNumbers = new Set<string>()
-  const pageSize = 1000
-  let from = 0
-
-  while (true) {
-    const { data, error } = await supabase
-      .from("audit_logs")
-      .select("actor_id,request_context,enquiry_number:after_row->>enquiry_number")
-      .eq("table_schema", "public")
-      .eq("table_name", "spc_enquiries")
-      .eq("operation", "INSERT")
-      .like("actor_id", "spc:%")
-      .contains("request_context", { pageId: "spc-buyer-enquiries" })
-      .order("occurred_at", { ascending: false })
-      .range(from, from + pageSize - 1)
-
-    if (error) throw error
-
-    const rows = (data || []) as unknown as SpcStatisticsAuditRow[]
-    rows
-      .filter(isSpcBuyerEnquiryAudit)
-      .map(auditEnquiryNumber)
-      .filter(Boolean)
-      .forEach((enquiryNumber) => enquiryNumbers.add(enquiryNumber))
-
-    if (rows.length < pageSize) break
-    from += pageSize
+function parseStatisticsSource(value: unknown, expected: StatisticsSourceBounds): StatisticsSource {
+  const source = sourceObject(value)
+  exactSourceFields(source, ["schema", "complete", "bounds", "fixtures", "enquiries", "users", "buyerEnquiryNumbers", "roles", "profiles", "counts"])
+  if (source.schema !== "fcuno.spc-statistics-source/v1" || source.complete !== true) throw sourceFailure()
+  const bounds = sourceObject(source.bounds)
+  exactSourceFields(bounds, ["firstFixtureYear", "lastFixtureYear", "windowStart", "windowEnd"])
+  if (bounds.firstFixtureYear !== expected.firstFixtureYear || bounds.lastFixtureYear !== expected.lastFixtureYear) throw sourceFailure()
+  for (const key of ["windowStart", "windowEnd"] as const) {
+    sourceTime(bounds[key])
+    if (new Date(bounds[key] as string).getTime() !== new Date(expected[key]).getTime()) throw sourceFailure()
   }
+  const counts = sourceObject(source.counts)
+  const kinds = ["fixtures", "enquiries", "users", "buyerEnquiryNumbers", "roles", "profiles"] as const
+  exactSourceFields(counts, kinds)
+  // SQL measures each bounded projection before materialising its aggregate.
+  // Verify that same complete wire contract here without another giant stringify.
+  let bytes = 4096
+  for (const kind of kinds) {
+    const rows = source[kind]
+    if (!Array.isArray(rows) || !Number.isSafeInteger(counts[kind]) || counts[kind] !== rows.length) throw sourceFailure()
+    const ids = new Set<string>()
+    for (const item of rows) {
+      const encoded = JSON.stringify(item)
+      bytes += Buffer.byteLength(encoded, "utf8") + 2
+      if (bytes > 32 * 1024 * 1024) throw sourceFailure()
+      if (kind === "buyerEnquiryNumbers") { sourceText(item); continue }
+      const row = sourceObject(item)
+      exactSourceFields(row, statisticsSourceFields[kind])
+      if (kind === "roles" || kind === "profiles") {
+        for (const field of statisticsSourceFields[kind]) sourceText(row[field], true)
+        continue
+      }
+      sourceId(row.id)
+      if (ids.has(row.id as string)) throw sourceFailure()
+      ids.add(row.id as string)
+      if (kind === "users") {
+        sourceText(row.username); sourceText(row.display_name, true); sourceText(row.role)
+        if (typeof row.is_active !== "boolean") throw sourceFailure()
+        continue
+      }
+      sourceTime(row.created_at)
+      if (kind === "enquiries") {
+        for (const field of ["enquiry_number", "title", "created_by_username", "created_by_display_name"]) sourceText(row[field])
+        continue
+      }
+      if (row.fixture_status !== "completed" || typeof row.fixture_date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(row.fixture_date)) throw sourceFailure()
+      for (const field of ["supplier_trader_username", "supplier_trader_display_name", "buyer_trader_username", "buyer_trader_display_name"]) sourceText(row[field])
+      for (const field of ["account", "vessel_name", "hsfo", "vlsfo", "lsmgo", "supplier_name", "supplier_key"]) sourceText(row[field], true)
+      if (row.enquiry !== null) {
+        const enquiry = sourceObject(row.enquiry)
+        exactSourceFields(enquiry, ["enquiry_number", "created_by_username", "created_by_display_name", "created_at"])
+        for (const field of ["enquiry_number", "created_by_username", "created_by_display_name"]) sourceText(enquiry[field])
+        sourceTime(enquiry.created_at)
+      }
+    }
+  }
+  return source as unknown as StatisticsSource
+}
 
-  return enquiryNumbers
+async function loadStatisticsSource(supabase: ReturnType<typeof createSpcAuditedSupabaseClient>, bounds: StatisticsSourceBounds) {
+  const { data, error } = await supabase.rpc("read_spc_statistics_source", {
+    p_first_fixture_year: bounds.firstFixtureYear,
+    p_last_fixture_year: bounds.lastFixtureYear,
+    p_window_start: bounds.windowStart,
+    p_window_end: bounds.windowEnd,
+  })
+  if (error) throw error
+  return parseStatisticsSource(data, bounds)
 }
 
 export async function loadSpcStatistics(session: SpcSession, yearInput?: number | string | null): Promise<SpcStatisticsPayload> {
@@ -463,12 +453,15 @@ export async function loadSpcStatistics(session: SpcSession, yearInput?: number 
   const lastFixtureYear = Math.max(selectedYear, windowEndYear)
   const context = createSpcAuditContext(session, undefined, "spc-statistics")
   const supabase = createSpcAuditedSupabaseClient(context)
-  const [fixtures, enquiries, users, spcBuyerEnquiryNumbers] = await Promise.all([
-    loadFixtures(supabase, firstFixtureYear, lastFixtureYear),
-    loadEnquiries(supabase, statisticsWindow.startIso, statisticsWindow.endIso),
-    listSpcUserReferenceOptions(),
-    loadSpcBuyerEnquiryNumbers(supabase),
-  ])
+  const source = await loadStatisticsSource(supabase, {
+    firstFixtureYear,
+    lastFixtureYear,
+    windowStart: statisticsWindow.startIso,
+    windowEnd: statisticsWindow.endIso,
+  })
+  const { fixtures, enquiries } = source
+  const users = projectSpcUserReferenceOptions(source.users, { userRoles: source.roles, userProfiles: source.profiles })
+  const spcBuyerEnquiryNumbers = new Set(source.buyerEnquiryNumbers.map(cleanText).filter(Boolean))
   const usersByUsername = userMap(users)
   const activeTraders = createActiveSpcTraderResolver(users)
   const nativeEnquiries = enquiries.filter((enquiry) => (

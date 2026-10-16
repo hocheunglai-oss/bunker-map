@@ -1,0 +1,54 @@
+{
+  "schema": "fcuno.sitewide-audit-checkpoint/v1",
+  "date": "2026-10-16",
+  "goalComplete": false,
+  "status": "source-release-candidate",
+  "releaseEvidence": "This describes reviewed source, not a deployed release. Verify the exact merged tree, canonical migrations and both production deployment responses before treating it as live.",
+  "baseProductionCommit": "444728aca396a8b5ea1bcb1cbd5d10e8c2dc37fa",
+  "baseProductionTree": "1caf60410b12446a182aa5ff8bc0709517e69cf3",
+  "confirmedSyntheticFailures": [
+    "The actual OpenAI Usage route omitted the oldest eligible event above its 10,000-row limit, understating requests/tokens/errors without disclosing truncation. This is not evidence that the current production dataset exceeded the limit.",
+    "The actual Usage page displayed zero/no tracked requests after a failed initial load; a late seven-day reply could replace the selected ninety-day result.",
+    "The actual SPC Statistics route and aggregator omitted eligible fixture and enquiry records above their 5,000-row limits. This is not a claim of current live undercounting.",
+    "Expired Statistics cache and explicit refresh failures returned old figures as HTTP 200 with no body disclosure. Initial page failure rendered multiple NO DATA sections despite having no verified report.",
+    "The Statistics chart grid clipped right-hand figures on narrow phones; its tables also shortened names and values."
+  ],
+  "scopedRepairs": [
+    "OpenAI Usage uses a complete read-only database snapshot for supported fixed-second periods, exact totals/page shares and deterministic recent events; unsupported unsafe numeric totals fail clearly instead of rounding silently.",
+    "SPC Statistics reads all required non-secret inputs from one stable database snapshot. An explicit complete-read resource budget fails without partial figures, rather than silently truncating rows.",
+    "Existing financial parsing, imported/native classification, per-grade counts, trader/office assignment precedence, selected-year and ninety-day reporting semantics are preserved and parity-tested.",
+    "Statistics never reports an expired failed refresh as successful. Both pages validate responses, distinguish unavailable from verified empty data, label retained verified values and ignore replies from former request/session owners.",
+    "Access denial clears retained data before parsing even a non-JSON error reply; existing View/Edit and signed-out authorization remain unchanged.",
+    "Statistics has keyboard-accessible internal chart/table scrolling and a narrow-phone grid that keeps full figures reachable. Safe local usage page links remain links; API and unsafe legacy path values are plain text, never omitted from totals.",
+    "Hosted release checks include the analytics API/SQL regressions and isolated Chromium/WebKit desktop/mobile state matrices without adding production dependencies or credentials."
+  ],
+  "plannedMigrations": [
+    "20261016045316_complete_openai_usage_report.sql",
+    "20261016050243_snapshot_consistent_spc_statistics.sql"
+  ],
+  "preservedBoundaries": [
+    "New functions are read-only, stable, security-invoker, empty-search-path and service-role-only with bounded statement timeouts; existing tables, data, RLS, triggers and indexes are unchanged.",
+    "No prices, notices, contacts, templates, suppliers, enquiries, fixtures, credentials, permissions, provider keys or usage events are edited for testing.",
+    "No email, reminder, sync, backup, recovery, provider request, retention, cost-control, Exchange worker, dependency or federation change is included.",
+    "Taiwan general remarks still wait for the separate Publish action; previously deployed user choices and repairs remain intact."
+  ],
+  "requiredReleaseChecks": [
+    "Freeze the exact source and verify it remains unchanged through broad TypeScript, SQL/native PostgreSQL, browser, type, lint, build, font, contract and worker-preservation gates.",
+    "Check 320px and 390px phones plus desktop, Chromium and WebKit, both OS color preferences, affected View/Edit/denied/signed-out states and internal scrolling.",
+    "Independent implementation and review tests must agree, including concurrent commits, over-limit datasets, resource-budget failures and unchanged business formulas.",
+    "Production dependency audit must pass; retain full-audit failure evidence only for the unchanged standing-authorized development-tool advisory.",
+    "Use the exact canonical 138-migration history plus only these two reviewed append-only files; verify read-only privileges and unchanged business records before and after applying them to the pinned FCUNO project.",
+    "Promote only the exact tested staged production build, verify both public hostnames and affected signed-in read-only views, then close only owned browser tabs."
+  ],
+  "releasePolicy": {
+    "knownDevelopmentOnlyAdvisory": "GHSA-vfj7-8cjw-p6xm",
+    "standingAuthorization": "docs/known-development-warning-release-authorization-2026-10-15.json",
+    "newAdvisoriesNotWaived": true,
+    "allOtherChecksMustPass": true
+  },
+  "verificationLimits": [
+    "Synthetic scale and concurrency tests do not prove production volume or latency; live post-release read-only checks remain required.",
+    "Physical iPhone and Android devices are not tested. Both OS color preferences are tested against the existing fixed-light admin palette, not a new dark theme.",
+    "The rest of the sitewide requirement matrix, full isolated backup restoration and previously recorded business decisions remain unfinished. No pre-migration backup is claimed to cover these new functions."
+  ]
+}

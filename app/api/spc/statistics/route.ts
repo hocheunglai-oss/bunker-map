@@ -39,9 +39,6 @@ async function loadCachedStatistics(
     const value = await promise
     statisticsCache.set(key, { value, expiresAt: Date.now() + STATISTICS_CACHE_MS })
     return { value, cacheStatus: forceRefresh ? "refresh" as const : "miss" as const }
-  } catch (error) {
-    if (cached) return { value: cached.value, cacheStatus: "stale" as const }
-    throw error
   } finally {
     statisticsPromises.delete(key)
   }
@@ -51,7 +48,7 @@ function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : "Failed to load SPC statistics."
   return NextResponse.json(
     { message },
-    { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 },
+    { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500, headers: { "Cache-Control": "private, no-store" } },
   )
 }
 
