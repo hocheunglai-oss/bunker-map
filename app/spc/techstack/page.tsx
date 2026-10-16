@@ -1,31 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 import { canAccessSpcPage } from "@/lib/spcPages"
-
-type SecretItem = {
-  name: string
-  configured: boolean
-  storage: string
-  value: string
-}
-
-type TechStackResponse = {
-  generatedAt: string
-  deployment: {
-    platform: string
-    project: string
-    productionUrl: string
-    gitRepository: string
-    branch: string
-    commit: string
-  }
-  secrets: SecretItem[]
-  message?: string
-}
+import { formatSpcOperationalTime, parseSpcTechStackResponse } from "@/lib/spcOperationalResponse"
+import { useSpcOperationalRead } from "@/lib/useSpcOperationalRead"
 
 const SERVICES = [
   ["APPLICATION", "NEXT.JS 16 / REACT 19 / TYPESCRIPT", "VERCEL", "SPC.FCUNO.COM"],
@@ -65,21 +46,8 @@ const DATABASE_GROUPS = [
 
 export default function SpcTechStackPage() {
   const router = useRouter()
-  const { loading: authLoading, authenticated, permissions } = useSpcAuth()
-  const [data, setData] = useState<TechStackResponse | null>(null)
-  const [message, setMessage] = useState("")
+  const { loading: authLoading, authenticated, permissions, actorKey, username, role, office } = useSpcAuth()
   const canView = canAccessSpcPage(permissions, "spc-tech-stack", "view")
-
-  const loadData = useCallback(async () => {
-    if (!authenticated || !canView) return
-    const response = await fetch("/api/spc/tech-stack", { cache: "no-store" })
-    const result = (await response.json()) as TechStackResponse
-    if (!response.ok) {
-      setMessage(result.message || "Could not load SPC tech stack.")
-      return
-    }
-    setData(result)
-  }, [authenticated, canView])
 
   useEffect(() => {
     document.title = "SPC Tech Stack"
@@ -89,25 +57,32 @@ export default function SpcTechStackPage() {
     if (!authLoading && (!authenticated || !canView)) router.replace("/spc")
   }, [authLoading, authenticated, canView, router])
 
-  useEffect(() => {
-    void loadData()
-  }, [loadData])
-
   if (authLoading || !authenticated || !canView) {
     return <div className="spc-loading">Loading...</div>
   }
 
+  return <TechStackPanel key={JSON.stringify([actorKey, username, role, office, permissions["spc-tech-stack"]])} />
+}
+
+function TechStackPanel() {
+  const { data, loading, message, refresh } = useSpcOperationalRead("/api/spc/tech-stack", parseSpcTechStackResponse)
+
   return (
     <SpcShell title="SPC Tech Stack">
-      {message ? <div className="spc-alert is-error">{message}</div> : null}
+      <div className="spc-operational-page">
+      {message ? <div className="spc-alert is-error" role="alert">{message}</div> : null}
 
       <section className="spc-panel">
-        <div className="spc-health-grid">
-          <div><span>PLATFORM</span><strong>{data?.deployment.platform || "VERCEL"}</strong></div>
-          <div><span>PROJECT</span><strong>{data?.deployment.project || "BUNKER-MAP-C2KS"}</strong></div>
-          <div><span>DOMAIN</span><strong>SPC.FCUNO.COM</strong></div>
-          <div><span>COMMIT</span><strong>{data?.deployment.commit?.slice(0, 7) || "-"}</strong></div>
-        </div>
+        <div className="spc-panel-header"><h2>Current deployment</h2><button type="button" onClick={refresh} disabled={loading}>{loading ? "Refreshing..." : "Refresh"}</button></div>
+        {data ? <>
+          <p className="spc-operational-status" role="status">{message || loading ? "Previously loaded" : "Loaded"}{" · "}{formatSpcOperationalTime(data.generatedAt)}. This is not an infrastructure verification time.</p>
+          <div className="spc-health-grid">
+            <div><span>PLATFORM</span><strong>{data.deployment.platform}</strong></div>
+            <div><span>PROJECT</span><strong>{data.deployment.project}</strong></div>
+            <div><span>DOMAIN</span><strong>{new URL(data.deployment.productionUrl).hostname}</strong></div>
+            <div><span>COMMIT</span><strong>{data.deployment.commit.slice(0, 7)}</strong></div>
+          </div>
+        </> : <p className="spc-operational-status" role="status">{loading ? "Loading current system details..." : "Current system details are unavailable. Please refresh to retry."}</p>}
       </section>
 
       <section className="spc-panel">
@@ -134,6 +109,7 @@ export default function SpcTechStackPage() {
 
       <section className="spc-panel">
         <div className="spc-panel-header"><h2>Key and Secret Register</h2></div>
+        <p className="spc-operational-status">Presence only; credentials and external services are not checked. Optional settings may be absent.</p>
         <div className="spc-secret-grid">
           {(data?.secrets || []).map((secret) => (
             <article key={secret.name}>
@@ -142,12 +118,13 @@ export default function SpcTechStackPage() {
                 <p>{secret.storage}</p>
               </div>
               <span className={secret.configured ? "is-configured" : "is-missing"}>
-                {secret.configured ? "CONFIGURED" : "NOT CONFIGURED"}
+                {secret.status}
               </span>
             </article>
           ))}
         </div>
       </section>
+      </div>
     </SpcShell>
   )
 }

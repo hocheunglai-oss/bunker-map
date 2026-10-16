@@ -1,5 +1,8 @@
-import { NextResponse } from "next/server"
 import { requireSpcPagePermission } from "@/lib/spcAuth"
+import { spcPrivateJson } from "@/lib/spcResponse"
+import { fcunoConnectionPolicy } from "@/config/fcunoConnections"
+
+export const dynamic = "force-dynamic"
 
 const SPC_KEYS = [
   "NEXT_PUBLIC_SUPABASE_URL",
@@ -22,33 +25,37 @@ const SPC_KEYS = [
 ] as const
 
 function secretInventory() {
-  return SPC_KEYS.map((name) => ({
-    name,
-    configured: Boolean(process.env[name]),
-    storage: "VERCEL ENVIRONMENT VARIABLES",
-    value: "MASKED",
-  }))
+  return SPC_KEYS.map((name) => {
+    const value = process.env[name]?.trim() || ""
+    const placeholder = /^(?:\[?redacted\]?|masked|\*+|<[^>]+>|(?:your|replace)[_-].*)$/i.test(value)
+    return {
+      name, configured: Boolean(value) && !placeholder,
+      status: placeholder ? "PLACEHOLDER — NOT VALIDATED" : value ? "PRESENT — NOT VALIDATED" : "NOT PRESENT",
+      storage: "VERCEL ENVIRONMENT VARIABLES", value: "MASKED",
+    }
+  })
 }
 
 export async function GET() {
   try {
     await requireSpcPagePermission("spc-tech-stack", "view")
 
-    return NextResponse.json({
+    return spcPrivateJson({
       generatedAt: new Date().toISOString(),
       deployment: {
         platform: "VERCEL",
-        project: "bunker-map-c2ks",
-        productionUrl: "https://spc.fcuno.com",
-        gitRepository: "hocheunglai-oss/bunker-map",
-        branch: process.env.VERCEL_GIT_COMMIT_REF || "main",
+        project: fcunoConnectionPolicy.vercel.project,
+        productionUrl: fcunoConnectionPolicy.vercel.productionOrigins[1],
+        gitRepository: fcunoConnectionPolicy.github.repository,
+        branch: process.env.VERCEL_GIT_COMMIT_REF || "unknown",
         commit: process.env.VERCEL_GIT_COMMIT_SHA || "unknown",
       },
       secrets: secretInventory(),
+      verification: { environmentValues: "Presence only; credentials and external services are not checked." },
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load SPC tech stack."
-    return NextResponse.json(
+    return spcPrivateJson(
       { message },
       { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 },
     )

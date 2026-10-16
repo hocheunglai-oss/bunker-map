@@ -1,66 +1,17 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 import { canAccessSpcPage } from "@/lib/spcPages"
-
-type HealthStatus = "ok" | "warning" | "error"
-
-type HealthCheck = {
-  id: string
-  label: string
-  status: HealthStatus
-  message: string
-  checkedAt: string
-  details?: Record<string, string | number | boolean | null>
-}
-
-type HealthResponse = {
-  status: HealthStatus
-  checkedAt: string
-  deployment: {
-    commit: string
-    shortCommit: string
-    branch: string
-    deployedAt: string
-    environment: string
-  }
-  checks: HealthCheck[]
-  message?: string
-}
+import { formatSpcOperationalTime, parseSpcHealthResponse } from "@/lib/spcOperationalResponse"
+import { useSpcOperationalRead } from "@/lib/useSpcOperationalRead"
 
 export default function SpcSystemHealthPage() {
   const router = useRouter()
-  const { loading: authLoading, authenticated, permissions } = useSpcAuth()
-  const [health, setHealth] = useState<HealthResponse | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState("")
+  const { loading: authLoading, authenticated, permissions, actorKey, username, role, office } = useSpcAuth()
   const canView = canAccessSpcPage(permissions, "spc-system-health", "view")
-  const checks = useMemo(() => health?.checks || [], [health])
-
-  const loadHealth = useCallback(async (forceRefresh = false) => {
-    if (!authenticated || !canView) return
-    setLoading(true)
-    setMessage("")
-    try {
-      const response = await fetch(
-        forceRefresh ? "/api/spc/system-health?refresh=1" : "/api/spc/system-health",
-        { cache: "no-store" },
-      )
-      const data = (await response.json()) as HealthResponse
-      if (!response.ok) {
-        setMessage(data.message || "Failed to load SPC system health.")
-        return
-      }
-      setHealth(data)
-    } catch {
-      setMessage("Failed to load SPC system health.")
-    } finally {
-      setLoading(false)
-    }
-  }, [authenticated, canView])
 
   useEffect(() => {
     document.title = "SPC System Health"
@@ -70,31 +21,37 @@ export default function SpcSystemHealthPage() {
     if (!authLoading && (!authenticated || !canView)) router.replace("/spc")
   }, [authLoading, authenticated, canView, router])
 
-  useEffect(() => {
-    void loadHealth()
-  }, [loadHealth])
-
   if (authLoading || !authenticated || !canView) {
     return <div className="spc-loading">Loading...</div>
   }
 
+  return <HealthPanel key={JSON.stringify([actorKey, username, role, office, permissions["spc-system-health"]])} />
+}
+
+function HealthPanel() {
+  const { data: health, loading, message, refresh } = useSpcOperationalRead("/api/spc/system-health", parseSpcHealthResponse)
+  const previous = Boolean(health && (message || loading || health.freshness.state === "stale"))
+
   return (
     <SpcShell title="SPC System Health">
-      {message ? <div className="spc-alert is-error">{message}</div> : null}
+      <div className="spc-operational-page">
+      {message ? <div className="spc-alert is-error" role="alert">{message}</div> : null}
+      {health?.freshness.state === "stale" ? <div className="spc-alert is-error" role="alert">The latest check could not finish. Showing the last successful check from {formatSpcOperationalTime(health.checkedAt)}. Current status is unknown.</div> : null}
 
       <section className="spc-panel">
         <div className="spc-panel-header">
           <h2>Overview</h2>
-          <button type="button" onClick={() => void loadHealth(true)} disabled={loading}>
+          <button type="button" onClick={refresh} disabled={loading}>
             {loading ? "Refreshing..." : "Refresh"}
           </button>
         </div>
+        {health ? <p className="spc-operational-status" role="status">{previous ? "Previously checked" : "Last checked"}{" · "}{formatSpcOperationalTime(health.checkedAt)}{health.freshness.state === "cached" ? " · Cached for up to one minute" : ""}. Table access and settings only; external services and message delivery are not tested.</p> : <p className="spc-operational-status" role="status">{loading ? "Loading system checks..." : "System checks are unavailable. Please refresh to retry."}</p>}
         <div className="spc-health-grid">
           {[
             ["COMMIT", health?.deployment.shortCommit || "-"],
             ["BRANCH", health?.deployment.branch || "-"],
             ["ENVIRONMENT", health?.deployment.environment || "-"],
-            ["STATUS", health?.status || "-"],
+            ["STATUS", health ? previous ? "UNKNOWN" : health.status : "-"],
           ].map(([label, value]) => (
             <div key={label}>
               <span>{label}</span>
@@ -109,11 +66,11 @@ export default function SpcSystemHealthPage() {
           <h2>Checks</h2>
         </div>
         <div className="spc-check-grid">
-          {checks.map((check) => (
+          {(health?.checks || []).map((check) => (
             <article key={check.id} className={`is-${check.status}`}>
               <div>
                 <h3>{check.label}</h3>
-                <span>{check.status}</span>
+                <span>{previous ? "LAST: " : ""}{check.status}</span>
               </div>
               <p>{check.message}</p>
               {check.details ? (
@@ -130,6 +87,7 @@ export default function SpcSystemHealthPage() {
           ))}
         </div>
       </section>
+      </div>
     </SpcShell>
   )
 }

@@ -5705,6 +5705,42 @@ body:has(.spc-statistics-page) .spc-main {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+/* Operational reads retain old values on a failed refresh, visibly marked as
+   previous. Long environment names/branch names must remain readable on phones. */
+.spc-operational-page {
+  min-width: 0;
+}
+
+.spc-operational-page .spc-alert,
+.spc-operational-status,
+.spc-operational-page .spc-health-grid strong,
+.spc-operational-page .spc-check-grid h3,
+.spc-operational-page .spc-secret-grid h3,
+.spc-operational-page .spc-tech-database li {
+  overflow-wrap: anywhere;
+}
+
+.spc-operational-status {
+  margin: 0;
+  padding: 12px 14px;
+  color: var(--fc-admin-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.spc-operational-page .spc-secret-grid article {
+  flex-wrap: wrap;
+}
+
+.spc-operational-page .spc-secret-grid article > div {
+  min-width: 0;
+  flex: 1 1 160px;
+}
+
+.spc-operational-page .spc-secret-grid article > span {
+  white-space: normal;
+}
+
 .spc-health-grid > div {
   min-height: 86px;
   display: grid;

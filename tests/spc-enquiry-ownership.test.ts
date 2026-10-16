@@ -79,7 +79,9 @@ test("SPC enquiry clear action sits inside the parser box", () => {
 
 test("SPC Lost Record retains a separately authorized shared record scope", () => {
   assert.match(lostRecordPage, /scope=records/)
-  assert.match(route, /hasSpcPagePermission\(session, "spc-lost-record", "view"\)/)
+  assert.match(route, /requireSpcPagePermission\(\s*recordsScope \? "spc-lost-record" : "spc-buyer-enquiries",\s*"view"/)
+  assert.match(route, /status !== "cancelled"/)
+  assert.match(route, /new Set\(\["scope", "status", "limit"\]\)/)
 })
 
 test("SPC web outcome, amendment, and reoffer mutations enforce enquiry ownership", () => {
