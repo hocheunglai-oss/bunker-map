@@ -2,6 +2,7 @@ import {
   setSpcVerifiedSession,
 } from "@/lib/spcAuth"
 import { SPC_PAGE_DEFINITIONS } from "@/lib/spcPages"
+import { browserSessionActorKey } from "@/lib/browserSessionOwner"
 import { spcPrivateJson } from "@/lib/spcResponse"
 import { revokeDatabaseSpcSession } from "@/lib/spcSessions"
 import { getDatabaseSpcUserById } from "@/lib/spcUsers"
@@ -101,6 +102,7 @@ export async function POST(request: Request) {
     return spcPrivateJson({
       success: true,
       user: {
+        actorKey: browserSessionActorKey("spc", user.id),
         username: user.username,
         displayName: user.displayName || user.username,
         role: user.role,

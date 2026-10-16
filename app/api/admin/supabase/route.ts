@@ -51,7 +51,7 @@ function errorResponse(error: unknown) {
         : error instanceof OutlookContactValidationError || error instanceof OutlookGroupValidationError || message.startsWith("Select an existing phonebook company:")
           ? 400
           : 500
-  return NextResponse.json({ message }, { status })
+  return NextResponse.json({ message }, { status, headers: { "Cache-Control": "private, no-store" } })
 }
 
 function getTarget(request: Request) {
@@ -137,7 +137,7 @@ async function proxyRequest(request: Request) {
     const isRead = ["GET", "HEAD"].includes(request.method)
 
     if (!pageId || !PAGE_TABLES[pageId]?.has(table)) {
-      return NextResponse.json({ message: "Forbidden" }, { status: 403 })
+      return NextResponse.json({ message: "Forbidden" }, { status: 403, headers: { "Cache-Control": "private, no-store" } })
     }
 
     const session = await requireAdminPagePermission(pageId, isRead ? "view" : "edit")
@@ -224,6 +224,7 @@ async function proxyRequest(request: Request) {
       cache: "no-store",
     })
     const responseHeaders = new Headers()
+    responseHeaders.set("Cache-Control", "private, no-store")
     ;["content-type", "content-range", "location", "preference-applied"].forEach((name) => {
       const value = response.headers.get(name)
       if (value) responseHeaders.set(name, value)

@@ -128,5 +128,7 @@ test("active SPC browser sessions periodically revisit the cookie-refresh endpoi
   assert.match(clientAuth, /document\.addEventListener\("visibilitychange", handleVisibilityChange\)/)
   assert.match(clientAuth, /window\.setInterval\([\s\S]*?refreshActiveSession,[\s\S]*?SPC_SESSION_BACKGROUND_REFRESH_MS/)
   assert.match(clientAuth, /window\.clearInterval\(refreshInterval\)/)
-  assert.match(clientAuth, /fetch\("\/api\/spc\/session", \{ cache: "no-store" \}\)/)
+  assert.match(clientAuth, /createBrowserSessionStore\("\/api\/spc\/session", SPC_SESSION_CACHE_MS\)/)
+  const sessionStore = readFileSync(new URL("../lib/clientSessionStore.ts", import.meta.url), "utf8")
+  assert.match(sessionStore, /fetch\(url, \{ cache: "no-store", signal: requestController.signal \}\)/)
 })

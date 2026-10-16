@@ -6,9 +6,8 @@ import { useEffect, useRef, useState } from "react"
 import "leaflet/dist/leaflet.css"
 import { AdminAiWorkbench } from "@/components/AdminAiWorkbench"
 import { PASSWORD_MIN_LENGTH } from "@/lib/passwordPolicy"
-import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
+import { clearAdminClientSessionCache, primeAdminClientSessionCache, useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { normaliseOidcAuthorizeReturnTo } from "@/lib/fcunoOidcContinuation"
-import { removeClientStorage, writeClientStorage } from "@/lib/clientStorage"
 
 const HOLIDAY_MARKET_CODES = "HK CN TW SG KR JP VN US"
 const HKO_TROPICAL_CYCLONE_MAP_URL = "https://www.hko.gov.hk/en/wxinfo/currwx/tc_gis.htm"
@@ -427,11 +426,14 @@ export default function AdminPage() {
   const [dashboardError, setDashboardError] = useState("")
   const [selectedTyphoonStorm, setSelectedTyphoonStorm] =
     useState<AdminTyphoonStorm | null>(null)
+  const activeRef = useRef(true)
 
   useEffect(() => {
+    activeRef.current = true
     document.title = "Admin - FC Uno"
     const loginHint = new URLSearchParams(window.location.search).get("loginHint")?.trim() || ""
     if (loginHint.length <= 320) setUsername(loginHint)
+    return () => { activeRef.current = false }
   }, [])
 
   useEffect(() => {
@@ -476,6 +478,7 @@ export default function AdminPage() {
 
   async function handleLogin(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!activeRef.current) return
     setSubmitting(true)
     setMessage("")
 
@@ -487,23 +490,23 @@ export default function AdminPage() {
       })
       const data = await response.json()
 
+      if (!activeRef.current) return
       if (!response.ok) {
         setMessage(data.message || "Login failed.")
         return
       }
 
       if (data.user?.username) {
-        writeClientStorage(
-          "bunker_admin_actor",
-          JSON.stringify({
-            username: data.user.username,
-            displayName: data.user.displayName || data.user.username,
-            role: data.user.role || null,
-            resetRequired: data.user.resetRequired === true,
-            permissions: data.user.permissions || {},
-            pages: data.user.pages || [],
-          }),
-        )
+        primeAdminClientSessionCache({
+          authenticated: true,
+          actorKey: data.user.actorKey || null,
+          username: data.user.username,
+          displayName: data.user.displayName || data.user.username,
+          role: data.user.role || null,
+          resetRequired: data.user.resetRequired === true,
+          permissions: data.user.permissions || {},
+          pages: data.user.pages || [],
+        })
       }
 
       const target = normaliseOidcAuthorizeReturnTo(
@@ -516,14 +519,16 @@ export default function AdminPage() {
       }
       window.location.reload()
     } catch {
+      if (!activeRef.current) return
       setMessage("Unable to sign in. Please try again.")
     } finally {
-      setSubmitting(false)
+      if (activeRef.current) setSubmitting(false)
     }
   }
 
   async function handlePasswordReset(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!activeRef.current) return
     setSubmitting(true)
     setMessage("")
 
@@ -540,12 +545,13 @@ export default function AdminPage() {
       })
       const data = await response.json()
 
+      if (!activeRef.current) return
       if (!response.ok) {
         setMessage(data.message || "Password reset failed.")
         return
       }
 
-      removeClientStorage("bunker_admin_actor")
+      clearAdminClientSessionCache()
       const target = normaliseOidcAuthorizeReturnTo(
         new URLSearchParams(window.location.search).get("returnTo"),
         window.location.origin,
@@ -556,29 +562,34 @@ export default function AdminPage() {
       }
       window.location.reload()
     } catch {
+      if (!activeRef.current) return
       setMessage("Password reset is temporarily unavailable. Please try again.")
     } finally {
-      setSubmitting(false)
+      if (activeRef.current) setSubmitting(false)
     }
   }
 
   async function handleResetLogout() {
+    if (!activeRef.current) return
     setSubmitting(true)
     setMessage("")
     try {
       const response = await fetch("/api/admin/logout", { method: "POST" })
+      if (!activeRef.current) return
       if (!response.ok) {
         const data = await response.json().catch(() => ({}))
+        if (!activeRef.current) return
         setMessage(data.message || "Unable to sign out.")
         return
       }
 
-      removeClientStorage("bunker_admin_actor")
+      clearAdminClientSessionCache()
       window.location.reload()
     } catch {
+      if (!activeRef.current) return
       setMessage("Unable to sign out. Please try again.")
     } finally {
-      setSubmitting(false)
+      if (activeRef.current) setSubmitting(false)
     }
   }
 

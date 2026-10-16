@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { browserSessionActorKey } from "@/lib/browserSessionOwner"
 import { setAdminSession, validateAdminCredentials } from "@/lib/adminAuth"
 
 export async function POST(request: Request) {
@@ -41,6 +42,7 @@ export async function POST(request: Request) {
   return NextResponse.json({
     success: true,
     user: {
+      actorKey: browserSessionActorKey("fcuno", user.id),
       username: user.username,
       displayName: user.displayName || user.username,
       role: user.role || null,

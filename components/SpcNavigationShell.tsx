@@ -64,6 +64,7 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
   const [collapsed, setCollapsed] = useState(false)
   const [expandedGroups, setExpandedGroups] = useState(defaultExpandedGroups)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const activeRef = useRef(true)
   const sessionPresentationLabel = getSpcSessionPresentationLabel({
     role,
     displayName,
@@ -71,8 +72,10 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
   })
 
   useEffect(() => {
+    activeRef.current = true
     setCollapsed(readClientStorage(SIDEBAR_COLLAPSED_KEY) === "true")
     setExpandedGroups(readStoredGroups())
+    return () => { activeRef.current = false }
   }, [])
 
   useEffect(() => {
@@ -172,17 +175,19 @@ export function SpcNavigationShell({ children }: { children: React.ReactNode }) 
   }
 
   async function handleLogout() {
+    if (!activeRef.current) return
     setCollapsed(false)
     setMobileOpen(false)
     removeClientStorage(SIDEBAR_COLLAPSED_KEY)
     const loggedOut = await fetch("/api/spc/logout", { method: "POST" })
       .then((response) => response.ok)
       .catch(() => false)
+    if (!activeRef.current) return
     if (!loggedOut) {
       window.alert("Unable to log out. Please try again.")
       return
     }
-    clearSpcClientSessionCache()
+    clearSpcClientSessionCache({ leavingDocument: true })
     window.location.assign("/spc")
   }
 

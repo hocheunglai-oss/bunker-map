@@ -1,4 +1,5 @@
 import { requireSpcSession, setSpcSession } from "@/lib/spcAuth"
+import { browserSessionActorKey } from "@/lib/browserSessionOwner"
 import {
   createSpcAuditContext,
   recordSpcUserManagementAuditEvent,
@@ -45,6 +46,7 @@ export async function POST(request: Request) {
     return spcPrivateJson({
       success: true,
       user: {
+        actorKey: browserSessionActorKey("spc", user.id),
         username: user.username,
         displayName: user.displayName,
         role: user.role,

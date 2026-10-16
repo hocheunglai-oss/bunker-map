@@ -7,7 +7,6 @@ import { usePathname, useRouter } from "next/navigation"
 import { ParserReportSidebarBadge } from "@/components/ParserReportSidebarBadge"
 import { getAdminFolderStyle } from "@/lib/adminFolderTones"
 import {
-  clearAdminClientCache,
   fetchAdminClientJson,
   OUTLOOK_TEMPLATES_INDEX_CACHE_KEY,
 } from "@/lib/adminClientCache"
@@ -19,7 +18,7 @@ import {
   type AdminPageDefinition,
   type AdminPagePermission,
 } from "@/lib/adminPages"
-import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
+import { clearAdminClientSessionCache, useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { readClientStorage, removeClientStorage, writeClientStorage } from "@/lib/clientStorage"
 
 type AdminPageGroup = AdminPageDefinition["group"]
@@ -218,10 +217,13 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
   const [collapsed, setCollapsed] = useState(false)
   const [expandedGroups, setExpandedGroups] = useState(defaultExpandedGroups)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const activeRef = useRef(true)
 
   useEffect(() => {
+    activeRef.current = true
     setCollapsed(readClientStorage(SIDEBAR_COLLAPSED_KEY) === "true")
     setExpandedGroups(readStoredGroups())
+    return () => { activeRef.current = false }
   }, [])
 
   useEffect(() => {
@@ -332,18 +334,19 @@ export function AdminNavigationShell({ children }: { children: React.ReactNode }
   }
 
   async function handleLogout() {
+    if (!activeRef.current) return
     setCollapsed(false)
     setMobileOpen(false)
     removeClientStorage(SIDEBAR_COLLAPSED_KEY)
     const loggedOut = await fetch("/api/admin/logout", { method: "POST" })
       .then((response) => response.ok)
       .catch(() => false)
+    if (!activeRef.current) return
     if (!loggedOut) {
       window.alert("Unable to log out. Please try again.")
       return
     }
-    clearAdminClientCache()
-    removeClientStorage("bunker_admin_actor")
+    clearAdminClientSessionCache()
     window.location.assign("/admin")
   }
 

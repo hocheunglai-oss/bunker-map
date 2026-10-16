@@ -1,4 +1,5 @@
 import { getRefreshedSpcSession } from "@/lib/spcAuth"
+import { browserSessionActorKey } from "@/lib/browserSessionOwner"
 import { SPC_PAGE_DEFINITIONS } from "@/lib/spcPages"
 import { spcPrivateJson } from "@/lib/spcResponse"
 
@@ -7,6 +8,7 @@ export async function GET() {
 
   return spcPrivateJson({
     authenticated: session.authenticated,
+    actorKey: browserSessionActorKey("spc", session.userId),
     username: session.username,
     displayName: session.displayName,
     role: session.role,

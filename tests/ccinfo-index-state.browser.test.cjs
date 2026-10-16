@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, ".."), repo = createRequire(path.join(root,
 const { build } = repo("esbuild"), postcss = repo("postcss"), tailwind = repo("@tailwindcss/postcss")
 const { chromium, webkit } = require("playwright")
 const mocks = {
-  "@/lib/useSimpleAdminAuth": "export const useSimpleAdminAuth=()=>window.__ccinfoIndexHarness.auth;",
+  "@/lib/useSimpleAdminAuth": "export const useSimpleAdminAuth=()=>window.__ccinfoIndexHarness.auth;export const clearAdminClientSessionCache=()=>{};",
   "next/navigation": "const router={push:p=>window.__ccinfoIndexHarness.routes.push(p),replace:p=>window.__ccinfoIndexHarness.routes.push(p),prefetch:()=>{}};export const useRouter=()=>router;export const usePathname=()=>location.pathname;",
   "next/link": "import React from 'react';export default function Link({prefetch,...props}){return <a {...props}/>;}",
   "next/image": "import React from 'react';export default function Image({priority,unoptimized,fill,...props}){return <img {...props}/>;}",

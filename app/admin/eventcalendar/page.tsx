@@ -6,6 +6,7 @@ import {
   officeCalendarSeedEvents,
 } from "@/data/eventCalendar"
 import { EVENT_CALENDAR_PROTOCOL_VERSION } from "@/lib/eventCalendarProtocol"
+import { parseEventCalendarResponse, type EventCalendarResponse } from "@/lib/eventCalendarResponse"
 import { validateCalendarEmailList } from "@/lib/calendarRecipients"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
@@ -227,6 +228,7 @@ const modalBackdropStyle: React.CSSProperties = {
   inset: 0,
   background: "#1d1d1f",
   display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr)",
   placeItems: "center",
   padding: "20px",
   zIndex: 3000,
@@ -240,6 +242,14 @@ const modalStyle: React.CSSProperties = {
   borderRadius: "22px",
   boxShadow: "0 18px 42px #0000001f",
   padding: "18px",
+}
+
+const overlayModalStyle: React.CSSProperties = {
+  ...modalStyle,
+  minWidth: 0,
+  maxWidth: "100%",
+  maxHeight: "calc(100dvh - 40px)",
+  overflowY: "auto",
 }
 
 const primaryActionButtonStyle: React.CSSProperties = {
@@ -495,6 +505,7 @@ export default function EventCalendarPage() {
   const [googleCalendarStatus, setGoogleCalendarStatus] = useState("Calendar ready")
   const [, setSaveStatus] = useState("Loading shared calendar")
   const [calendarLoadError, setCalendarLoadError] = useState("")
+  const [calendarRefreshError, setCalendarRefreshError] = useState("")
   const [holidayImportStatus, setHolidayImportStatus] = useState("")
   const [holidayImporting, setHolidayImporting] = useState(false)
   const [holidayPreview, setHolidayPreview] = useState<HolidayPreview | null>(null)
@@ -522,6 +533,23 @@ export default function EventCalendarPage() {
   const refreshRequestSequenceRef = useRef(0)
   const toolsMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const addMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const componentLifetimeRef = useRef({ sequence: 0, active: false })
+
+  useEffect(() => {
+    const lifetime = componentLifetimeRef.current
+    lifetime.sequence += 1
+    lifetime.active = true
+    return () => {
+      lifetime.active = false
+      lifetime.sequence += 1
+      eventSubmissionTokenRef.current += 1
+      leaveSubmissionTokenRef.current += 1
+    }
+  }, [])
+
+  function ownsCalendar(owner: number) {
+    return componentLifetimeRef.current.active && componentLifetimeRef.current.sequence === owner
+  }
 
   useEffect(() => {
     const refreshToday = () => setTodayKey(getHongKongDateKey())
@@ -530,20 +558,16 @@ export default function EventCalendarPage() {
     return () => { window.clearInterval(timer); window.removeEventListener("focus", refreshToday) }
   }, [])
 
-  function applyCanonicalCalendarPayload(
-    rawPayload: unknown,
-    rawEventVersions: unknown,
-    rawSettingVersions: unknown,
-  ) {
-    if (!rawPayload || typeof rawPayload !== "object" || Array.isArray(rawPayload)) return false
-    const payload = rawPayload as Record<string, unknown>
+  function applyCanonicalCalendarPayload(canonical: EventCalendarResponse) {
+    const payload = canonical.payload
+    if (!payload) return false
     if (!Array.isArray(payload.events)) return false
 
     const nextEvents = normalizeStoredEvents(payload.events)
-    const nextEventVersions = normalizeEventVersions(rawEventVersions)
+    const nextEventVersions = canonical.eventVersions
     eventsRef.current = nextEvents
     setEventVersions(nextEventVersions)
-    setSettingVersions(normalizeEventVersions(rawSettingVersions))
+    setSettingVersions(canonical.settingVersions)
     if (
       draftEventIdRef.current &&
       draftEventVersionRef.current &&
@@ -553,11 +577,9 @@ export default function EventCalendarPage() {
     }
     setEvents(nextEvents)
     setDeletedEventIds(normalizeStringList(Array.isArray(payload.deletedEventIds) ? payload.deletedEventIds.map(String) : []))
-    if (Array.isArray(payload.people)) setPeople(normalizePeople(payload.people.map(String)))
-    if (typeof payload.emailRecipientsText === "string") setEmailRecipientsText(payload.emailRecipientsText)
-    if (Array.isArray(payload.deletedRequiredSeedIds)) {
-      setDeletedRequiredSeedIds(normalizeStringList(payload.deletedRequiredSeedIds.map(String)))
-    }
+    setPeople(payload.people === undefined ? defaultPeople : normalizePeople(payload.people))
+    setEmailRecipientsText(payload.emailRecipientsText ?? "")
+    setDeletedRequiredSeedIds(normalizeStringList(payload.deletedRequiredSeedIds ?? []))
     return true
   }
 
@@ -589,18 +611,21 @@ export default function EventCalendarPage() {
       }
 
       try {
-        const response = await fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`)
+        const response = await fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`, { cache: "no-store" })
         if (!response.ok) throw new Error("Could not load shared calendar data.")
         const data = await response.json()
-        const payload = data?.payload
+        const canonical = await parseEventCalendarResponse(data)
+        const payload = canonical.payload
+        fallbackEventVersions = canonical.eventVersions
+        fallbackSettingVersions = canonical.settingVersions
 
-        if (data?.protocolVersion !== EVENT_CALENDAR_PROTOCOL_VERSION) {
-          throw new Error("This Event Calendar tab is outdated. Refresh the page before making calendar changes.")
-        }
-        fallbackEventVersions = normalizeEventVersions(data.eventVersions)
-        fallbackSettingVersions = normalizeEventVersions(data.settingVersions)
-
-        if (response.ok && payload && typeof payload === "object") {
+        if (!canonical.legacyAbsent && payload) {
+          // A real shared row is authoritative. Missing legacy settings use the
+          // product fallback mode, never values cached by a different old tab.
+          fallbackPeople = defaultPeople
+          fallbackEmailRecipients = ""
+          fallbackDeletedEventIds = []
+          fallbackDeletedRequiredSeedIds = []
           if (Array.isArray(payload.events)) fallbackEvents = normalizeStoredEvents(payload.events)
           if (Array.isArray(payload.people)) fallbackPeople = normalizePeople(payload.people)
           if (typeof payload.emailRecipientsText === "string") fallbackEmailRecipients = payload.emailRecipientsText
@@ -682,11 +707,6 @@ export default function EventCalendarPage() {
         const response = await fetch(`/api/office-calendar-store/${SHARED_STORE_KEY}`, { cache: "no-store" })
         const data = await response.json().catch(() => null)
         if (!response.ok) throw new Error(data?.message || "Could not refresh the shared calendar.")
-        if (data?.protocolVersion !== EVENT_CALENDAR_PROTOCOL_VERSION) {
-          setCalendarLoadError("This Event Calendar tab is outdated. Refresh the page before making calendar changes.")
-          setSaveStatus("Calendar tab outdated - refresh required")
-          return
-        }
         if (
           cancelled ||
           requestSequence !== refreshRequestSequenceRef.current ||
@@ -694,12 +714,18 @@ export default function EventCalendarPage() {
           calendarMutationPendingRef.current
         ) return
 
-        if (applyCanonicalCalendarPayload(data.payload, data.eventVersions, data.settingVersions)) {
-          setCalendarLoadError("")
-          setSaveStatus("Shared calendar refreshed")
-        }
+        const canonical = await parseEventCalendarResponse(data)
+        // Hash verification is asynchronous too: recheck ownership before apply.
+        if (cancelled || requestSequence !== refreshRequestSequenceRef.current || stateSequence !== calendarStateSequenceRef.current || calendarMutationPendingRef.current) return
+        if (!applyCanonicalCalendarPayload(canonical)) throw new Error("The shared calendar is no longer available.")
+        setCalendarLoadError("")
+        setCalendarRefreshError("")
+        setSaveStatus("Shared calendar refreshed")
       } catch {
-        if (!cancelled) setSaveStatus("Shared calendar refresh pending")
+        if (!cancelled && requestSequence === refreshRequestSequenceRef.current && stateSequence === calendarStateSequenceRef.current && !calendarMutationPendingRef.current) {
+          setCalendarRefreshError("Calendar refresh unavailable. Showing the last verified calendar; your unsaved changes have been kept.")
+          setSaveStatus("Shared calendar refresh pending")
+        }
       }
     }
 
@@ -756,8 +782,8 @@ export default function EventCalendarPage() {
     }
   }, [authenticated, calendarLoaded])
 
-  async function syncCanonicalGoogleCalendar(eventIds: string[]) {
-    if (!eventIds.length) return
+  async function syncCanonicalGoogleCalendar(eventIds: string[], owner = componentLifetimeRef.current.sequence) {
+    if (!eventIds.length || !ownsCalendar(owner)) return
     setSyncStatus("Syncing Google")
     try {
       const response = await fetch("/api/event-calendar/google-sync", {
@@ -766,6 +792,7 @@ export default function EventCalendarPage() {
         body: JSON.stringify({ eventIds }),
       })
       const payload = await response.json()
+      if (!ownsCalendar(owner)) return
       if (!response.ok || payload.success !== true) {
         setSyncStatus(payload.message || "Google sync pending")
         return
@@ -777,7 +804,7 @@ export default function EventCalendarPage() {
       )
       setGoogleRefreshKey((current) => current + 1)
     } catch {
-      setSyncStatus("Google sync pending")
+      if (ownsCalendar(owner)) setSyncStatus("Google sync pending")
     }
   }
 
@@ -820,6 +847,8 @@ export default function EventCalendarPage() {
   }, [])
 
   async function sendEventEmail(notificationEvents: ManagedEvent[], versions: Record<string, string>, action: "created" | "updated") {
+    const owner = componentLifetimeRef.current.sequence
+    if (!ownsCalendar(owner)) throw new Error("This calendar is no longer active.")
     if (!canEdit) throw new Error("You have view-only access to this calendar.")
     const response = await fetch("/api/event-calendar/email-notify", {
         method: "POST",
@@ -830,6 +859,7 @@ export default function EventCalendarPage() {
       })
 
     const payload = await response.json().catch(() => null)
+    if (!ownsCalendar(owner)) throw new Error("This calendar is no longer active.")
     if (!response.ok || payload?.status === "in_progress") {
       if (payload?.status === "in_progress") throw new Error("This update is already being sent. Please wait a moment before checking again.")
       throw new Error(payload?.message || "Email notification failed.")
@@ -845,6 +875,8 @@ export default function EventCalendarPage() {
     expectedSettingVersions: Record<string, string> = {},
     confirmEmailRecipientsClear = false,
   ) {
+    const owner = componentLifetimeRef.current.sequence
+    if (!ownsCalendar(owner)) throw new Error("This calendar is no longer active. Check the saved result in the current account.")
     if (!canEdit) throw new Error("You have view-only access to this calendar.")
     if (calendarMutationPendingRef.current) {
       throw new Error("Another calendar change is still saving. Wait for it to finish, then try again.")
@@ -870,11 +902,17 @@ export default function EventCalendarPage() {
         }),
       })
       const payload = await response.json().catch(() => null)
+      if (!ownsCalendar(owner)) throw new Error("This calendar is no longer active. Check the saved result in the current account.")
 
-      if (payload?.payload) {
-        applyCanonicalCalendarPayload(payload.payload, payload.eventVersions, payload.settingVersions)
-      }
-      if (!response.ok || !payload?.payload) {
+      if (!response.ok) {
+        if (response.status === 409 && payload?.payload) {
+          try {
+            const canonical = await parseEventCalendarResponse(payload)
+            if (!ownsCalendar(owner)) throw new Error("This calendar is no longer active.")
+            applyCanonicalCalendarPayload(canonical)
+          } catch { /* Never install an unverified conflict reply or rebase the pinned draft. */ }
+        }
+        if (!ownsCalendar(owner)) throw new Error("This calendar is no longer active.")
         const message = payload?.message || "Shared calendar save failed"
         setSaveStatus(message)
         if (payload?.reloadRequired) {
@@ -883,19 +921,24 @@ export default function EventCalendarPage() {
         throw new Error(message)
       }
 
+      const canonical = await parseEventCalendarResponse(payload, { operation, events: mutationEvents, eventIds, settings })
+      if (!ownsCalendar(owner)) throw new Error("This calendar is no longer active. Check the saved result in the current account.")
+      if (!applyCanonicalCalendarPayload(canonical)) throw new Error("The saved calendar could not be verified. Your unsaved changes have been kept. Refresh the page to check the result.")
+
       setCalendarLoadError("")
+      setCalendarRefreshError("")
       setSaveStatus("Shared calendar saved")
       if (["create", "update", "delete"].includes(operation)) {
         const affectedEventIds = operation === "delete"
           ? eventIds
           : mutationEvents.map((event) => event.id)
-        void syncCanonicalGoogleCalendar(affectedEventIds)
+        void syncCanonicalGoogleCalendar(affectedEventIds, owner)
       }
       return payload
     } finally {
       calendarMutationPendingRef.current = false
       calendarStateSequenceRef.current += 1
-      setCalendarMutationPending(false)
+      if (ownsCalendar(owner)) setCalendarMutationPending(false)
     }
   }
 
@@ -1014,6 +1057,8 @@ export default function EventCalendarPage() {
   }
 
   async function saveDraftEvent() {
+    const owner = componentLifetimeRef.current.sequence
+    if (!ownsCalendar(owner)) return
     if (!canEdit || calendarMutationPendingRef.current || eventSubmissionPendingRef.current || !eventModalMode) return
     if (!isValidCalendarDate(draftEvent.startDate) || !isValidCalendarDate(draftEvent.endDate) || draftEvent.endDate < draftEvent.startDate) {
       window.alert("Enter a valid start and end date. The end must not be before the start.")
@@ -1037,7 +1082,7 @@ export default function EventCalendarPage() {
       }
 
       const conflicts = await findMeetingRoomConflicts(nextEvent)
-      if (submissionToken !== eventSubmissionTokenRef.current) return
+      if (!ownsCalendar(owner) || submissionToken !== eventSubmissionTokenRef.current) return
       if (conflicts.length) {
         const conflictText = conflicts
           .slice(0, 3)
@@ -1056,6 +1101,7 @@ export default function EventCalendarPage() {
         {},
         wasEdit ? { [nextEvent.id]: draftEventVersion } : {},
       )
+      if (!ownsCalendar(owner)) return
       const committedEvent = normalizeStoredEvents(result.payload.events).find((event) => event.id === nextEvent.id) || nextEvent
       setEmailPrompt({
         events: [committedEvent],
@@ -1071,6 +1117,7 @@ export default function EventCalendarPage() {
         setEventModalMode(null)
       }
     } catch (error) {
+      if (!ownsCalendar(owner)) return
       window.alert(error instanceof Error ? error.message : "The event was not saved. Please try again.")
     } finally {
       if (submissionToken === eventSubmissionTokenRef.current) {
@@ -1081,14 +1128,18 @@ export default function EventCalendarPage() {
   }
 
   async function confirmEventEmailSend() {
+    const owner = componentLifetimeRef.current.sequence
+    if (!ownsCalendar(owner)) return
     if (!emailPrompt || emailPrompt.status === "sending") return
     setEmailPrompt((current) => current && { ...current, status: "sending", error: "" })
 
     try {
       await sendEventEmail(emailPrompt.events, emailPrompt.eventVersions, emailPrompt.action)
+      if (!ownsCalendar(owner)) return
       setEmailPrompt((current) => current && { ...current, status: "sent", error: "" })
-      window.setTimeout(() => setEmailPrompt(null), 900)
+      window.setTimeout(() => { if (ownsCalendar(owner)) setEmailPrompt(null) }, 900)
     } catch (error) {
+      if (!ownsCalendar(owner)) return
       setEmailPrompt((current) => current && {
         ...current,
         status: "failed",
@@ -1098,6 +1149,8 @@ export default function EventCalendarPage() {
   }
 
   async function saveRecurrentEvents() {
+    const owner = componentLifetimeRef.current.sequence
+    if (!ownsCalendar(owner)) return
     if (!canEdit || calendarMutationPendingRef.current) return
     if (!isValidCalendarDate(draftRecurrentEvent.startDate) || !isValidCalendarDate(draftRecurrentEvent.endDate) || draftRecurrentEvent.endDate < draftRecurrentEvent.startDate) {
       window.alert("Enter a valid start and end date. The end must not be before the start.")
@@ -1157,12 +1210,14 @@ export default function EventCalendarPage() {
 
     try {
       const result = await mutateCalendar("create", nextEvents)
+      if (!ownsCalendar(owner)) return
       const ids = new Set(nextEvents.map((event) => event.id))
       setEmailPrompt({
         events: normalizeStoredEvents(result.payload.events).filter((event) => ids.has(event.id)),
         eventVersions: normalizeEventVersions(result.eventVersions), action: "created", status: "idle", error: "",
       })
     } catch (error) {
+      if (!ownsCalendar(owner)) return
       window.alert(error instanceof Error ? error.message : "The recurrent events were not saved. Please try again.")
       return
     }
@@ -1170,6 +1225,8 @@ export default function EventCalendarPage() {
   }
 
   async function sendLeaveRequest() {
+    const owner = componentLifetimeRef.current.sequence
+    if (!ownsCalendar(owner)) return
     if (!canEdit || !leaveRequestDraft.person || leaveSubmissionPendingRef.current || leaveRequestDraft.status === "sent") return
     const submissionToken = ++leaveSubmissionTokenRef.current
     leaveSubmissionPendingRef.current = true
@@ -1287,6 +1344,8 @@ export default function EventCalendarPage() {
   }
 
   async function savePeople() {
+    const owner = componentLifetimeRef.current.sequence
+    if (!ownsCalendar(owner)) return
     if (calendarMutationPendingRef.current) return
     const nextPeople = normalizePeople(draftPeopleText.split(/\n|,/))
     try {
@@ -1298,7 +1357,9 @@ export default function EventCalendarPage() {
         {},
         { people: draftPeopleVersion },
       )
+      if (!ownsCalendar(owner)) return
     } catch (error) {
+      if (!ownsCalendar(owner)) return
       window.alert(error instanceof Error ? error.message : "The people list was not saved. Please try again.")
       return
     }
@@ -1317,6 +1378,8 @@ export default function EventCalendarPage() {
   }
 
   async function saveEmailRecipients() {
+    const owner = componentLifetimeRef.current.sequence
+    if (!ownsCalendar(owner)) return
     if (calendarMutationPendingRef.current) return
     if (draftEmailRecipientsText === draftEmailRecipientsInitialText) {
       setEmailModalOpen(false)
@@ -1334,14 +1397,18 @@ export default function EventCalendarPage() {
         { emailRecipientsText: draftEmailRecipientsVersion },
         clearingEmailRecipients,
       )
+      if (!ownsCalendar(owner)) return
       setEmailRecipientsText(draftEmailRecipientsText)
       setEmailModalOpen(false)
     } catch (error) {
+      if (!ownsCalendar(owner)) return
       window.alert(error instanceof Error ? error.message : "The email reminder list was not saved. Please try again.")
     }
   }
 
   async function previewHolidayUpdates(countries: string[]) {
+    const owner = componentLifetimeRef.current.sequence
+    if (!ownsCalendar(owner)) return
     if (!canEdit || holidayImporting || calendarMutationPendingRef.current) return
     const year = Number(getHongKongDateKey().slice(0, 4))
     const years = [year, year + 1]
@@ -1354,17 +1421,21 @@ export default function EventCalendarPage() {
         body: JSON.stringify({ action: "preview", years, countries }),
       })
       const payload = await response.json()
+      if (!ownsCalendar(owner)) return
       if (!response.ok || !payload.plan || !payload.storeVersion || !payload.revision) throw new Error(payload.message || "Could not prepare the holiday updates.")
       setHolidayPreview({ ...payload, years, countries })
       setHolidayImportStatus(payload.complete ? "Holiday updates ready for review" : "Partial holiday coverage — review available updates")
     } catch (error) {
+      if (!ownsCalendar(owner)) return
       setHolidayImportStatus(error instanceof Error ? error.message : "Could not prepare the holiday updates.")
     } finally {
-      setHolidayImporting(false)
+      if (ownsCalendar(owner)) setHolidayImporting(false)
     }
   }
 
   async function applyHolidayUpdates() {
+    const owner = componentLifetimeRef.current.sequence
+    if (!ownsCalendar(owner)) return
     if (!canEdit || !holidayPreview || holidayImporting || calendarMutationPendingRef.current) return
     calendarMutationPendingRef.current = true
     calendarStateSequenceRef.current += 1
@@ -1376,23 +1447,28 @@ export default function EventCalendarPage() {
         body: JSON.stringify({ action: "apply", years: holidayPreview.years, countries: holidayPreview.countries, expectedStoreVersion: holidayPreview.storeVersion, revision: holidayPreview.revision }),
       })
       const payload = await response.json()
+      if (!ownsCalendar(owner)) return
       if (!response.ok) throw new Error(payload.message || "Holiday updates were not saved. Review a fresh preview before trying again.")
-      if (!applyCanonicalCalendarPayload(payload.payload, payload.eventVersions, payload.settingVersions)) throw new Error("The holiday response did not include the saved calendar. Refresh the page to check the result.")
+      const canonical = await parseEventCalendarResponse(payload)
+      if (!ownsCalendar(owner)) return
+      if (!applyCanonicalCalendarPayload(canonical)) throw new Error("The holiday response did not include the saved calendar. Refresh the page to check the result.")
       setHolidayImportStatus(`Holiday updates saved for ${holidayPreview.years.join("–")}${holidayPreview.plan.preserved.length ? `; ${holidayPreview.plan.preserved.length} edited/assigned entries left unchanged` : ""}`)
       setHolidayPreview(null)
     } catch (error) {
+      if (!ownsCalendar(owner)) return
       window.alert(error instanceof Error ? error.message : "The holiday updates were not saved.")
       setHolidayPreview(null)
       setHolidayImportStatus("Review a fresh holiday preview before trying again")
     } finally {
       calendarMutationPendingRef.current = false
       calendarStateSequenceRef.current += 1
-      setCalendarMutationPending(false)
-      setHolidayImporting(false)
+      if (ownsCalendar(owner)) { setCalendarMutationPending(false); setHolidayImporting(false) }
     }
   }
 
   async function recoverMissingEvents() {
+    const owner = componentLifetimeRef.current.sequence
+    if (!ownsCalendar(owner)) return
     if (!canEdit || recoveringEvents || calendarMutationPendingRef.current) return
     if (!window.confirm("Restore missing future events found in audit history?")) return
 
@@ -1410,15 +1486,18 @@ export default function EventCalendarPage() {
         body: JSON.stringify({}),
       })
       const payload = await response.json()
+      if (!ownsCalendar(owner)) return
       if (!response.ok || !Array.isArray(payload.restoredEvents)) {
         throw new Error(payload?.message || "Could not recover missing events.")
       }
 
-      if (!applyCanonicalCalendarPayload(payload.payload, payload.eventVersions, payload.settingVersions)) {
+      const canonical = await parseEventCalendarResponse(payload)
+      if (!ownsCalendar(owner)) return
+      if (!applyCanonicalCalendarPayload(canonical)) {
         throw new Error("The recovery response did not include the canonical calendar.")
       }
       const restoredIds = normalizeStoredEvents(payload.restoredEvents).map((event) => event.id)
-      if (restoredIds.length) void syncCanonicalGoogleCalendar(restoredIds)
+      if (restoredIds.length) void syncCanonicalGoogleCalendar(restoredIds, owner)
       setRecoveryStatus([payload.restoredCount
           ? `Recovered ${payload.restoredCount} missing events`
           : "No missing future events found",
@@ -1427,16 +1506,18 @@ export default function EventCalendarPage() {
         payload.historyComplete === false ? "Only part of the audit history was checked; older events may need administrator review" : "",
       ].filter(Boolean).join(". "))
     } catch (error) {
+      if (!ownsCalendar(owner)) return
       setRecoveryStatus(error instanceof Error ? error.message : "Could not recover missing events.")
     } finally {
       calendarMutationPendingRef.current = false
       calendarStateSequenceRef.current += 1
-      setCalendarMutationPending(false)
-      setRecoveringEvents(false)
+      if (ownsCalendar(owner)) { setCalendarMutationPending(false); setRecoveringEvents(false) }
     }
   }
 
   async function deleteDraftEvent() {
+    const owner = componentLifetimeRef.current.sequence
+    if (!ownsCalendar(owner)) return
     if (eventModalMode !== "edit") return
     if (calendarMutationPendingRef.current || eventSubmissionPendingRef.current) return
     if (!window.confirm("Are you sure you want to delete this event?")) return
@@ -1448,7 +1529,9 @@ export default function EventCalendarPage() {
       await mutateCalendar("delete", [], [draftEvent.id], {
         deletedRequiredSeedIds: nextDeletedRequiredSeedIds,
       }, { [draftEvent.id]: draftEventVersion })
+      if (!ownsCalendar(owner)) return
     } catch (error) {
+      if (!ownsCalendar(owner)) return
       window.alert(error instanceof Error ? error.message : "The event was not deleted. Please try again.")
       return
     }
@@ -1493,7 +1576,7 @@ export default function EventCalendarPage() {
       <div style={pageStyle}>
         <div style={shellStyle}>
           <div style={panelStyle}>
-            <p style={{ margin: "0 0 8px", color: "var(--fc-admin-danger-text)", fontSize: "14px", fontWeight: 900 }}>
+            <p role="alert" style={{ margin: "0 0 8px", color: "var(--fc-admin-panel-text)", fontSize: "14px", fontWeight: 900 }}>
               Shared calendar unavailable
             </p>
             <p style={{ margin: 0, color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
@@ -1508,6 +1591,7 @@ export default function EventCalendarPage() {
   return (
     <div style={pageStyle}>
       <div style={shellStyle}>
+        {calendarRefreshError && <p role="alert" style={{ color: "var(--fc-admin-panel-text)", background: "var(--fc-admin-panel-bg)", border: "1px solid var(--fc-admin-border)", padding: "12px", borderRadius: "12px", fontSize: "13px" }}>{calendarRefreshError}</p>}
         <header
           style={{
             display: "flex",
@@ -2013,7 +2097,7 @@ export default function EventCalendarPage() {
 
       {holidayPreview && (
         <div style={modalBackdropStyle}>
-          <div role="dialog" aria-modal="true" aria-labelledby="holiday-preview-title" style={{ ...modalStyle, width: "min(720px, 100%)", maxHeight: "85vh", overflowY: "auto" }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="holiday-preview-title" style={{ ...overlayModalStyle, width: "min(720px, 100%)", maxHeight: "min(85vh, calc(100dvh - 40px))" }}>
             <h2 id="holiday-preview-title" style={{ margin: "0 0 10px" }}>Review Holiday Updates</h2>
             <p>{holidayPreview.countries.join(", ")} · {holidayPreview.years.join("–")}</p>
             <p>Only recognised imported holidays are changed. Manually edited entries, attendance selections and intentionally deleted events are protected.</p>
@@ -2042,8 +2126,8 @@ export default function EventCalendarPage() {
 
       {eventModalMode && (
         <div style={modalBackdropStyle}>
-          <div style={modalStyle}>
-            <h2 style={{ margin: "0 0 14px", fontSize: "24px" }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="event-editor-title" style={overlayModalStyle}>
+            <h2 id="event-editor-title" style={{ margin: "0 0 14px", fontSize: "24px" }}>
               {eventModalMode === "add" ? "New Event" : "Edit Event"}
             </h2>
             {draftEventChangedElsewhere && (
@@ -2062,7 +2146,7 @@ export default function EventCalendarPage() {
                 This event changed in another tab. Your draft is preserved, but it cannot overwrite the newer record. Cancel and reopen the event before saving.
               </div>
             )}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))", gap: "10px", marginBottom: "10px" }}>
               <label style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                 From
                 <input
@@ -2156,7 +2240,7 @@ export default function EventCalendarPage() {
                 )
               })}
             </div>
-            <div style={{ display: "flex", justifyContent: eventModalMode === "edit" ? "space-between" : "flex-end", gap: "9px" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: eventModalMode === "edit" ? "space-between" : "flex-end", gap: "9px" }}>
               {eventModalMode === "edit" && (
                 <button
                   type="button"
@@ -2167,7 +2251,7 @@ export default function EventCalendarPage() {
                   Delete Event
                 </button>
               )}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "9px" }}>
+              <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: "9px", marginLeft: "auto" }}>
                 <button
                   type="button"
                   onClick={closeEventModal}
@@ -2192,10 +2276,10 @@ export default function EventCalendarPage() {
 
       {recurrentModalOpen && (
         <div style={modalBackdropStyle}>
-          <div style={modalStyle}>
+          <div style={overlayModalStyle}>
             <h2 style={{ margin: "0 0 14px", fontSize: "24px" }}>Recurrent Event</h2>
             <fieldset disabled={calendarMutationPending} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))", gap: "10px", marginBottom: "10px" }}>
               <label style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                 From
                 <input
@@ -2352,10 +2436,10 @@ export default function EventCalendarPage() {
 
       {leaveModalOpen && (
         <div style={modalBackdropStyle}>
-          <div style={{ ...modalStyle, width: "min(560px, 100%)" }}>
+          <div style={{ ...overlayModalStyle, width: "min(560px, 100%)" }}>
             <h2 style={{ margin: "0 0 14px", fontSize: "24px" }}>Leave Request</h2>
             <fieldset disabled={leaveRequestDraft.status === "sending" || leaveRequestDraft.status === "sent"} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))", gap: "10px", marginBottom: "10px" }}>
               <label style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                 Leave Period From
                 <input
@@ -2483,7 +2567,7 @@ export default function EventCalendarPage() {
 
       {emailPrompt && (
         <div style={modalBackdropStyle}>
-          <div style={{ ...modalStyle, width: "min(430px, 100%)" }}>
+          <div style={{ ...overlayModalStyle, width: "min(430px, 100%)" }}>
             <h2 style={{ margin: "0 0 10px", fontSize: "22px" }}>Send Event Update?</h2>
             <p style={{ margin: "0 0 6px", color: "var(--fc-admin-panel-text)", fontSize: "14px", fontWeight: 800 }}>
               {emailPrompt.events[0]?.title || "NEW EVENT"}
@@ -2587,8 +2671,8 @@ export default function EventCalendarPage() {
 
       {peopleModalOpen && (
         <div style={modalBackdropStyle}>
-          <div style={{ ...modalStyle, width: "min(460px, 100%)" }}>
-            <h2 style={{ margin: "0 0 10px", fontSize: "24px" }}>People Columns</h2>
+          <div role="dialog" aria-modal="true" aria-labelledby="people-columns-title" style={{ ...overlayModalStyle, width: "min(460px, 100%)" }}>
+            <h2 id="people-columns-title" style={{ margin: "0 0 10px", fontSize: "24px" }}>People Columns</h2>
             <p style={{ margin: "0 0 12px", color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
               One person per line. Reorder the lines to reorder the columns.
             </p>
@@ -2629,8 +2713,8 @@ export default function EventCalendarPage() {
 
       {emailModalOpen && (
         <div style={modalBackdropStyle}>
-          <div style={{ ...modalStyle, width: "min(520px, 100%)" }}>
-            <h2 style={{ margin: "0 0 10px", fontSize: "24px" }}>Event Update Email Recipients</h2>
+          <div role="dialog" aria-modal="true" aria-labelledby="email-recipients-title" style={{ ...overlayModalStyle, width: "min(520px, 100%)" }}>
+            <h2 id="email-recipients-title" style={{ margin: "0 0 10px", fontSize: "24px" }}>Event Update Email Recipients</h2>
             <p style={{ margin: "0 0 12px", color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
               One email per line. This list is for new and edited events when you choose to send an update. Saving without changes keeps the current settings. To disable update emails, clear the listed addresses, save and confirm. The scheduled daily reminder has a separate recipient list.
             </p>

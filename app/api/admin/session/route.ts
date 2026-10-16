@@ -4,5 +4,5 @@ import { getRefreshedAdminSession } from "@/lib/adminAuth"
 export async function GET() {
   const session = await getRefreshedAdminSession()
 
-  return NextResponse.json(session)
+  return NextResponse.json(session, { headers: { "Cache-Control": "private, no-store" } })
 }

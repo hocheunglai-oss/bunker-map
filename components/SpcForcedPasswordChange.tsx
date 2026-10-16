@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/passwordPolicy"
@@ -9,6 +9,7 @@ import type { SpcPagePermissionMap, SpcRoleId } from "@/lib/spcPages"
 
 type PasswordChangeResponse = {
   user?: {
+    actorKey?: string
     username?: string
     displayName?: string
     role?: SpcRoleId
@@ -22,6 +23,7 @@ type PasswordChangeResponse = {
 export function SpcForcedPasswordChange() {
   const router = useRouter()
   const {
+    actorKey,
     username,
     displayName,
     role,
@@ -33,9 +35,16 @@ export function SpcForcedPasswordChange() {
   const [confirmPassword, setConfirmPassword] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState("")
+  const activeRef = useRef(true)
+
+  useEffect(() => {
+    activeRef.current = true
+    return () => { activeRef.current = false }
+  }, [])
 
   async function handlePasswordChange(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!activeRef.current) return
     setMessage("")
 
     if (newPassword !== confirmPassword) {
@@ -51,12 +60,16 @@ export function SpcForcedPasswordChange() {
         body: JSON.stringify({ password: newPassword }),
       })
       const data = (await response.json().catch(() => ({}))) as PasswordChangeResponse
+      // A dispatched server change cannot be recalled. Its late response must
+      // not publish an old account into a replacement provider or navigate it.
+      if (!activeRef.current) return
       if (!response.ok || !data.user) {
         throw new Error(data.message || "Failed to update password.")
       }
 
       primeSpcClientSessionCache({
         authenticated: true,
+        actorKey: data.user.actorKey || actorKey,
         username: data.user.username || username,
         displayName: data.user.displayName || displayName || username,
         role: data.user.role || role,
@@ -68,9 +81,10 @@ export function SpcForcedPasswordChange() {
       router.replace("/spc")
       router.refresh()
     } catch (error) {
+      if (!activeRef.current) return
       setMessage(error instanceof Error ? error.message : "Failed to update password.")
     } finally {
-      setSubmitting(false)
+      if (activeRef.current) setSubmitting(false)
     }
   }
 

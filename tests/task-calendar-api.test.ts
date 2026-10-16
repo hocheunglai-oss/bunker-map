@@ -4,6 +4,7 @@ import test from "node:test"
 import { transformSync } from "esbuild"
 import * as taskData from "../data/taskCalendar"
 import * as taskStore from "../lib/taskCalendarStore"
+import * as calendarResponse from "../lib/eventCalendarResponse"
 import { resolveCalendarStaffRecipients, type CalendarStaff } from "../lib/calendarStaff"
 
 const task = (id = "a") => ({ id, sourceRow: 0, scheduleType: "Monthly", daysOfMonth: Array.from({ length: 31 }, (_, i) => i + 1), months: [], notify: ["DT", "JZ"], cc: ["DT"], task: "Synthetic task", remark: "Synthetic only" })
@@ -47,6 +48,7 @@ function harness(options: { permission?: "view" | "edit" | "none"; signedIn?: bo
     "@/lib/adminAudit": { createAdminAuditContext: () => ({}), createAdminAuditedSupabaseClient: () => client },
     "@/lib/eventCalendarStore": {},
     "@/lib/eventCalendarProtocol": { EVENT_CALENDAR_PROTOCOL_VERSION: 2 },
+    "@/lib/eventCalendarResponse": calendarResponse,
     "@/data/taskCalendar": taskData,
     "@/lib/taskCalendarStore": taskStore,
     "@/lib/calendarStaff": {

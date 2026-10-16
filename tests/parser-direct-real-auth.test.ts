@@ -180,6 +180,7 @@ function harness(options: { route?: "direct" | "canonical"; mfaEnabled?: boolean
   }
   const never = () => { throw new Error("Unexpected login, outbound delivery, or write boundary") }
   const adapters: Record<string, unknown> = {
+    "server-only": {},
     "node:crypto": crypto, crypto,
     "next/headers": { cookies: async () => cookieStore },
     "next/server": { NextResponse },
@@ -216,6 +217,7 @@ function harness(options: { route?: "direct" | "canonical"; mfaEnabled?: boolean
     "@/lib/spcAudit": { createSpcAuditContext: () => ({}), createSpcAuditedSupabaseClient: () => createReportClient() },
   }
   const realModules: Record<string, string> = {
+    "@/lib/browserSessionOwner": "../lib/browserSessionOwner.ts",
     "@/lib/adminAuth": "../lib/adminAuth.ts", "@/lib/spcAuth": "../lib/spcAuth.ts",
     "@/lib/adminSessions": "../lib/adminSessions.ts", "@/lib/spcSessions": "../lib/spcSessions.ts",
     "@/lib/spcWhatsappLoginMfa": "../lib/spcWhatsappLoginMfa.ts",

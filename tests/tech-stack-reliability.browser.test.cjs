@@ -9,7 +9,7 @@ const tailwind = require("@tailwindcss/postcss")
 const { chromium, webkit } = require("playwright")
 const root = path.resolve(__dirname, "..")
 const mocks = {
-  "@/lib/useSimpleAdminAuth": "export const useSimpleAdminAuth=()=>window.__techStackHarness.auth;",
+  "@/lib/useSimpleAdminAuth": "export const useSimpleAdminAuth=()=>window.__techStackHarness.auth; export const clearAdminClientSessionCache=()=>{};",
   "next/navigation": "const router={push:path=>window.__techStackHarness.routes.push(path),replace:path=>window.__techStackHarness.routes.push(path),prefetch:()=>{}};export const useRouter=()=>router;export const usePathname=()=>'/admin/techstack';",
   "next/link": "import React from 'react';export default function Link({prefetch,...props}){return <a {...props}/>;}",
   "next/image": "import React from 'react';export default function Image({priority,unoptimized,fill,...props}){return <img {...props}/>;}",

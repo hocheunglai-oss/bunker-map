@@ -40,7 +40,7 @@ const entry = `
 
 async function main() {
   const mocks = {
-    "@/lib/useSimpleAdminAuth": "export const useSimpleAdminAuth=()=>window.__navigationHarness.auth;",
+    "@/lib/useSimpleAdminAuth": "export const useSimpleAdminAuth=()=>window.__navigationHarness.auth; export const clearAdminClientSessionCache=()=>{};",
     "@/lib/useSpcAuth": "export const useSpcAuth=()=>window.__navigationHarness.auth;export const clearSpcClientSessionCache=()=>{};",
     "@/components/ParserReportSidebarBadge": "export const ParserReportSidebarBadge=()=>null;",
     "@/components/SpcMobileModeControl": "export const SpcMobileModeControl=()=>null;",

@@ -117,7 +117,8 @@ async function main() {
         const cached = JSON.parse(raw)
         assert.equal(cached.resetRequired, resetFlag === true)
         assert.equal(typeof cached.resetRequired, "boolean")
-        assert.deepEqual(Object.keys(cached).sort(), ["displayName", "pages", "permissions", "resetRequired", "role", "username"])
+        assert.deepEqual(Object.keys(cached).sort(), ["actorKey", "displayName", "pages", "permissions", "resetRequired", "role", "username"])
+        assert.equal(cached.actorKey, null, "Legacy synthetic responses without an ownership fingerprint do not invent one")
         assert.equal(raw.includes("synthetic-never-cache"), false)
         assert.deepEqual(pageErrors, [])
       }

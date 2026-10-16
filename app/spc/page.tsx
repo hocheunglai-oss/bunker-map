@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { primeSpcClientSessionCache, useSpcAuth } from "@/lib/useSpcAuth"
+import { isSpcDocumentDeparturePending, primeSpcClientSessionCache, useSpcAuth } from "@/lib/useSpcAuth"
 import { SpcShell } from "@/components/SpcShell"
 import { getSpcSessionPresentationLabel } from "@/lib/spcSessionPresentation"
 import type { SpcPageDefinition, SpcPagePermissionMap, SpcRoleId } from "@/lib/spcPages"
@@ -19,6 +19,7 @@ type SpcLoginResponse = {
   expiresAt?: string
   phoneHint?: string
   user?: {
+    actorKey?: string
     username?: string
     displayName?: string
     role?: SpcRoleId
@@ -68,7 +69,7 @@ export default function SpcLoginPage() {
   )
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [checkingFcuno, setCheckingFcuno] = useState(fcunoSpcLoginEnabled)
+  const [checkingFcuno, setCheckingFcuno] = useState(() => fcunoSpcLoginEnabled && !isSpcDocumentDeparturePending())
   const [message, setMessage] = useState("")
   const [mfaChallenge, setMfaChallenge] = useState<SpcMfaChallenge | null>(null)
   const [mfaCode, setMfaCode] = useState("")
@@ -78,6 +79,7 @@ export default function SpcLoginPage() {
   const mfaCodeInputRef = useRef<HTMLInputElement>(null)
   const usePasswordButtonRef = useRef<HTMLButtonElement>(null)
   const focusUsernameAfterCancel = useRef(false)
+  const activeRef = useRef(true)
   const sessionPresentationLabel = getSpcSessionPresentationLabel({
     role,
     displayName,
@@ -85,27 +87,35 @@ export default function SpcLoginPage() {
   })
 
   useEffect(() => {
+    activeRef.current = true
     document.title = "Singapore Purchasing Center"
+    return () => { activeRef.current = false }
   }, [])
 
   useEffect(() => {
-    if (!fcunoSpcLoginEnabled || loading || authenticated) return
+    if (!fcunoSpcLoginEnabled || loading || authenticated || isSpcDocumentDeparturePending()) return
 
     const controller = new AbortController()
-    fetch("/api/spc/fcuno-login?silent=1", {
-      cache: "no-store",
-      signal: controller.signal,
-    })
-      .then((response) => {
+    async function checkFcunoLogin() {
+      try {
+        if (!activeRef.current || controller.signal.aborted || isSpcDocumentDeparturePending()) return
+        const response = await fetch("/api/spc/fcuno-login?silent=1", {
+          cache: "no-store",
+          signal: controller.signal,
+        })
+        if (!activeRef.current || controller.signal.aborted || isSpcDocumentDeparturePending()) return
         if (response.ok) {
           window.location.replace("/spc")
           return
         }
         setCheckingFcuno(false)
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setCheckingFcuno(false)
-      })
+      } catch {
+        // WebKit can throw during request setup while a document is leaving.
+        // Catch that synchronous failure as well as a rejected fetch promise.
+        if (activeRef.current && !controller.signal.aborted && !isSpcDocumentDeparturePending()) setCheckingFcuno(false)
+      }
+    }
+    void checkFcunoLogin()
 
     return () => controller.abort()
   }, [loading, authenticated])
@@ -141,8 +151,10 @@ export default function SpcLoginPage() {
   }, [mfaChallenge, mfaSecondsRemaining])
 
   function completeLogin(data: SpcLoginResponse) {
+    if (!activeRef.current) return
     primeSpcClientSessionCache({
       authenticated: true,
+      actorKey: data.user?.actorKey || null,
       username: data.user?.username || null,
       displayName: data.user?.displayName || data.user?.username || null,
       role: data.user?.role || null,
@@ -158,6 +170,7 @@ export default function SpcLoginPage() {
 
   async function handleLogin(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!activeRef.current) return
     setSubmitting(true)
     setMessage("")
 
@@ -173,6 +186,7 @@ export default function SpcLoginPage() {
           message?: string
         }
 
+        if (!activeRef.current) return
         if (!response.ok) {
           setMessage(data.message || LOGIN_UNAVAILABLE_MESSAGE)
           return
@@ -185,7 +199,7 @@ export default function SpcLoginPage() {
         }
 
         setLoginMethod("password")
-        window.requestAnimationFrame(() => passwordInputRef.current?.focus())
+        window.requestAnimationFrame(() => { if (activeRef.current) passwordInputRef.current?.focus() })
         return
       }
 
@@ -198,6 +212,7 @@ export default function SpcLoginPage() {
       })
 
       const data = (await response.json().catch(() => ({}))) as SpcLoginResponse
+      if (!activeRef.current) return
       if (response.status === 202 && data.mfaRequired === true) {
         const remaining = secondsUntil(data.expiresAt || "")
         if (!data.expiresAt || remaining === 0) {
@@ -229,14 +244,16 @@ export default function SpcLoginPage() {
 
       completeLogin(data)
     } catch {
+      if (!activeRef.current) return
       setMessage(LOGIN_UNAVAILABLE_MESSAGE)
     } finally {
-      setSubmitting(false)
+      if (activeRef.current) setSubmitting(false)
     }
   }
 
   async function handleMfaVerification(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!activeRef.current) return
     setMessage("")
 
     if (!mfaChallenge || mfaSecondsRemaining === 0 || !/^\d{6}$/.test(mfaCode)) {
@@ -253,10 +270,11 @@ export default function SpcLoginPage() {
       })
       const data = (await response.json().catch(() => ({}))) as SpcLoginResponse
 
+      if (!activeRef.current) return
       if (!response.ok || response.status !== 200) {
         setMfaCode("")
         if (response.status === 400) {
-          window.requestAnimationFrame(() => mfaCodeInputRef.current?.focus())
+          window.requestAnimationFrame(() => { if (activeRef.current) mfaCodeInputRef.current?.focus() })
         } else {
           setMfaSecondsRemaining(0)
         }
@@ -266,13 +284,15 @@ export default function SpcLoginPage() {
 
       completeLogin(data)
     } catch {
+      if (!activeRef.current) return
       setMessage(LOGIN_UNAVAILABLE_MESSAGE)
     } finally {
-      setSubmitting(false)
+      if (activeRef.current) setSubmitting(false)
     }
   }
 
   async function handleUsePasswordAgain() {
+    if (!activeRef.current) return
     setSubmitting(true)
     setMessage("")
     let cancelFailed = false
@@ -283,14 +303,16 @@ export default function SpcLoginPage() {
     } catch {
       cancelFailed = true
     } finally {
-      focusUsernameAfterCancel.current = true
-      setMfaChallenge(null)
-      setMfaCode("")
-      setPassword("")
-      setShowPassword(false)
-      setMfaSecondsRemaining(0)
-      setSubmitting(false)
-      setMessage(cancelFailed ? LOGIN_UNAVAILABLE_MESSAGE : "")
+      if (activeRef.current) {
+        focusUsernameAfterCancel.current = true
+        setMfaChallenge(null)
+        setMfaCode("")
+        setPassword("")
+        setShowPassword(false)
+        setMfaSecondsRemaining(0)
+        setSubmitting(false)
+        setMessage(cancelFailed ? LOGIN_UNAVAILABLE_MESSAGE : "")
+      }
     }
   }
 
