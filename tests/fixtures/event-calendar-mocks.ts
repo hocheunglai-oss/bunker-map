@@ -4,7 +4,7 @@ import { addCalendarDays, getHongKongDateKey } from "../../lib/eventCalendarDate
 import { EVENT_CALENDAR_PROTOCOL_VERSION } from "../../lib/eventCalendarProtocol"
 import { googleMeetingRoomDates, normalizeMeetingRoomGoogleEvent } from "../../lib/eventCalendarMeeting"
 
-type Harness = { requests: Array<{ method: string; path: string; body: Record<string, unknown> | null }>; events: OfficeCalendarEvent[]; viewOnly: boolean; today: string; emailStatus: string }
+type Harness = { requests: Array<{ method: string; path: string; body: Record<string, unknown> | null }>; events: OfficeCalendarEvent[]; viewOnly: boolean; today: string; emailStatus: string; recoveryResult?: { restoredCount: number; remainingCount: number; skippedInvalidCount: number; historyComplete: boolean } }
 declare global { interface Window { __eventCalendarHarness: Harness } }
 
 const version = "a".repeat(64)
@@ -47,6 +47,11 @@ export function installEventCalendarHarness() {
       if (body.action === "apply") { h.events.push(holiday); return json({ plan, ...coverage, ...state() }) }
     }
     if (url.pathname === "/api/event-calendar/google-sync") return json({ success: true, updated: 0, inserted: 0, deleted: 0, queued: 0 })
+    if (url.pathname === "/api/event-calendar/recover-missing" && method === "POST" && h.recoveryResult) {
+      // Status/layout only. The actual API/CAS logic is exercised independently
+      // by calendar-recovery.test.ts; no real history, writes or jobs run here.
+      return json({ ...h.recoveryResult, restoredEvents: [], ...state() })
+    }
     if (url.pathname === "/api/event-calendar/google-events") {
       const dates = googleMeetingRoomDates({ startDate: addCalendarDays(today, -1), endDate: addCalendarDays(today, -1), title: "23:30-01:00 EXISTING OVERNIGHT BOOKING" })
       return json({ events: [normalizeMeetingRoomGoogleEvent({ id: "external-booking", summary: "EXISTING OVERNIGHT BOOKING", ...dates }, "synthetic")] })

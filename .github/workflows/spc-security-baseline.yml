@@ -127,6 +127,13 @@ jobs:
           set -o pipefail
           NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/spc-stem-api.test.ts tests/spc-fixture-api.test.ts 2>&1 | tee spc-stem-tests.tap
 
+      - name: Verify supplier concurrency and Outlook draft recovery
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/spc-supplier-api.test.ts tests/outlook-edit-recovery.test.ts tests/outlook-exchange-health-alerts.test.ts 2>&1 | tee supplier-outlook-reliability-tests.tap
+
       - name: Verify streaming backup validation at full inventory scale
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
@@ -141,7 +148,7 @@ jobs:
           set -o pipefail
           NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/backup-protection-*.test.ts tests/backup-truth-snapshot-export.test.ts tests/drive-file-backup-health.test.ts tests/system-health-alerts.test.ts tests/system-health-backup-window.test.ts 2>&1 | tee backup-protection-tests.tap
 
-      - name: Verify backup clocks and delivery with isolated PostgreSQL
+      - name: Verify transactional SQL policies with isolated PostgreSQL
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
         run: |
@@ -149,7 +156,7 @@ jobs:
           test_runtime="${RUNNER_TEMP}/fcuno-backup-gap-test-runtime"
           npm install --prefix "$test_runtime" --ignore-scripts --no-fund @electric-sql/pglite@0.5.8
           npm audit signatures --prefix "$test_runtime"
-          PGLITE_MODULE_PATH="$test_runtime/node_modules/@electric-sql/pglite/dist/index.js" node --import tsx --test tests/backup-protection-flow.test.mjs tests/backup-protection-gaps-sql.test.mjs tests/system-health-alerts-sql.test.mjs 2>&1 | tee backup-protection-sql-tests.tap
+          PGLITE_MODULE_PATH="$test_runtime/node_modules/@electric-sql/pglite/dist/index.js" node --import tsx --test tests/backup-protection-flow.test.mjs tests/backup-protection-gaps-sql.test.mjs tests/system-health-alerts-sql.test.mjs tests/outlook-template-save-policy.test.mjs tests/spc-supplier-sql.test.mjs 2>&1 | tee backup-protection-sql-tests.tap
 
       - name: Verify phonebook delivery, retry and failure reporting
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -216,6 +223,7 @@ jobs:
             country-pricing-tests.tap
             outlook-contact-tests.tap
             spc-stem-tests.tap
+            supplier-outlook-reliability-tests.tap
             backup-stream-tests.tap
             backup-protection-tests.tap
             backup-protection-sql-tests.tap

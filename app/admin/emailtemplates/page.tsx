@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
+import { reapplyEmailTemplateDraft } from "@/lib/emailTemplateDraftRecovery"
 import {
   clearAdminClientCache,
   fetchAdminClientJson,
@@ -90,6 +91,7 @@ type FolderNode = {
 }
 
 type SaveState = "idle" | "dirty" | "saving" | "saved" | "failed" | "conflict"
+type TemplateDraftConflict = { server: EmailTemplate | null; loading: boolean; deleted: boolean; message: string }
 type RecipientField = "to" | "cc" | "bcc"
 type FolderDialogMode = "create" | "edit"
 type RecipientTruthIssueStatus = "missing" | "ambiguous"
@@ -619,6 +621,9 @@ export default function EmailTemplatesAdminPage() {
   const autosaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   const dirtyVersionsRef = useRef<Map<string, number>>(new Map())
   const pendingTemplatesRef = useRef<Map<string, EmailTemplate>>(new Map())
+  const editBasesRef = useRef<Map<string, EmailTemplate>>(new Map())
+  const draftConflictsRef = useRef<Map<string, TemplateDraftConflict>>(new Map())
+  const [draftConflicts, setDraftConflicts] = useState<Map<string, TemplateDraftConflict>>(new Map())
   const failedSavesRef = useRef<Set<string>>(new Set())
   const queuedSavePromisesRef = useRef<Map<string, Promise<void>>>(new Map())
   const deletingTemplateIdsRef = useRef<Set<string>>(new Set())
@@ -627,6 +632,7 @@ export default function EmailTemplatesAdminPage() {
   const detailPromisesRef = useRef<Map<string, Promise<EmailTemplate>>>(new Map())
   const templatesRef = useRef<EmailTemplate[]>(initialTemplates)
   const libraryBusyRef = useRef(false)
+  const mountedRef = useRef(true)
   const [templates, setTemplates] = useState<EmailTemplate[]>(initialTemplates)
   const [selectedFolder, setSelectedFolder] = useState(initialFolder)
   const [selectedId, setSelectedId] = useState(
@@ -673,7 +679,9 @@ export default function EmailTemplatesAdminPage() {
 
   useEffect(() => {
     const timers = autosaveTimersRef.current
+    mountedRef.current = true
     return () => {
+      mountedRef.current = false
       timers.forEach((timer) => clearTimeout(timer))
       timers.clear()
     }
@@ -687,7 +695,15 @@ export default function EmailTemplatesAdminPage() {
     }
 
     window.addEventListener("beforeunload", warnBeforeLeaving)
-    return () => window.removeEventListener("beforeunload", warnBeforeLeaving)
+    function warnBeforeNavigation(event: MouseEvent) {
+      const target = event.target instanceof Element ? event.target.closest("a[href]") : null
+      if (!target || pendingTemplatesRef.current.size === 0 || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+      const href = target.getAttribute("href")
+      if (!href || href.startsWith("#") || target.getAttribute("target") === "_blank") return
+      if (!window.confirm("You have unsaved Outlook template changes. Leave this page and discard them?")) { event.preventDefault(); event.stopPropagation() }
+    }
+    document.addEventListener("click", warnBeforeNavigation, true)
+    return () => { window.removeEventListener("beforeunload", warnBeforeLeaving); document.removeEventListener("click", warnBeforeNavigation, true) }
   }, [])
 
   const folderTree = useMemo(() => buildFolderTreeFromPaths(templates, customFolders), [customFolders, templates])
@@ -701,6 +717,7 @@ export default function EmailTemplatesAdminPage() {
   }, [search, selectedFolder, templates])
 
   const selectedTemplate = templates.find((template) => template.id === selectedId) || null
+  const selectedDraftConflict = draftConflicts.get(selectedId)
   const recipientTruthByTemplateId = useMemo(
     () =>
       new Map(
@@ -724,7 +741,7 @@ export default function EmailTemplatesAdminPage() {
     : selectedId
       ? saveStates[selectedId] || (initialLibrary ? "saved" : "idle")
       : "idle"
-  const displayedMessage = conflictAlert?.message || message
+  const displayedMessage = selectedDraftConflict?.message || message || (conflictAlert?.templateId === selectedId ? conflictAlert.message : "")
 
   const recipientOptions = useMemo<RecipientOption[]>(() => {
     const contactOptions = contacts
@@ -853,11 +870,18 @@ export default function EmailTemplatesAdminPage() {
     autosaveTimersRef.current.set(templateId, timer)
   }
 
-  function markDirty(template: EmailTemplate) {
+  function markDirty(template: EmailTemplate, base?: EmailTemplate) {
     clearAdminClientCache(OUTLOOK_TEMPLATES_INDEX_CACHE_KEY)
     const nextVersion = (dirtyVersionsRef.current.get(template.id) || 0) + 1
     dirtyVersionsRef.current.set(template.id, nextVersion)
     pendingTemplatesRef.current.set(template.id, template)
+    if (!editBasesRef.current.has(template.id)) editBasesRef.current.set(template.id, base || template)
+    if (draftConflictsRef.current.has(template.id)) {
+      failedSavesRef.current.add(template.id)
+      clearAutosaveTimer(template.id)
+      setTemplateSaveState(template.id, "conflict")
+      return
+    }
     failedSavesRef.current.delete(template.id)
     setConflictAlert((current) =>
       current?.templateId === template.id ? null : current
@@ -894,11 +918,12 @@ export default function EmailTemplatesAdminPage() {
           throw new Error(data.message || "Failed to load template.")
         }
         const loadedTemplate = templateFromDetail(data.template)
+        if (loadedTemplate.id !== templateId) throw new Error("The requested template could not be verified.")
         setTemplates((current) => {
           const next = current.map((template) =>
             template.id !== templateId
               ? template
-              : loadedTemplate
+              : pendingTemplatesRef.current.get(templateId) || loadedTemplate
           )
           templatesRef.current = next
           return next
@@ -996,7 +1021,7 @@ export default function EmailTemplatesAdminPage() {
       return next
     })
     setLastUpdatedAt(updatedAt)
-    markDirty(nextTemplate)
+    markDirty(nextTemplate, currentTemplate)
   }
 
   function handleEditorInput() {
@@ -1017,58 +1042,89 @@ export default function EmailTemplatesAdminPage() {
   }
 
   async function reloadTemplateAfterConflict(templateId: string, conflictMessage: string) {
-    templateConflictVersionsRef.current.set(
-      templateId,
-      (templateConflictVersionsRef.current.get(templateId) || 0) + 1,
-    )
+    const version = (templateConflictVersionsRef.current.get(templateId) || 0) + 1
+    templateConflictVersionsRef.current.set(templateId, version)
     clearAutosaveTimer(templateId)
-    pendingTemplatesRef.current.delete(templateId)
-    dirtyVersionsRef.current.delete(templateId)
     failedSavesRef.current.add(templateId)
     clearAdminClientCache(OUTLOOK_TEMPLATES_INDEX_CACHE_KEY)
-
+    setTemplateSaveState(templateId, "conflict")
+    updateDraftConflict(templateId, { server: null, loading: true, deleted: false, message: `${conflictMessage} Your draft is kept. Checking the current server copy.` })
     try {
-      await loadTemplateDetail(templateId, true)
-      setTemplateSaveState(templateId, "conflict")
-      setConflictAlert({
-        templateId,
-        message: `${conflictMessage} Your unsaved changes were not written. The current server version has been reloaded.`,
-      })
-    } catch (error) {
-      if (error instanceof Error && error.message === "Template not found.") {
-        const nextTemplates = templatesRef.current.filter(
-          (template) => template.id !== templateId
-        )
-        templatesRef.current = nextTemplates
-        setTemplates(nextTemplates)
-        setSaveStates((current) => {
-          const next = { ...current }
-          delete next[templateId]
-          return next
-        })
-        setSelectedId((current) =>
-          current === templateId
-            ? nextTemplates[0]?.id || ""
-            : current
-        )
-        setConflictAlert({
-          templateId,
-          message: `${conflictMessage} Your unsaved changes were not written because the server copy was deleted.`,
-        })
-        return
-      }
-      setTemplateSaveState(templateId, "failed")
-      setConflictAlert({
-        templateId,
-        message: `${conflictMessage} Your unsaved changes were not written, and the current server version could not be reloaded.`,
-      })
+      const server = await readCurrentTemplate(templateId)
+      if (!mountedRef.current || templateConflictVersionsRef.current.get(templateId) !== version || !draftConflictsRef.current.has(templateId)) return
+      updateDraftConflict(templateId, { server, loading: false, deleted: !server, message: server
+        ? `${conflictMessage} Your draft is kept. Choose whether to reload the server copy or reapply your changed fields.`
+        : `${conflictMessage} The server copy was deleted. Your draft is kept; copy your work before discarding it.` })
+    } catch {
+      if (!mountedRef.current || templateConflictVersionsRef.current.get(templateId) !== version) return
+      updateDraftConflict(templateId, { server: null, loading: false, deleted: false, message: `${conflictMessage} Your draft is kept. The server copy could not be checked; retry the check before saving.` })
     }
+  }
+
+  function updateDraftConflict(templateId: string, conflict: TemplateDraftConflict | null) {
+    const next = new Map(draftConflictsRef.current)
+    if (conflict) next.set(templateId, conflict)
+    else next.delete(templateId)
+    draftConflictsRef.current = next
+    setDraftConflicts(next)
+    setConflictAlert(current => conflict ? { templateId, message: conflict.message } : current?.templateId === templateId ? null : current)
+  }
+
+  async function readCurrentTemplate(templateId: string) {
+    const response = await fetch(`/api/admin/email-templates?id=${encodeURIComponent(templateId)}`, { cache: "no-store" })
+    if (response.status === 404) return null
+    const data = await response.json() as SaveTemplateResponse
+    if (!response.ok || !data.template || data.template.id !== templateId || !Number.isSafeInteger(data.template.revision) || data.template.revision < 1) {
+      throw new Error("The current server template could not be verified.")
+    }
+    return templateFromDetail(data.template)
+  }
+
+  async function resolveDraftConflict(choice: "check" | "reload" | "reapply") {
+    const templateId = selectedId
+    const conflict = draftConflictsRef.current.get(templateId)
+    if (!conflict || conflict.loading || libraryBusyRef.current) return
+    if (choice !== "check" && !window.confirm(choice === "reload"
+      ? "Discard your unsaved draft and reload the current server copy?"
+      : "Reapply your changed fields to the current server copy? Your changes may replace a colleague's changes to those same fields.")) return
+    setLibraryOperationBusy(true)
+    const conflictVersion = templateConflictVersionsRef.current.get(templateId)
+    try {
+      if (choice === "check") { await reloadTemplateAfterConflict(templateId, "The template changed before your save."); return }
+      const server = await readCurrentTemplate(templateId)
+      if (!mountedRef.current || templateConflictVersionsRef.current.get(templateId) !== conflictVersion || !draftConflictsRef.current.has(templateId)) return
+      if (choice === "reapply") {
+        const draft = pendingTemplatesRef.current.get(templateId)
+        const base = editBasesRef.current.get(templateId)
+        if (!server || !draft || !base) throw new Error("The server copy is unavailable. Your draft is still here; it has not been recreated or overwritten.")
+        const rebased = { ...reapplyEmailTemplateDraft(base, draft, server), bodyLoaded: true, bodyLoading: false, updatedAt: new Date().toISOString() }
+        editBasesRef.current.set(templateId, server)
+        updateDraftConflict(templateId, null)
+        setTemplates(current => { const next = current.map(row => row.id === templateId ? rebased : row); templatesRef.current = next; return next })
+        markDirty(rebased, server)
+      } else {
+        clearAutosaveTimer(templateId)
+        pendingTemplatesRef.current.delete(templateId)
+        dirtyVersionsRef.current.delete(templateId)
+        editBasesRef.current.delete(templateId)
+        failedSavesRef.current.delete(templateId)
+        updateDraftConflict(templateId, null)
+        setTemplates(current => { const next = server ? current.map(row => row.id === templateId ? server : row) : current.filter(row => row.id !== templateId); templatesRef.current = next; return next })
+        setTemplateSaveState(templateId, "saved")
+        if (!server) setSelectedId(current => current === templateId ? "" : current)
+      }
+      clearAdminClientCache(OUTLOOK_TEMPLATES_INDEX_CACHE_KEY)
+    } catch (error) {
+      if (!mountedRef.current || templateConflictVersionsRef.current.get(templateId) !== conflictVersion || !draftConflictsRef.current.has(templateId)) return
+      updateDraftConflict(templateId, { ...conflict, loading: false, message: error instanceof Error ? error.message : "The server check failed. Your draft is still here." })
+    } finally { if (mountedRef.current) setLibraryOperationBusy(false) }
   }
 
   async function savePendingTemplateNow(templateId: string) {
     // A confirmed deletion does not need to save the draft it will remove.
     // Any request already in flight is awaited by the deletion handler.
     if (deletingTemplateIdsRef.current.has(templateId)) return false
+    if (draftConflictsRef.current.has(templateId)) return false
     const pendingTemplate = pendingTemplatesRef.current.get(templateId)
     if (!pendingTemplate) return false
 
@@ -1099,6 +1155,7 @@ export default function EmailTemplatesAdminPage() {
       if (!response.ok || !data.template) throw new Error(data.message || "Save failed.")
 
       const savedTemplate = templateFromDetail(data.template)
+      if (savedTemplate.id !== templateId || savedTemplate.revision <= templateToSave.revision) throw new Error("The saved template could not be verified. Your draft is still here.")
       const latestVersion = dirtyVersionsRef.current.get(templateId) || 0
       const latestPending = pendingTemplatesRef.current.get(templateId)
       if (latestPending && latestVersion !== version) {
@@ -1114,6 +1171,7 @@ export default function EmailTemplatesAdminPage() {
           revision: savedTemplate.revision,
         }
         pendingTemplatesRef.current.set(templateId, rebasedTemplate)
+        editBasesRef.current.set(templateId, savedTemplate)
         const next = templatesRef.current.map((item) =>
           item.id === templateId ? rebasedTemplate : item
         )
@@ -1125,6 +1183,7 @@ export default function EmailTemplatesAdminPage() {
       }
 
       pendingTemplatesRef.current.delete(templateId)
+      editBasesRef.current.delete(templateId)
       dirtyVersionsRef.current.delete(templateId)
       failedSavesRef.current.delete(templateId)
       // Publish the acknowledged revision synchronously to queued operations;
@@ -1203,6 +1262,9 @@ export default function EmailTemplatesAdminPage() {
     const loadedTemplates = library.templates.map(templateFromDetail)
     pendingTemplatesRef.current.clear()
     dirtyVersionsRef.current.clear()
+    editBasesRef.current.clear()
+    draftConflictsRef.current.clear()
+    setDraftConflicts(new Map())
     failedSavesRef.current.clear()
     setConflictAlert(null)
     autosaveTimersRef.current.forEach((timer) => clearTimeout(timer))
@@ -1438,7 +1500,7 @@ export default function EmailTemplatesAdminPage() {
       setSelectedFolder(targetFolder)
       setSelectedId(templateId)
       setExpandedFolders((current) => expandFolderPath(targetFolder, current))
-      markDirty(templateToSave)
+      markDirty(templateToSave, template)
     } catch (error) {
       setTemplateSaveState(templateId, "failed")
       setMessage(error instanceof Error ? error.message : "Failed to move template.")
@@ -1448,8 +1510,9 @@ export default function EmailTemplatesAdminPage() {
   async function handleDeleteTemplate() {
     if (!selectedTemplate) return
     const templateId = selectedTemplate.id
+    const reviewedServer = draftConflictsRef.current.get(templateId)?.server
     const confirmed = window.confirm(
-      `Delete template "${selectedTemplate.title || "Untitled template"}"?\n\nThis cannot be undone from this page.`,
+      `Delete template "${reviewedServer?.title || selectedTemplate.title || "Untitled template"}"?\n\n${reviewedServer ? "This deletes the reviewed server copy and discards your kept draft.\n\n" : ""}This cannot be undone from this page.`,
     )
     if (!confirmed) return
 
@@ -1470,7 +1533,7 @@ export default function EmailTemplatesAdminPage() {
         // confirmation does not authorize deleting that replacement version.
         return
       }
-      const currentTemplate = templatesRef.current.find(
+      const currentTemplate = reviewedServer || templatesRef.current.find(
         (template) => template.id === templateId
       )
       if (!currentTemplate) throw new Error("Template not found.")
@@ -1497,6 +1560,8 @@ export default function EmailTemplatesAdminPage() {
 
       clearAutosaveTimer(templateId)
       pendingTemplatesRef.current.delete(templateId)
+      editBasesRef.current.delete(templateId)
+      updateDraftConflict(templateId, null)
       dirtyVersionsRef.current.delete(templateId)
       failedSavesRef.current.delete(templateId)
       templateConflictVersionsRef.current.delete(templateId)
@@ -1821,7 +1886,7 @@ export default function EmailTemplatesAdminPage() {
                       : saveState === "failed"
                         ? "Retry Save"
                         : saveState === "conflict"
-                          ? "Server Reloaded"
+                          ? "Review Changes"
                           : "Saved"}
               </button>
               <button type="button" onClick={handleDeleteTemplate} style={dangerButtonStyle} disabled={!selectedTemplate || libraryBusy}>
@@ -1842,6 +1907,17 @@ export default function EmailTemplatesAdminPage() {
             >
               {displayedMessage}
             </div>
+          ) : null}
+
+          {selectedDraftConflict ? (
+            <section aria-label="Unsaved draft recovery" style={{ padding: "12px", borderBottom: "1px solid var(--fc-admin-border-soft)", display: "grid", gap: "10px", overflowWrap: "anywhere" }}>
+              <div style={{ fontSize: "13px" }}>Your unsaved draft is still in the editor. {selectedDraftConflict.server ? `Server copy: ${selectedDraftConflict.server.title || "Untitled template"}.` : selectedDraftConflict.deleted ? "The server copy was deleted; copy any work you need before discarding this draft." : "The server copy is not yet verified."}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                <button type="button" style={buttonStyle} disabled={libraryBusy || selectedDraftConflict.loading} onClick={() => void resolveDraftConflict("check")}>Retry Server Check</button>
+                <button type="button" style={buttonStyle} disabled={libraryBusy || selectedDraftConflict.loading || (!selectedDraftConflict.server && !selectedDraftConflict.deleted)} onClick={() => void resolveDraftConflict("reload")}>{selectedDraftConflict.deleted ? "Discard Deleted Draft" : "Reload Server Copy"}</button>
+                <button type="button" style={primaryButtonStyle} disabled={libraryBusy || selectedDraftConflict.loading || !selectedDraftConflict.server || !pendingTemplatesRef.current.has(selectedId)} onClick={() => void resolveDraftConflict("reapply")}>Reapply My Draft</button>
+              </div>
+            </section>
           ) : null}
 
           {selectedTemplate ? selectedTemplate.bodyLoaded ? (

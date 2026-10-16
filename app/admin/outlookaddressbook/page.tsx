@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
 import type { AuditLogRecord } from "@/lib/auditLog"
-import { normalizeOutlookContactFields, validateOutlookContactFields, type OutlookContactFields } from "@/lib/outlookContactValidation"
+import { isCreatedOutlookContact, normalizeOutlookContactFields, validateOutlookContactFields, type OutlookContactFields } from "@/lib/outlookContactValidation"
 import { OUTLOOK_GROUP_EDIT_FIELDS, isOutlookGroupVersion, isSavedOutlookGroup, normalizeOutlookGroupFields, readStableOutlookGroupSnapshot, validateOutlookGroupFields, type OutlookGroupFields } from "@/lib/outlookGroupValidation"
 import {
   clearAdminClientCache,
@@ -532,6 +532,7 @@ export default function OutlookAddressBookPage() {
   const groupEditRevisionRef = useRef(0)
   const mountedRef = useRef(true)
   const createGroupIdRef = useRef<string | null>(null)
+  const createContactIdRef = useRef<string | null>(null)
   const createMenuHideTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -1065,6 +1066,7 @@ export default function OutlookAddressBookPage() {
       : sourceBookOptions[0] || DEFAULT_SOURCE_BOOK
     setCreateDraftType(type)
     createGroupIdRef.current = type === "group" ? newId("group") : null
+    createContactIdRef.current = null
     setCreateSourceBook(defaultSource)
     setCreateNewSourceBook("")
     setCreateName("")
@@ -1076,6 +1078,7 @@ export default function OutlookAddressBookPage() {
   function cancelCreate() {
     if (contactBusyRef.current || groupBusyRef.current) return
     createGroupIdRef.current = null
+    createContactIdRef.current = null
     setCreateDraftType(null)
     setCreateNewSourceBook("")
     setCreateName("")
@@ -1154,7 +1157,9 @@ export default function OutlookAddressBookPage() {
       setMessage(validationError)
       return false
     }
-    const id = newId("contact")
+    const retrying = Boolean(createContactIdRef.current)
+    const id = createContactIdRef.current || newId("contact")
+    createContactIdRef.current = id
     const contact: SharedContact = {
       ...fields,
       id,
@@ -1163,15 +1168,37 @@ export default function OutlookAddressBookPage() {
       properties: {},
     }
     setSaving("saving")
-    const { error } = await supabase.from("shared_addressbook_contacts").insert(contact)
-    if (error) {
+    let data: unknown = null
+    if (!retrying) {
+      try {
+        const inserted = await supabase.from("shared_addressbook_contacts").insert(contact).select("*").single()
+        if (!inserted.error) data = inserted.data
+      } catch { /* A transport failure does not prove that INSERT rolled back. */ }
+    }
+    if (!isCreatedOutlookContact(data, contact)) {
+      try {
+        const readback = await supabase.from("shared_addressbook_contacts").select("*").eq("id", id).maybeSingle()
+        if (readback.error) throw new Error("The earlier creation could not be checked. Your details are still here; retry when access returns.")
+        data = readback.data
+        if (!data && retrying) {
+          const inserted = await supabase.from("shared_addressbook_contacts").insert(contact).select("*").single()
+          if (!inserted.error) data = inserted.data
+          else {
+            const checked = await supabase.from("shared_addressbook_contacts").select("*").eq("id", id).maybeSingle()
+            if (!checked.error) data = checked.data
+          }
+        }
+      } catch { data = null }
+    }
+    if (!mountedRef.current || createContactIdRef.current !== id) return false
+    if (!isCreatedOutlookContact(data, contact)) {
       setSaving("failed")
-      setMessage(error.message)
+      setMessage("The new contact could not be verified. Your details are still here. Retry checks the same contact; if someone changed it, reload the directory instead of creating another copy.")
       return false
     }
     markExchangeNeedsSync()
     setContactDraft(null)
-    setContacts((current) => [contact, ...current])
+    setContacts((current) => [data, ...current.filter(row => row.id !== id)])
     setSelectedSourceBook(SOURCE_ALL)
     setActiveView("contacts")
     setSelectedContactId(id)
@@ -1412,7 +1439,7 @@ export default function OutlookAddressBookPage() {
     }
   }
 
-  if (authLoading || loading) return <p style={{ padding: "40px" }}>Loading...</p>
+  if (authLoading || (authenticated && loading)) return <p style={{ padding: "40px" }}>Loading...</p>
 
   if (!authenticated) {
     return (

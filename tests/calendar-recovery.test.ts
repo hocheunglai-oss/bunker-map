@@ -77,24 +77,44 @@ test("history read errors fail closed instead of passing a partial recovery set"
 })
 
 const routeCode = transformSync(readFileSync(new URL("../app/api/event-calendar/recover-missing/route.ts", import.meta.url), "utf8"), { loader: "ts", format: "cjs", target: "node24" }).code
-function recoveryRoute(options: { permissionFailure?: string; auditPermissionFailure?: boolean; historyComplete?: boolean; historyError?: boolean; historyEvents?: unknown[] } = {}) {
+function recoveryRoute(options: { permissionFailure?: string; auditPermissionFailure?: boolean; historyComplete?: boolean; historyError?: boolean; historyEvents?: unknown[]; previousHistoryEvents?: unknown[]; failWrites?: boolean; concurrentChange?: (payload: Record<string, unknown>) => Record<string, unknown> } = {}) {
   let payload: Record<string, unknown> = { events: [event("keep", "LATEST SAVED TITLE")], deletedEventIds: ["deleted"], people: ["OL"], emailRecipientsText: "office@example.test" }
   const permissions: string[] = [], writes: unknown[] = []
+  const batches: eventStore.CalendarMutation[][] = []
+  let updatedAt = "2026-10-07T00:00:00.000Z", raced = false
   let historyReads = 0, clients = 0
-  const history: CalendarAuditRow[] = [{ ...audit(1), after_row: { key: "event-calendar", payload: { events: options.historyEvents || [event("keep", "STALE TITLE"), event("deleted"), event("recover"), { ...event("past"), startDate: "2026-10-01", endDate: "2026-10-01" }] } } }]
-  const db = { from() { const query = { select() { return query }, eq() { return query }, async maybeSingle() { return { data: { payload }, error: null } } }; return query } }
+  const history: CalendarAuditRow[] = [{ ...audit(1), after_row: { key: "event-calendar", payload: { events: options.historyEvents || [event("keep", "STALE TITLE"), event("deleted"), event("recover"), { ...event("past"), startDate: "2026-10-01", endDate: "2026-10-01" }] } }, before_row: options.previousHistoryEvents ? { key: "event-calendar", payload: { events: options.previousHistoryEvents } } : null }]
+  const db = { from(table: string) {
+    assert.equal(table, "office_calendar_store")
+    let change: Record<string, unknown> | undefined, expected = ""
+    const query = {
+      select() { return query },
+      eq(key: string, value: unknown) { if (key === "key") assert.equal(value, "event-calendar"); if (key === "updated_at") expected = String(value); return query },
+      update(value: Record<string, unknown>) { change = value; return query },
+      async maybeSingle() {
+        if (!change) return { data: { payload: structuredClone(payload), updated_at: updatedAt }, error: null }
+        if (options.failWrites) return { data: null, error: Error("Synthetic recovery write failure") }
+        if (options.concurrentChange && !raced) { raced = true; payload = options.concurrentChange(payload); updatedAt = "2026-10-07T00:00:01.000Z" }
+        if (expected !== updatedAt) return { data: null, error: null }
+        payload = structuredClone(change.payload as Record<string, unknown>); updatedAt = String(change.updated_at)
+        writes.push(structuredClone(payload))
+        return { data: { payload: structuredClone(payload) }, error: null }
+      },
+    }
+    return query
+  } }
   const modules: Record<string, unknown> = {
     "next/server": { NextResponse: { json: Response.json.bind(Response) } },
     "@/lib/adminAuth": { async requireAdminPagePermission(page: string, permission: string) { permissions.push(`${page}:${permission}`); if (options.permissionFailure) throw new Error(options.permissionFailure); if (page === "audit-log" && options.auditPermissionFailure) throw new Error("Forbidden"); return { username: "synthetic" } } },
     "@/lib/adminAudit": { createAdminAuditContext() { return {} }, createAdminAuditedSupabaseClient(_context: unknown, settings: unknown) { assert.deepEqual(settings, { useServiceRole: true }); return db } },
-    "@/lib/eventCalendarStore": { ...eventStore, async mutateEventCalendarStore(_db: unknown, mutation: eventStore.CalendarMutation) { writes.push(mutation); payload = eventStore.applyEventCalendarMutation(payload, mutation); return payload } },
+    "@/lib/eventCalendarStore": { ...eventStore, async mutateEventCalendarStoreBatch(client: unknown, mutations: eventStore.CalendarMutation[]) { batches.push(structuredClone(mutations)); return eventStore.mutateEventCalendarStoreBatch(client as never, mutations) } },
     "@/lib/eventCalendarProtocol": { EVENT_CALENDAR_PROTOCOL_VERSION },
     "@/lib/calendarServiceClient": { createCalendarServiceClient() { clients += 1; return db } },
     "@/lib/eventCalendarRecovery": { readRecoverableHolidaySource, async loadEventCalendarHistory() { historyReads += 1; if (options.historyError) throw new Error("History unavailable"); return { rows: history, historyComplete: options.historyComplete !== false, historyScanned: 1, oldestChecked: history[0].occurred_at } } },
   }
   const loaded = { exports: {} as { GET(): Promise<Response>; POST(request: Request): Promise<Response> } }
   new Function("require", "module", "exports", routeCode)((name: string) => { assert.ok(Object.hasOwn(modules, name), `Unexpected dependency ${name}`); return modules[name] }, loaded, loaded.exports)
-  return { permissions, writes, reads: () => ({ historyReads, clients }), async request(method = "POST", body: unknown = {}) { const response = method === "GET" ? await loaded.exports.GET() : await loaded.exports.POST(new Request("https://synthetic.test/recover", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })); return { status: response.status, body: await response.json() } } }
+  return { permissions, writes, batches, payload: () => structuredClone(payload), reads: () => ({ historyReads, clients }), async request(method = "POST", body: unknown = {}) { const response = method === "GET" ? await loaded.exports.GET() : await loaded.exports.POST(new Request("https://synthetic.test/recover", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })); return { status: response.status, body: await response.json() } } }
 }
 
 test("recovery requires Event Edit and Audit View before reading or writing history", async () => {
@@ -127,6 +147,114 @@ test("recovery stops on history failure with no writes", async () => {
   const app = recoveryRoute({ historyError: true })
   assert.equal((await app.request()).status, 500)
   assert.deepEqual(app.writes, [])
+})
+
+test("malformed historical rows are counted once and cannot poison valid recovery or revive an older version", async () => {
+  const malformed = { ...event("bad"), startDate: "not-a-date", endDate: "not-a-date" }
+  const noId = { ...event(""), id: "", title: "INVALID MISSING ID" }
+  const app = recoveryRoute({ historyEvents: [event("valid"), malformed, malformed, noId, noId], previousHistoryEvents: [event("bad", "OLDER VALID VERSION")] })
+  const preview = await app.request("GET")
+  assert.equal(preview.status, 200)
+  assert.equal(preview.body.count, 1)
+  assert.equal(preview.body.skippedInvalidCount, 2)
+  assert.equal(app.writes.length, 0)
+  const result = await app.request()
+  assert.equal(result.status, 200)
+  assert.equal(result.body.restoredCount, 1)
+  assert.equal(result.body.skippedInvalidCount, 2)
+  assert.equal(result.body.remainingCount, 0)
+  assert.deepEqual(result.body.restoredEvents.map((entry: { id: string }) => entry.id), ["valid"])
+  assert.ok(!result.body.payload.events.some((entry: { id: string }) => entry.id === "bad"))
+  assert.equal(app.writes.length, 1)
+  assert.equal((await app.request()).body.restoredCount, 0)
+  assert.equal(app.writes.length, 1)
+})
+
+test("recovery reuses incoming event validation for invalid titles, IDs, arrays, event types and date ranges", async () => {
+  for (const change of [{ title: "" }, { id: " padded " }, { people: [42] }, { tags: "bad" }, { eventType: "Unknown" }, { startDate: "2026-10-09", endDate: "2026-10-08" }]) {
+    const app = recoveryRoute({ historyEvents: [event("valid"), { ...event("invalid"), ...change }] })
+    const result = await app.request()
+    assert.equal(result.status, 200)
+    assert.equal(result.body.restoredCount, 1)
+    assert.equal(result.body.skippedInvalidCount, 1)
+    assert.equal(app.writes.length, 1)
+  }
+})
+
+test("a malformed newest past-dated row cannot revive an older future version, while valid past-date policy is unchanged", async () => {
+  const past = { ...event("past"), startDate: "2026-10-01", endDate: "2026-10-01" }
+  const app = recoveryRoute({ historyEvents: [{ ...past, title: "" }, { ...past, id: "valid-past" }], previousHistoryEvents: [event("past"), event("valid-past")] })
+  const result = await app.request()
+  assert.equal(result.status, 200)
+  assert.equal(result.body.skippedInvalidCount, 1)
+  assert.deepEqual(result.body.restoredEvents.map((entry: { id: string }) => entry.id), ["valid-past"])
+})
+
+test("501 missing events use two bounded inserts and one atomic CAS commit", async () => {
+  const app = recoveryRoute({ historyEvents: Array.from({ length: 501 }, (_, i) => event(`recover-${i}`)) })
+  const result = await app.request()
+  assert.equal(result.status, 200)
+  assert.equal(result.body.restoredCount, 501)
+  assert.equal(result.body.remainingCount, 0)
+  assert.equal(app.writes.length, 1)
+  assert.deepEqual(app.batches[0].map((mutation) => mutation.events?.length), [500, 1])
+  assert.equal(result.body.payload.emailRecipientsText, "office@example.test")
+  assert.deepEqual(result.body.payload.deletedEventIds, ["deleted"])
+  assert.equal((await app.request()).body.restoredCount, 0)
+  assert.equal(app.writes.length, 1)
+})
+
+test("5001 missing events restore at most ten bounded inserts and report the remaining event", async () => {
+  const app = recoveryRoute({ historyEvents: Array.from({ length: 5001 }, (_, i) => event(`recover-${i}`)) })
+  const first = await app.request()
+  assert.equal(first.status, 200)
+  assert.equal(first.body.restoredCount, 5000)
+  assert.equal(first.body.remainingCount, 1)
+  assert.equal(app.writes.length, 1)
+  assert.equal(app.batches[0].length, 10)
+  assert.ok(app.batches[0].every((mutation) => mutation.events?.length === 500))
+  const second = await app.request()
+  assert.equal(second.body.restoredCount, 1)
+  assert.equal(second.body.remainingCount, 0)
+  assert.equal(app.writes.length, 2)
+  assert.equal(new Set(second.body.payload.events.map((entry: { id: string }) => entry.id)).size, 5002)
+  assert.equal((await app.request()).body.restoredCount, 0)
+  assert.equal(app.writes.length, 2)
+})
+
+test("a concurrent deletion and edit survive recovery CAS retry and are not claimed as restored", async () => {
+  const app = recoveryRoute({ historyEvents: [event("recover"), event("concurrent-delete")], concurrentChange: (payload) => ({
+    ...payload, events: [event("keep", "CONCURRENT EDIT")], deletedEventIds: ["deleted", "concurrent-delete"], emailRecipientsText: "current@example.test",
+  }) })
+  const result = await app.request()
+  assert.equal(result.status, 200)
+  assert.deepEqual(result.body.restoredEvents.map((entry: { id: string }) => entry.id), ["recover"])
+  assert.equal(result.body.remainingCount, 0)
+  assert.equal(result.body.payload.events.find((entry: { id: string }) => entry.id === "keep").title, "CONCURRENT EDIT")
+  assert.equal(result.body.payload.emailRecipientsText, "current@example.test")
+  assert.deepEqual(result.body.payload.deletedEventIds, ["deleted", "concurrent-delete"])
+  assert.equal(app.writes.length, 1)
+})
+
+test("a failed large recovery batch commits no partial events or settings", async () => {
+  const app = recoveryRoute({ historyEvents: Array.from({ length: 501 }, (_, i) => event(`recover-${i}`)), failWrites: true })
+  const before = app.payload()
+  assert.equal((await app.request()).status, 500)
+  assert.equal(app.writes.length, 0)
+  assert.deepEqual(app.payload(), before)
+})
+
+test("a concurrently saved malformed row still owns its ID and is not reported as pending recovery", async () => {
+  const malformed = { ...event("recover"), title: "", startDate: "invalid" }
+  const app = recoveryRoute({ historyEvents: [event("recover")], concurrentChange: (payload) => ({ ...payload, events: [...payload.events as unknown[], malformed] }) })
+  const result = await app.request()
+  assert.equal(result.status, 200)
+  assert.equal(result.body.restoredCount, 0)
+  assert.equal(result.body.remainingCount, 0)
+  assert.deepEqual(result.body.payload.events.find((entry: { id: string }) => entry.id === "recover"), malformed)
+  const preview = await app.request("GET")
+  assert.equal(preview.body.count, 0)
+  assert.equal(preview.body.skippedInvalidCount, 0, "an existing current row is never offered as a missing historical record")
 })
 
 test("recovery preserves valid holiday provenance so an unchanged recovered import needs no manual review", async () => {

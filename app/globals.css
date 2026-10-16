@@ -9653,6 +9653,16 @@ body:has(.spc-statistics-page) .spc-main {
     grid-template-columns: 1fr;
   }
 
+  .spc-supplier-edit-actions.is-contact-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .spc-supplier-edit-actions.is-contact-actions button,
+  .spc-supplier-edit-actions.is-contact-actions button:nth-child(3) {
+    min-width: 0;
+    justify-self: stretch;
+  }
+
   .spc-supplier-modal-backdrop {
     align-items: stretch;
     padding: 12px;

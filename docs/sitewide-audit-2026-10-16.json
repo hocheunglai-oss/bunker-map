@@ -1,0 +1,71 @@
+{
+  "schema": "fcuno.sitewide-audit-checkpoint/v1",
+  "date": "2026-10-16",
+  "goalComplete": false,
+  "status": "reviewed-source-release-candidate",
+  "releaseEvidence": "This checkpoint describes the reviewed source. Actual release status requires the merged pull request, migration history and both production /api/deploy-info responses; this file alone does not prove deployment.",
+  "baseProductionCommit": "f429b26ae565a2103ef00037b0dc07dea9d07c51",
+  "baseProductionTree": "3cb78d1cd581fb910b08c337a4e84cfc483ce74a",
+  "scopedRepairs": [
+    "Atomic supplier override writes preserve unrelated supplier and section edits; stale same-section edits retain the draft and return a conflict.",
+    "Stable supplier save intents and transactionally coupled audit receipts prevent duplicate writes after lost acknowledgements within the retained 256-operation receipt window; this is not a permanent replay ledger.",
+    "Supplier renames preserve validated sheet-backed barges and contacts, and narrow-phone contact action buttons remain separate without overlap.",
+    "Malformed newest calendar history is excluded without blocking valid recovery; bounded 500-event chunks commit atomically, with remaining work reported explicitly.",
+    "Each undelivered task reminder resolves recipients from the current active staff directory.",
+    "Outlook contact creation retries retain one identity and verify the committed contact rather than allocating a duplicate.",
+    "Template conflicts retain unsaved work until explicit reload or changed-field reapplication; deleted server templates are not recreated implicitly.",
+    "Application and database template-save guards use recent intact certified recipients during ordinary pending/processing sync while retaining real failure, stale and integrity blocks.",
+    "Function-scoped 20-second Outlook verification deadlines replace the inherited 8-second limit only for six named server RPCs; health checks allow 25 seconds. Verification bodies, privileges and global/role settings are unchanged.",
+    "Normal pending Exchange delivery and individually valid moving read snapshots remain visible without sending an action-needed email or falsely resolving an existing incident; real failed work, stale certification and invalid evidence remain actionable."
+  ],
+  "plannedMigrations": [
+    "20261016021125_atomic_spc_supplier_store.sql",
+    "20261016021744_keep_certified_template_writes_available_during_sync.sql",
+    "20261016022343_bounded_outlook_verification_rpc_timeouts.sql"
+  ],
+  "backupRecoveryObserved": {
+    "source": "existing-vercel-cron-not-started-by-agent",
+    "generatedAt": "2026-10-15T19:03:21.721Z",
+    "completedRequestStatus": 200,
+    "durationMs": 688363,
+    "fileBytes": 2599832796,
+    "independentHealthVerified": true,
+    "immediatePredecessorVerified": true,
+    "inventoryCurrent": true,
+    "fileCoverage": "6234/6234",
+    "missingFiles": 0,
+    "pendingFiles": 0,
+    "restoreTestPerformed": false,
+    "retentionChangedByAgent": false,
+    "note": "The natural run pruned one older file under the existing newest-two permanent-deletion policy. No manual backup or deletion was triggered by the agent. A no-delete manual verification option is no longer needed to establish this scheduled run succeeded; retention design remains a separate decision."
+  },
+  "releasePolicy": {
+    "knownDevelopmentOnlyAdvisory": "GHSA-vfj7-8cjw-p6xm",
+    "standingAuthorization": "docs/known-development-warning-release-authorization-2026-10-15.json",
+    "noFurtherQuestionSolelyForSameWarning": true,
+    "productionAuditMustPass": true,
+    "allOtherChecksMustPass": true,
+    "newAdvisoriesNotWaived": true
+  },
+  "preservedBoundaries": [
+    "No FCOS database or federation contract mutation.",
+    "No Exchange worker, dependency, retention, recipient-choice or holiday-policy changes.",
+    "No real test contacts, supplier edits, template changes, calendar recovery, reminders or emails submitted by the agent.",
+    "Unrelated local changes and personal browser tabs preserved."
+  ],
+  "remainingGoalWork": [
+    "Verify the exact released source, migrations and relevant signed-in read paths after promotion.",
+    "Certify actual Outlook verification after the scoped timeout migration; larger-history performance remains a follow-up, not a solved speed optimization.",
+    "Run a complete recovery restore drill; JSON validation and a successful backup do not establish recoverability of all storage objects.",
+    "Review the newest-two permanent backup retention policy, Google Cloud project-wide cost controls and coverage of separately stored objects.",
+    "Resolve five blocked Outlook template recipient choices and six quoted SPC enquiries without fixtures only with business-owner confirmation.",
+    "Confirm whether two active attendance users intentionally lack DingTalk mappings; do not guess identities or assign mappings.",
+    "Plan PostgreSQL security-version maintenance and check legacy TLS clients without changing database versions during this repair.",
+    "Complete current physical-device contact verification and remaining sitewide permission/workflow checks."
+  ],
+  "verificationLimits": [
+    "Synthetic browser/database tests do not certify actual third-party delivery or real devices.",
+    "Physical iPhone and Android devices are not controlled or tested.",
+    "Scoped deadline headroom is not an optimization or a guarantee against future growth."
+  ]
+}

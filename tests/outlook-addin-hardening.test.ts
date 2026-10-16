@@ -154,10 +154,14 @@ test("recipient map keeps the latest certified projection available during activ
   )
   assert.match(
     recipientResolver,
-    /certificationAgeMs <= maxAgeSeconds \* 1000/,
+    /import \{ isCertifiedRecipientProjectionAvailable \} from "@\/lib\/outlookRecipientMapAvailability"/,
   )
   assert.match(
     recipientResolver,
+    /isCertifiedRecipientProjectionAvailable\(verification, Date\.now\(\), certificationMaxAgeSeconds\(\)\)/,
+  )
+  assert.match(
+    recipientAvailability,
     /certificationAgeMs >= -CLOCK_SKEW_MS/,
   )
   assert.match(

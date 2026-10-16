@@ -7,6 +7,7 @@
 const assert = require("node:assert/strict")
 const http = require("node:http")
 const path = require("node:path")
+const fs = require("node:fs")
 const { build } = require("esbuild")
 
 const root = path.resolve(__dirname, "..")
@@ -32,6 +33,7 @@ async function main() {
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Local Outlook contact regression</title><style>
   :root { --fc-admin-page-bg:#f4f5f8; --fc-admin-font:Arial,sans-serif; --fc-admin-panel-text:#20232a; --fc-admin-heading:#20232a; --fc-admin-panel-bg:#fff; --fc-admin-panel-soft-bg:#f8f9fc; --fc-admin-border:#ccd0d8; --fc-admin-border-soft:#dfe2e8; --fc-admin-muted:#69707d; --fc-admin-button-bg:#f4f5f8; --fc-admin-button-text:#20232a; --fc-admin-button-border:#ccd0d8; --fc-admin-success-bg:#218838; --fc-admin-success-text:#fff; --fc-admin-success-border:#218838; --fc-admin-danger-bg:#dc001b; --fc-admin-danger-text:#fff; --fc-admin-danger-border:#dc001b; --fc-admin-link:#0672ed; --fc-input-border:#ccd0d8; --fc-tool-input-bg:#fff; --fc-tool-input-text:#20232a; --fc-row-bg:#f4f5f8; --fc-row-text:#20232a; --fc-row-border:#dfe2e8; --fc-row-active-bg:#e7f2ff; --fc-row-active-text:#0054af; --fc-accent:#0672ed; --fc-count-bg:#e7f2ff; --fc-count-text:#0054af; --fc-error:#b00020; --fc-muted:#69707d; }
   * { box-sizing:border-box; } body { margin:0; font-family:Arial,sans-serif; } button,input,select { font:inherit; } button:disabled { opacity:.55; cursor:default!important; }
+  @media(prefers-color-scheme:dark){:root{--fc-admin-page-bg:#121820;--fc-admin-panel-bg:#1a2330;--fc-admin-panel-soft-bg:#202c3c;--fc-admin-panel-text:#eef3fa;--fc-admin-heading:#eef3fa;--fc-admin-border:#536072;--fc-admin-border-soft:#3d4d60;--fc-admin-muted:#b4c0d1;--fc-muted:#b4c0d1;--fc-row-bg:#202c3c;--fc-row-text:#eef3fa;--fc-row-border:#536072;--fc-row-active-bg:#123f6b;--fc-row-active-text:#e1f0ff;--fc-admin-button-bg:#293648;--fc-admin-button-text:#eef3fa;--fc-admin-button-border:#536072;--fc-error:#ff91a2;--fc-tool-input-bg:#202c3c;--fc-tool-input-text:#eef3fa;--fc-input-border:#536072}}
   </style></head><body><div id="root"></div><script src="${script}"></script></body></html>`
   const server = http.createServer((request, response) => {
     if (request.method !== "GET") { response.writeHead(405); response.end("Read-only fixture server"); return }
@@ -52,8 +54,9 @@ async function main() {
       })
       return
     }
-    const { chromium } = require("playwright")
-    browser = await chromium.launch({ headless: true, ...(process.env.CHROME_EXECUTABLE_PATH ? { executablePath: process.env.CHROME_EXECUTABLE_PATH } : {}) })
+    const playwright = require("playwright"), engine = process.env.BROWSER_ENGINE || "chromium"
+    const executablePath = engine === "webkit" ? process.env.WEBKIT_EXECUTABLE_PATH : process.env.CHROME_EXECUTABLE_PATH
+    browser = await playwright[engine].launch({ headless: true, ...(executablePath ? { executablePath } : {}) })
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
     const errors = []
     const blockedRequests = []
@@ -218,15 +221,31 @@ async function main() {
     await createPanel.getByLabel("Email", { exact: true }).fill("new.contact@example.test")
     await page.evaluate(() => { window.__outlookContactHarness.failNext = true })
     await button(page, "Create").click()
-    await page.getByText("Synthetic save failure. Please retry.", { exact: true }).waitFor()
+    await page.getByText(/^The new contact could not be verified/).waitFor()
     assert.equal(await createPanel.getByLabel("Email", { exact: true }).inputValue(), "new.contact@example.test")
     assert.equal(await createPanel.getByLabel("Display Name", { exact: true }).inputValue(), "NEW SYNTHETIC CONTACT")
     await button(page, "Create").click()
     await createPanel.waitFor({ state: "hidden" })
     assert.equal(await field(page, "Email").inputValue(), "new.contact@example.test")
-    assert.equal((await operations(page)).length, 2)
+    const creationWrites = (await operations(page)).filter(operation=>operation.method==="POST")
+    assert.equal(creationWrites.length, 2)
+    assert.equal(creationWrites[0].payload.id, creationWrites[1].payload.id)
     await assertNoMembershipChanges()
     console.log("PASS: failed creation retains entered details; retry creates one contact")
+
+    await reset()
+    await button(page, "Add contact or group").click(); await button(page, "New Contact").click()
+    const lostPanel = page.locator("section").filter({ has: button(page, "Create") })
+    await lostPanel.getByLabel("Display Name",{exact:true}).fill("LOST REPLY CONTACT")
+    await lostPanel.getByLabel("Email",{exact:true}).fill("lost.reply@example.test")
+    await page.evaluate(()=>{window.__outlookContactHarness.loseNextInsertReply=true;window.__outlookContactHarness.failNextRead=true})
+    await button(page,"Create").click()
+    await page.getByText(/^The new contact could not be verified/).waitFor()
+    assert.equal(await page.evaluate(()=>window.__outlookContactHarness.contacts.filter(row=>row.primary_email==="lost.reply@example.test").length),1)
+    await button(page,"Create").click(); await lostPanel.waitFor({state:"hidden"})
+    assert.equal((await operations(page)).filter(operation=>operation.method==="POST").length,1)
+    assert.equal(await field(page,"Email").inputValue(),"lost.reply@example.test")
+    console.log("PASS: committed lost reply plus readback outage recovers one exact contact, without duplicate INSERT")
 
     await reset()
     await field(page, "Email").fill("draft.before.undo@example.test")
@@ -264,6 +283,32 @@ async function main() {
     await page.waitForFunction(() => window.__outlookContactHarness.contacts[0].primary_email === "mobile@example.test")
     await assertNoMembershipChanges()
     console.log("PASS: mobile contact editing and Save remain usable")
+
+    if (process.env.VISUAL_OUTPUT_DIR) {
+      fs.mkdirSync(process.env.VISUAL_OUTPUT_DIR,{recursive:true})
+      for (const width of [1440,320,390]) for (const colorScheme of ["light","dark"]) for (const signedout of [false,true]) {
+        const cell=await browser.newContext({viewport:{width,height:width<500?844:1000},colorScheme,isMobile:width<500,hasTouch:width<500})
+        await cell.route("**/*",route=>new URL(route.request().url()).origin===baseUrl?route.continue():route.abort())
+        const visual=await cell.newPage();visual.on("pageerror",error=>errors.push(error.message))
+        try {
+          await visual.goto(`${baseUrl}${signedout?"?signedout=1":""}`)
+          if (signedout) await visual.getByText("Please log in from the admin homepage first.").waitFor()
+          else {
+            await button(visual,"Add contact or group").click();await button(visual,"New Contact").click()
+            const panel=visual.locator("section").filter({has:button(visual,"Create")})
+            await panel.getByLabel("Display Name",{exact:true}).fill("SYNTHETIC RETRY CONTACT")
+            await panel.getByLabel("Email",{exact:true}).fill("synthetic.retry@example.test")
+            await visual.evaluate(()=>{window.__outlookContactHarness.loseNextInsertReply=true;window.__outlookContactHarness.failNextRead=true})
+            await button(visual,"Create").click();await visual.getByText(/^The new contact could not be verified/).waitFor()
+          }
+          assert.ok(await visual.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`${engine}/${width}/${colorScheme} overflow`)
+          await visual.screenshot({path:path.join(process.env.VISUAL_OUTPUT_DIR,`${engine}-contact-${width}-${colorScheme}-${signedout?"out":"in"}.png`),fullPage:true})
+          if (!signedout) { await button(visual,"Create").click();await visual.waitForFunction(()=>window.__outlookContactHarness.contacts.filter(row=>row.primary_email==="synthetic.retry@example.test").length===1);assert.equal((await operations(visual)).filter(row=>row.method==="POST").length,1) }
+          else assert.equal((await operations(visual)).length,0)
+          console.log(`PASS: ${engine} contact ${width} ${colorScheme} ${signedout?"signedout":"lost reply recovery"}`)
+        } finally { await cell.close() }
+      }
+    }
 
     assert.deepEqual(errors, [], "no browser errors")
     assert.deepEqual(blockedRequests, [], "no external browser requests")

@@ -32,6 +32,8 @@ export type OutlookContactHarness = {
   requests: { url: string; method: string }[]
   failNext: boolean
   throwNext: boolean
+  loseNextInsertReply: boolean
+  failNextRead: boolean
   deferNext: boolean
   releaseWrite: (() => void) | null
   deferUndo: boolean
@@ -49,7 +51,7 @@ export function installOutlookContactHarness() {
   ]
   const groups: Group[] = [{ id: "synthetic-group-a", source_book: "FC-GENERAL", source_uid: "original-group-a", name: "TEST SUPPLIERS", nickname: null, description: null, member_count: 2 }]
   const members: Member[] = contacts.map((contact) => ({ group_id: groups[0].id, contact_id: contact.id, source_book: "FC-GENERAL" }))
-  window.__outlookContactHarness = { contacts, groups, members, baselineMembers: clone(members), operations: [], requests: [], failNext: false, throwNext: false, deferNext: false, releaseWrite: null, deferUndo: false, releaseUndo: null, undone: false }
+  window.__outlookContactHarness = { contacts, groups, members, baselineMembers: clone(members), operations: [], requests: [], failNext: false, throwNext: false, loseNextInsertReply: false, failNextRead: false, deferNext: false, releaseWrite: null, deferUndo: false, releaseUndo: null, undone: false }
   window.fetch = async (input, init) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, window.location.origin)
     const method = init?.method || (input instanceof Request ? input.method : "GET")
@@ -89,6 +91,7 @@ class Query implements PromiseLike<QueryResult> {
   eq(field: string, value: unknown) { this.operation.filters.push({ field, value }); return this }
   select(columns: string) { this.operation.columns = columns; return this }
   single() { this.operation.single = true; return this }
+  maybeSingle() { this.operation.single = true; return this }
   then<TResult1 = QueryResult, TResult2 = never>(onfulfilled?: ((value: QueryResult) => TResult1 | PromiseLike<TResult1>) | null, onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null): PromiseLike<TResult1 | TResult2> {
     this.execution ??= this.execute()
     return this.execution.then(onfulfilled, onrejected)
@@ -107,6 +110,10 @@ class Query implements PromiseLike<QueryResult> {
     if (operation.table !== "shared_addressbook_contacts") return { data: null, error: { message: "Unexpected mutation outside contacts in local fixture." } }
     const payload = operation.payload as Record<string, unknown>
     const id = operation.filters.find((filter) => filter.field === "id")?.value
+    if (operation.method === "GET") {
+      if (harness.failNextRead) { harness.failNextRead = false; return { data: null, error: { message: "Synthetic readback outage." } } }
+      return { data: clone(harness.contacts.find(contact => contact.id === id) || null), error: null }
+    }
     if (operation.method === "PATCH") {
       const index = harness.contacts.findIndex((contact) => contact.id === id)
       if (index < 0) return { data: null, error: { message: "Contact no longer exists.", code: "PGRST116" } }
@@ -114,7 +121,9 @@ class Query implements PromiseLike<QueryResult> {
       return { data: { id }, error: null }
     }
     if (operation.method === "POST") {
+      if (harness.contacts.some(contact => contact.id === payload.id)) return { data: null, error: { message: "Duplicate ID", code: "23505" } }
       harness.contacts.push(clone(payload) as Contact)
+      if (harness.loseNextInsertReply) { harness.loseNextInsertReply = false; return { data: null, error: { message: "Synthetic committed reply loss." } } }
       return { data: operation.single ? payload : null, error: null }
     }
     if (operation.method === "DELETE") {
@@ -126,4 +135,4 @@ class Query implements PromiseLike<QueryResult> {
 }
 
 export const supabase = { from: (table: string) => new Query(table) }
-export function useSimpleAdminAuth() { return { loading: false, authenticated: true } }
+export function useSimpleAdminAuth() { return { loading: false, authenticated: !new URLSearchParams(location.search).has("signedout") } }

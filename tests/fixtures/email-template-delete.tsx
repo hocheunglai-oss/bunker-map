@@ -13,6 +13,7 @@ const harness = {
   requests: [] as { action?: string; id?: string; template?: ReturnType<typeof template>; expectedRevision?: number }[],
   failSaveIds: new Set<string>(), failDelete: false, deferSave: false, releaseSave: null as null | (() => void),
   concurrentDelete: false, conflictSave: false,
+  failDetail: false,
 }
 Object.assign(window, { __templateDeleteHarness: harness })
 window.fetch = async (input, init = {}) => {
@@ -20,7 +21,7 @@ window.fetch = async (input, init = {}) => {
   if (url.origin !== location.origin || url.pathname !== "/api/admin/email-templates") throw Error(`Unexpected fixture request: ${url.pathname}`)
   if ((init.method || "GET") === "GET") {
     const id = url.searchParams.get("id")
-    if (id) { const row = harness.templates.find(row => row.id === id); return Response.json(row ? { template: row } : { message: "Template not found." }, { status: row ? 200 : 404 }) }
+    if (id) { if (harness.failDetail) return Response.json({ message: "Synthetic server check outage." }, { status: 500 }); const row = harness.templates.find(row => row.id === id); return Response.json(row ? { template: row } : { message: "Template not found." }, { status: row ? 200 : 404 }) }
     if (url.searchParams.get("mode") === "recipients") return Response.json({ contacts: [], groups: [] })
     return Response.json({ templates: harness.templates, lastImportedAt: null, lastUpdatedAt: null, revision: "a".repeat(64) })
   }

@@ -481,7 +481,9 @@ test("recovery and AI imports retain additive-only atomic mutations", () => {
   const recovery = source("../app/api/event-calendar/recover-missing/route.ts")
   const aiWorkbench = source("../app/api/admin/ai-workbench/route.ts")
 
-  assert.match(recovery, /mutateEventCalendarStore\(supabase/)
+  assert.match(recovery, /mutateEventCalendarStoreBatch\(supabase, mutations\)/)
+  assert.match(recovery, /operation: "insert" as const/)
+  assert.match(recovery, /EVENT_CALENDAR_MAX_MUTATION_EVENTS \* EVENT_CALENDAR_MAX_BATCH_MUTATIONS/)
   assert.match(aiWorkbench, /mutateEventCalendarStore\(supabase/)
   assert.doesNotMatch(recovery, /from\("office_calendar_store"\)\.upsert/)
 })

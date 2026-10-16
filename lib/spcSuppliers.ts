@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js"
+import { createHash } from "node:crypto"
 import type * as XLSX from "xlsx"
-import type { SpcAuditContext } from "@/lib/spcAudit"
+import { createSpcAuditHeaders, type SpcAuditContext } from "@/lib/spcAudit"
 import {
   displaySupplierName,
   supplierKey,
@@ -18,6 +19,8 @@ import type {
   SaveSpcSupplierBargesInput,
   SaveSpcSupplierContactsInput,
   SaveSpcSupplierInput,
+  SpcSupplierEditVersions,
+  SpcSupplierMutation,
 } from "@/lib/spcSupplierTypes"
 import { listSpcUserReferenceOptions, type SpcUserOption } from "@/lib/spcUsers"
 
@@ -92,9 +95,10 @@ type SupplierOverrideStore = {
   records: SupplierOverrideRecord[]
   barges: SupplierBargeOverrideRecord[]
   contacts: SupplierContactOverrideRecord[]
+  receipts?: Array<{ requestId: string; actorUserId: string; operationHash: string }>
 }
 
-type MutableSupplierRecord = Omit<SpcSupplierRecord, "aliases" | "fixtures" | "searchText"> & {
+type MutableSupplierRecord = Omit<SpcSupplierRecord, "aliases" | "fixtures" | "searchText" | "editVersions"> & {
   aliases: Set<string>
   fixtures: SpcSupplierFixture[]
   barges: SpcSupplierBarge[]
@@ -131,10 +135,6 @@ function createStaleCachedLoader<T>(loader: () => Promise<T>) {
         cached = { value, expiresAt: Date.now() + EXTERNAL_SHEET_CACHE_MS }
         return value
       })
-      .catch((error) => {
-        if (cached) return cached.value
-        throw error
-      })
       .finally(() => {
         pending = null
       })
@@ -149,10 +149,11 @@ function requireEnv(name: string) {
   return value
 }
 
-function getServiceClient() {
+function getServiceClient(context?: SpcAuditContext) {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!serviceRoleKey) throw new Error("SUPABASE_SERVICE_ROLE_KEY is required for supplier database changes.")
-  return createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), serviceRoleKey)
+  return createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), serviceRoleKey,
+    context ? { global: { headers: createSpcAuditHeaders(context) } } : undefined)
 }
 
 function cell(row: SheetRow | undefined, index: number) {
@@ -711,6 +712,8 @@ function parseSupplierOverrideStore(payload: unknown): SupplierOverrideStore {
   const contacts = (payload as { contacts?: unknown }).contacts
 
   return {
+    receipts: Array.isArray((payload as SupplierOverrideStore).receipts)
+      ? (payload as SupplierOverrideStore).receipts : [],
     records: Array.isArray(records) ? records.flatMap((record) => {
       if (!record || typeof record !== "object") return []
       const source = record as Record<string, unknown>
@@ -718,6 +721,7 @@ function parseSupplierOverrideStore(payload: unknown): SupplierOverrideStore {
       const key = supplierKey(compactText(source.key) || name)
       if (!key || !name) return []
       return [{
+        ...source,
         key,
         name,
         info: cleanInfo(source.info as Partial<SpcSupplierInfoInput> | undefined),
@@ -732,11 +736,12 @@ function parseSupplierOverrideStore(payload: unknown): SupplierOverrideStore {
       if (!key) return []
       const sourceBarges = Array.isArray(source.barges) ? source.barges : []
       return [{
+        ...source,
         supplierKey: key,
         barges: sourceBarges.flatMap((barge, index) => {
           if (!barge || typeof barge !== "object") return []
           const clean = cleanStoredBarge(key, barge as Partial<StoredSupplierBarge>, index)
-          return clean ? [clean] : []
+          return clean ? [{ ...barge, ...clean }] : []
         }),
         updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : new Date(0).toISOString(),
       }]
@@ -748,11 +753,12 @@ function parseSupplierOverrideStore(payload: unknown): SupplierOverrideStore {
       if (!key) return []
       const sourceContacts = Array.isArray(source.contacts) ? source.contacts : []
       return [{
+        ...source,
         supplierKey: key,
         contacts: sourceContacts.flatMap((contact, index) => {
           if (!contact || typeof contact !== "object") return []
           const clean = cleanStoredContact(key, contact as Partial<StoredSupplierContact>, index)
-          return clean ? [clean] : []
+          return clean ? [{ ...contact, ...clean }] : []
         }),
         updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : new Date(0).toISOString(),
       }]
@@ -815,50 +821,6 @@ function applySupplierOverrides(records: Map<string, MutableSupplierRecord>, sto
       updatedAt: override.updatedAt,
     })
   })
-}
-
-async function writeSupplierStoreAudit(
-  supabase: ReturnType<typeof getServiceClient>,
-  context: SpcAuditContext,
-  operation: "INSERT" | "UPDATE" | "DELETE",
-  beforeRow: SupplierStoreRow | null,
-  afterRow: SupplierStoreRow,
-) {
-  await supabase.from("audit_logs").insert({
-    actor_user_id: context.actorUserId,
-    actor_id: `spc:${context.username}`,
-    actor_name: context.displayName || context.username,
-    actor_source: "app",
-    table_schema: "public",
-    table_name: "office_calendar_store",
-    operation,
-    record_pk: { key: SUPPLIER_OVERRIDE_STORE_KEY },
-    changed_fields: ["payload"],
-    before_row: beforeRow,
-    after_row: afterRow,
-    request_context: {
-      pageId: context.pageId,
-      pageLabel: context.pageLabel,
-      pagePath: context.pagePath,
-    },
-  })
-}
-
-async function writeSupplierOverrideStore(
-  store: SupplierOverrideStore,
-  context: SpcAuditContext,
-  beforeRow: SupplierStoreRow | null,
-  operation: "INSERT" | "UPDATE" | "DELETE",
-) {
-  const supabase = getServiceClient()
-  const afterRow: SupplierStoreRow = {
-    key: SUPPLIER_OVERRIDE_STORE_KEY,
-    payload: store,
-    updated_at: new Date().toISOString(),
-  }
-  const { error } = await supabase.from("office_calendar_store").upsert(afterRow)
-  if (error) throw error
-  await writeSupplierStoreAudit(supabase, context, operation, beforeRow, afterRow)
 }
 
 function parseGradeValues(value: unknown) {
@@ -1124,7 +1086,16 @@ function recordSearchText(record: MutableSupplierRecord) {
   ].filter(Boolean).join(" ").toLowerCase()
 }
 
-function finaliseDataset(records: Map<string, MutableSupplierRecord>, legacyFixtures: SpcSupplierLegacyFixture[]): SpcSupplierDataset {
+function version(value: unknown) {
+  const canonical = (item: unknown): unknown => Array.isArray(item) ? item.map(canonical)
+    : item && typeof item === "object" ? Object.fromEntries(Object.entries(item)
+      .filter(([, value]) => value !== undefined).sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, value]) => [key, canonical(value)])) : item
+  return createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex")
+}
+
+function finaliseDataset(records: Map<string, MutableSupplierRecord>, legacyFixtures: SpcSupplierLegacyFixture[],
+  availability: { barges: boolean; contacts: boolean }, store: SupplierOverrideStore): SpcSupplierDataset {
   const generatedAt = new Date().toISOString()
   const finalRecords = Array.from(records.values())
     .map<SpcSupplierRecord>((record) => ({
@@ -1135,6 +1106,15 @@ function finaliseDataset(records: Map<string, MutableSupplierRecord>, legacyFixt
       contacts: record.contacts,
       searchText: recordSearchText(record),
       updatedAt: generatedAt,
+      // Effective source content, never generatedAt/updatedAt, is the browser's
+      // stable edit baseline. Unrelated sections and suppliers do not conflict.
+      editVersions: {
+        details: version([record.key, record.name, cleanInfo(record.info)]),
+        barges: availability.barges || store.barges.some((entry) => entry.supplierKey === record.key)
+          ? version(record.barges.map(({ id, bargeName, imo, grade, capacity }) => [id, bargeName, imo, grade, capacity])) : null,
+        contacts: availability.contacts || store.contacts.some((entry) => entry.supplierKey === record.key)
+          ? version(record.contacts.map(({ id, role, name, mobile }) => [id, role, name, mobile])) : null,
+      },
     }))
     .sort((a, b) => a.name.localeCompare(b.name))
 
@@ -1173,20 +1153,30 @@ export async function loadSpcSupplierOptions() {
 }
 
 export async function loadSpcSupplierDataset(): Promise<SpcSupplierDataset> {
-  const [rows, fixtureRows, activeUsers, overrides, bargeSource, contactSource] = await Promise.all([
+  const [sources, overrides] = await Promise.all([loadSupplierSources(), loadSupplierOverrides()])
+  return supplierDatasetFromSnapshot(sources, overrides)
+}
+
+async function loadSupplierSources() {
+  const [rows, fixtureRows, activeUsers, bargeSource, contactSource] = await Promise.all([
     loadCachedSupplierSheet(),
     loadCompletedFixtures(),
     loadActiveSpcUsers(),
-    loadSupplierOverrides(),
     loadOptionalSheetRows("Supplier barge data", loadCachedSupplierBargeSheet),
     loadOptionalSheetRows("Supplier contact data", loadCachedSupplierContactsSheet),
   ])
+  return { rows, fixtureRows, activeUsers, bargeSource, contactSource }
+}
+
+function supplierDatasetFromSnapshot(sources: Awaited<ReturnType<typeof loadSupplierSources>>, overrides: SupplierOverrideStore) {
+  const { rows, fixtureRows, activeUsers, bargeSource, contactSource } = sources
   const records = buildSupplierRecords(rows)
   applySupplierOverrides(records, overrides)
   const legacyFixtures = attachFixtures(records, fixtureRows, activeUsers)
   attachBarges(records, bargeSource.rows, overrides)
   attachContacts(records, contactSource.rows, overrides)
-  const dataset = finaliseDataset(records, legacyFixtures)
+  const dataset = finaliseDataset(records, legacyFixtures,
+    { barges: !bargeSource.warning, contacts: !contactSource.warning }, overrides)
   const warnings = [bargeSource.warning, contactSource.warning].filter(
     (warning): warning is string => Boolean(warning),
   )
@@ -1194,138 +1184,202 @@ export async function loadSpcSupplierDataset(): Promise<SpcSupplierDataset> {
 }
 
 export async function saveSpcSupplier(input: SaveSpcSupplierInput, context: SpcAuditContext) {
+  requireObject(input)
+  requireTextFields(input, ["name"])
+  if (input.key !== undefined && typeof input.key !== "string") throw invalidSupplier()
+  requireObject(input.info)
+  requireTextFields(input.info, ["paymentTerms", "qualityClaimBar", "supplierTrader", "availableGrade", "foBdn", "goBdn"])
   const name = displaySupplierName(compactText(input.name))
   const key = supplierKey(name)
   if (!name || !key) throw new Error("Supplier name is required.")
-
-  const supabase = getServiceClient()
-  const { storeRow, store } = await loadSupplierOverrideStore(supabase)
-  const updatedAt = new Date().toISOString()
   const originalKey = supplierKey(input.key || key)
-  const nextRecords = store.records.filter((record) => record.key !== key && record.key !== originalKey)
-  if (originalKey && originalKey !== key) {
-    nextRecords.push({
-      key: originalKey,
-      name: input.key || name,
-      info: cleanInfo({}),
-      deleted: true,
-      updatedAt,
+  const info = cleanInfo(input.info)
+  return mutateSupplierStore("save", input, { originalKey, key, name, info, create: !input.key }, context,
+    (store, dataset, now) => {
+      const existing = dataset.records.find((record) => record.key === originalKey)
+      if (!input.key) {
+        if (occupiedSupplierKey(store, dataset, key)) throw supplierConflict("A supplier with this name already exists. Refresh before adding it.")
+      } else {
+        const renamed = name !== existing?.name || key !== originalKey
+        checkSupplierVersions(existing, input, renamed ? ["details", "barges", "contacts"] : ["details"])
+        if (key !== originalKey && occupiedSupplierKey(store, dataset, key)) {
+          throw supplierConflict("The new supplier name is already used. No changes were applied.")
+        }
+      }
+      const records = store.records.filter((record) => record.key !== key && record.key !== originalKey)
+      if (originalKey !== key) records.push({ key: originalKey, name: existing!.name, info: cleanInfo(existing!.info), deleted: true, updatedAt: now })
+      records.push({ key, name, info, deleted: false, updatedAt: now })
+      // Renaming detaches from the old sheet key. Snapshot every effective
+      // child, not merely existing overrides, or sheet-backed children vanish.
+      const barges = key === originalKey ? store.barges : [
+        ...store.barges.filter((entry) => entry.supplierKey !== originalKey),
+        { ...store.barges.find((entry) => entry.supplierKey === originalKey), supplierKey: key,
+          barges: existing!.barges.map((row) => { const stored = { ...row }; Reflect.deleteProperty(stored, "source"); return stored }), updatedAt: now },
+      ]
+      const contacts = key === originalKey ? store.contacts : [
+        ...store.contacts.filter((entry) => entry.supplierKey !== originalKey),
+        { ...store.contacts.find((entry) => entry.supplierKey === originalKey), supplierKey: key,
+          contacts: existing!.contacts.map((row) => { const stored = { ...row }; Reflect.deleteProperty(stored, "source"); return stored }), updatedAt: now },
+      ]
+      return { ...store, records, barges, contacts }
     })
-  }
-  nextRecords.push({
-    key,
-    name,
-    info: cleanInfo(input.info),
-    deleted: false,
-    updatedAt,
-  })
-  const nextBarges = store.barges.map((entry) =>
-    originalKey && originalKey !== key && entry.supplierKey === originalKey
-      ? { ...entry, supplierKey: key, updatedAt }
-      : entry,
-  )
-  const nextContacts = store.contacts.map((entry) =>
-    originalKey && originalKey !== key && entry.supplierKey === originalKey
-      ? { ...entry, supplierKey: key, updatedAt }
-      : entry,
-  )
-
-  await writeSupplierOverrideStore(
-    { records: nextRecords, barges: nextBarges, contacts: nextContacts },
-    context,
-    storeRow,
-    storeRow ? "UPDATE" : "INSERT",
-  )
-  return loadSpcSupplierDataset()
 }
 
-export async function deleteSpcSupplier(keyInput: string, context: SpcAuditContext) {
+export async function deleteSpcSupplier(keyInput: string, context: SpcAuditContext, mutation: SpcSupplierMutation) {
   const key = supplierKey(keyInput)
   if (!key) throw new Error("Supplier key is required.")
-
-  const supabase = getServiceClient()
-  const { storeRow, store } = await loadSupplierOverrideStore(supabase)
-  const dataset = await loadSpcSupplierDataset()
-  const existing = dataset.records.find((record) => record.key === key)
-  if (!existing) throw new Error("Supplier not found.")
-
-  const updatedAt = new Date().toISOString()
-  const nextRecords = store.records.filter((record) => record.key !== key)
-  nextRecords.push({
-    key,
-    name: existing.name,
-    info: cleanInfo(existing.info),
-    deleted: true,
-    updatedAt,
-  })
-
-  await writeSupplierOverrideStore(
-    {
-      records: nextRecords,
+  return mutateSupplierStore("delete", mutation, { key }, context, (store, dataset, now) => {
+    const existing = dataset.records.find((record) => record.key === key)
+    checkSupplierVersions(existing, mutation, ["details", "barges", "contacts"])
+    return { ...store,
+      records: [...store.records.filter((record) => record.key !== key), {
+        key, name: existing!.name, info: cleanInfo(existing!.info), deleted: true, updatedAt: now,
+      }],
       barges: store.barges.filter((entry) => entry.supplierKey !== key),
-      contacts: store.contacts.filter((entry) => entry.supplierKey !== key),
-    },
-    context,
-    storeRow,
-    storeRow ? "UPDATE" : "INSERT",
-  )
-  return loadSpcSupplierDataset()
+      contacts: store.contacts.filter((entry) => entry.supplierKey !== key) }
+  })
 }
 
 export async function saveSpcSupplierBarges(input: SaveSpcSupplierBargesInput, context: SpcAuditContext) {
+  requireObject(input)
+  requireTextFields(input, ["supplierKey"])
   const key = supplierKey(input.supplierKey)
   if (!key) throw new Error("Supplier key is required.")
-
-  const supabase = getServiceClient()
-  const { storeRow, store } = await loadSupplierOverrideStore(supabase)
-  const updatedAt = new Date().toISOString()
-  const cleanedBarges = (Array.isArray(input.barges) ? input.barges : [])
-    .flatMap((barge, index) => {
-      const clean = cleanStoredBarge(key, barge, index)
-      return clean ? [clean] : []
-    })
-
-  const nextBarges = store.barges.filter((entry) => entry.supplierKey !== key)
-  nextBarges.push({
-    supplierKey: key,
-    barges: cleanedBarges,
-    updatedAt,
+  requireRows(input.barges)
+  const barges = input.barges.map((row, index) => {
+    requireObject(row)
+    requireTextFields(row, ["bargeName", "imo", "grade", "capacity"])
+    if ((row.id !== undefined && typeof row.id !== "string") || !row.bargeName.trim()
+      || (row.grade.trim() && !fuelColumns.some((column) => column.label === row.grade.trim()))) throw invalidSupplier()
+    return cleanStoredBarge(key, row, index)!
   })
-
-  await writeSupplierOverrideStore(
-    { records: store.records, barges: nextBarges, contacts: store.contacts },
-    context,
-    storeRow,
-    storeRow ? "UPDATE" : "INSERT",
-  )
-  return loadSpcSupplierDataset()
+  requireUniqueIds(barges)
+  return mutateSupplierStore("save-barges", input, { key, barges }, context, (store, dataset, now) => {
+    checkSupplierVersions(dataset.records.find((record) => record.key === key), input, ["barges"])
+    return { ...store, barges: [...store.barges.filter((entry) => entry.supplierKey !== key), { supplierKey: key, barges, updatedAt: now }] }
+  })
 }
 
 export async function saveSpcSupplierContacts(input: SaveSpcSupplierContactsInput, context: SpcAuditContext) {
+  requireObject(input)
+  requireTextFields(input, ["supplierKey"])
   const key = supplierKey(input.supplierKey)
   if (!key) throw new Error("Supplier key is required.")
-
-  const supabase = getServiceClient()
-  const { storeRow, store } = await loadSupplierOverrideStore(supabase)
-  const updatedAt = new Date().toISOString()
-  const cleanedContacts = (Array.isArray(input.contacts) ? input.contacts : [])
-    .flatMap((contact, index) => {
-      const clean = cleanStoredContact(key, contact, index)
-      return clean ? [clean] : []
-    })
-
-  const nextContacts = store.contacts.filter((entry) => entry.supplierKey !== key)
-  nextContacts.push({
-    supplierKey: key,
-    contacts: cleanedContacts,
-    updatedAt,
+  requireRows(input.contacts)
+  const contacts = input.contacts.map((row, index) => {
+    requireObject(row)
+    requireTextFields(row, ["name", "mobile"])
+    if ((row.id !== undefined && typeof row.id !== "string") || !row.name.trim() && !row.mobile.trim()
+      || !["sales", "ops"].includes(row.role)) throw invalidSupplier()
+    return cleanStoredContact(key, row, index)!
   })
+  requireUniqueIds(contacts)
+  return mutateSupplierStore("save-contacts", input, { key, contacts }, context, (store, dataset, now) => {
+    checkSupplierVersions(dataset.records.find((record) => record.key === key), input, ["contacts"])
+    return { ...store, contacts: [...store.contacts.filter((entry) => entry.supplierKey !== key), { supplierKey: key, contacts, updatedAt: now }] }
+  })
+}
 
-  await writeSupplierOverrideStore(
-    { records: store.records, barges: store.barges, contacts: nextContacts },
-    context,
-    storeRow,
-    storeRow ? "UPDATE" : "INSERT",
-  )
-  return loadSpcSupplierDataset()
+function invalidSupplier() {
+  return Object.assign(new Error("Invalid supplier details. Complete or remove incomplete rows before saving."), { code: "22023" })
+}
+
+function supplierConflict(message = "This supplier changed while you were editing. Your draft is kept. Close and refresh, then review the latest details.") {
+  return Object.assign(new Error(message), { code: "40001" })
+}
+
+function requireObject(value: unknown): asserts value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw invalidSupplier()
+}
+
+function requireTextFields(value: object, fields: string[]) {
+  for (const field of fields) if (typeof (value as Record<string, unknown>)[field] !== "string") throw invalidSupplier()
+}
+
+function requireRows(value: unknown): asserts value is unknown[] {
+  if (!Array.isArray(value) || value.length > 1000) throw invalidSupplier()
+}
+
+function requireUniqueIds(rows: Array<{ id: string }>) {
+  if (new Set(rows.map((row) => row.id)).size !== rows.length) throw invalidSupplier()
+}
+
+function occupiedSupplierKey(store: SupplierOverrideStore, dataset: SpcSupplierDataset, key: string) {
+  return dataset.records.some((record) => record.key === key)
+    || store.records.some((record) => record.key === key)
+    || store.barges.some((entry) => entry.supplierKey === key)
+    || store.contacts.some((entry) => entry.supplierKey === key)
+}
+
+function checkSupplierVersions(record: SpcSupplierRecord | undefined, input: SpcSupplierMutation, sections: Array<keyof SpcSupplierEditVersions>) {
+  if (!record) throw supplierConflict("This supplier is no longer available. Your draft is kept. Close and refresh the supplier list.")
+  for (const section of sections) {
+    const expected = input.expectedVersions?.[section]
+    if (!expected || typeof expected !== "string" || !/^[a-f0-9]{64}$/.test(expected)) {
+      throw supplierConflict("Refresh this supplier before saving. A complete saved version is required; your draft is kept.")
+    }
+    if (!record.editVersions[section]) throw supplierConflict("The supplier source is temporarily unavailable. Your draft is kept. Refresh when the source is available.")
+    if (expected !== record.editVersions[section]) throw supplierConflict()
+  }
+}
+
+async function mutateSupplierStore(action: string, input: SpcSupplierMutation, intent: object, context: SpcAuditContext,
+  apply: (store: SupplierOverrideStore, dataset: SpcSupplierDataset, now: string) => SupplierOverrideStore) {
+  const requestId = typeof input.requestId === "string" ? input.requestId.toLowerCase() : ""
+  if (typeof requestId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+    throw supplierConflict("Refresh before saving supplier changes. A save request id is required; your draft is kept.")
+  }
+  if (input.expectedVersions !== undefined) requireObject(input.expectedVersions)
+  const operationHash = version([action, intent, input.expectedVersions || {}])
+  const sources = await loadSupplierSources()
+  const supabase = getServiceClient(context)
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const { storeRow, store } = await loadSupplierOverrideStore(supabase)
+    assertSupplierStoreSafe(storeRow?.payload, store)
+    // Build the effective records using precisely the same override snapshot
+    // that the CAS compares. Never load a second, independently timed store.
+    const dataset = supplierDatasetFromSnapshot(sources, store)
+    const receipt = store.receipts?.find((item) => item.requestId === requestId)
+    if (receipt) {
+      if (receipt.actorUserId !== context.actorUserId || receipt.operationHash !== operationHash) throw supplierConflict("This save request was already used for different changes. Refresh and review before saving.")
+      return { ...dataset, mutation: { requestId, replayed: true } }
+    }
+    const next = apply(store, dataset, new Date().toISOString())
+    const payload = { ...storeRow?.payload, ...next,
+      receipts: [...(store.receipts || []), { requestId, actorUserId: context.actorUserId, operationHash }].slice(-256) }
+    const { data, error } = await supabase.rpc("compare_and_swap_spc_supplier_store", {
+      p_expected_payload: storeRow?.payload ?? null, p_payload: payload,
+      p_expected_exists: storeRow !== null,
+      p_actor_username: context.username, p_request_id: requestId, p_action: action,
+    })
+    if (error?.code === "40001" && error.details === "supplier-store-cas-contention") continue
+    if (error) throw error
+    if (!data || data.schema !== "fcuno.supplier-store-cas/v1" || data.requestId !== requestId
+      || version(data.payload) !== version(payload)) throw new Error("Supplier save could not be verified. Your draft is kept. Retry the same save to check its result.")
+    return { ...supplierDatasetFromSnapshot(sources, next), mutation: { requestId, replayed: false } }
+  }
+  throw supplierConflict("Other supplier changes are being saved. Your draft is kept. Retry this save shortly.")
+}
+
+function assertSupplierStoreSafe(payload: unknown, parsed: SupplierOverrideStore) {
+  if (payload == null) return
+  const fail = () => { throw supplierConflict("Saved supplier data needs review before editing. No changes were applied.") }
+  if (typeof payload !== "object" || Array.isArray(payload)) fail()
+  const raw = payload as Record<string, unknown>
+  for (const section of ["records", "barges", "contacts"] as const) {
+    const items = raw[section]
+    if (items !== undefined && (!Array.isArray(items) || items.length !== parsed[section].length)) fail()
+    const keys = parsed[section].map(item => "key" in item ? item.key : item.supplierKey)
+    if (new Set(keys).size !== keys.length) fail()
+    if (section !== "records" && Array.isArray(items)) items.forEach((entry, index) => {
+      const list = entry?.[section]
+      const clean = parsed[section][index] as SupplierBargeOverrideRecord & SupplierContactOverrideRecord
+      if (!Array.isArray(list) || list.length !== clean[section].length) fail()
+    })
+  }
+  if (raw.receipts !== undefined && (!Array.isArray(raw.receipts) || raw.receipts.length > 256)) fail()
+  for (const receipt of parsed.receipts || []) {
+    if (!receipt || typeof receipt.requestId !== "string" || typeof receipt.actorUserId !== "string"
+      || typeof receipt.operationHash !== "string" || !/^[a-f0-9]{64}$/.test(receipt.operationHash)) fail()
+  }
 }

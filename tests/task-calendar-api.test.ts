@@ -4,6 +4,7 @@ import test from "node:test"
 import { transformSync } from "esbuild"
 import * as taskData from "../data/taskCalendar"
 import * as taskStore from "../lib/taskCalendarStore"
+import { resolveCalendarStaffRecipients, type CalendarStaff } from "../lib/calendarStaff"
 
 const task = (id = "a") => ({ id, sourceRow: 0, scheduleType: "Monthly", daysOfMonth: Array.from({ length: 31 }, (_, i) => i + 1), months: [], notify: ["DT", "JZ"], cc: ["DT"], task: "Synthetic task", remark: "Synthetic only" })
 type Handler = (request: Request, context?: { params: Promise<{ key: string }> }) => Promise<Response>
@@ -13,6 +14,7 @@ function harness(options: { permission?: "view" | "edit" | "none"; signedIn?: bo
   let row = { payload: { tasks: options.tasks ?? [task()], deletedTaskIds: [] }, updated_at: "2026-10-07T00:00:00.000Z" }
   let writes = 0
   let failReads = options.readError ?? false
+  let failStaffReads = false, staffReads = 0
   const deliveries: Record<string, unknown>[] = []
   const deliveredIds = new Set<string>()
   const client = { from(table: string) {
@@ -33,7 +35,7 @@ function harness(options: { permission?: "view" | "edit" | "none"; signedIn?: bo
     }
     return query
   } }
-  const staff = ["DT", "JZ", "OL"].map((code) => ({ code, name: `${code} synthetic`, email: `${code.toLowerCase()}@example.test` }))
+  let staff: CalendarStaff[] = ["DT", "JZ", "OL"].map((code) => ({ code, name: `${code} synthetic`, email: (options.unresolved || []).includes(code) ? null : `${code.toLowerCase()}@example.test` }))
   const modules: Record<string, unknown> = {
     "next/server": { NextResponse: { json: Response.json.bind(Response) } },
     "@supabase/supabase-js": { createClient: () => client },
@@ -48,8 +50,8 @@ function harness(options: { permission?: "view" | "edit" | "none"; signedIn?: bo
     "@/data/taskCalendar": taskData,
     "@/lib/taskCalendarStore": taskStore,
     "@/lib/calendarStaff": {
-      loadCalendarStaffDirectory: async () => staff,
-      resolveCalendarStaffRecipients: (codes: string[]) => ({ recipients: Array.from(new Set(codes.filter((code) => !(options.unresolved || []).includes(code)).map((code) => staff.find((entry) => entry.code === code)?.email).filter(Boolean))), unresolved: codes.filter((code) => (options.unresolved || []).includes(code)) }),
+      loadCalendarStaffDirectory: async () => { staffReads += 1; if (failStaffReads) throw new Error("The staff directory is unavailable. No recipient addresses were guessed."); return structuredClone(staff) },
+      resolveCalendarStaffRecipients,
     },
     "@/lib/calendarDelivery": { getCalendarReminderDelivery: async (value: { recordId: string }) => deliveredIds.has(value.recordId) ? { status: "already_delivered", sent: 1 } : null, deliverCalendarReminder: async (value: Record<string, unknown>) => {
       if (deliveredIds.has(String(value.recordId))) return { status: "already_delivered", sent: 0 }
@@ -72,6 +74,9 @@ function harness(options: { permission?: "view" | "edit" | "none"; signedIn?: bo
   return {
     writes: () => writes, deliveries, payload: () => row.payload,
     failReads() { failReads = true },
+    failStaffReads() { failStaffReads = true },
+    staffReads: () => staffReads,
+    changeStaff(change: (value: CalendarStaff[]) => CalendarStaff[]) { staff = change(structuredClone(staff)) },
     async request(method: string, body?: unknown) {
       const response = await store[method](new Request("https://example.test/api/office-calendar-store/task-calendar", { method, ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }) }), { params: Promise.resolve({ key: "task-calendar" }) })
       return { status: response.status, body: await response.json() }
@@ -231,4 +236,63 @@ test("a current-task read failure never falls back to the old due-task snapshot"
   assert.equal(result.status, 500)
   assert.deepEqual(app.deliveries.map((delivery) => delivery.recordId), ["a"])
   assert.deepEqual(result.body.failed, [{ id: "b", reason: "The current task could not be checked. This reminder was not sent." }])
+})
+
+test("a canonical email changed during an earlier delivery is refreshed before the next reminder", async () => {
+  let release!: () => void
+  const app = harness({ tasks: [task("a"), { ...task("b"), notify: ["OL"], cc: ["JZ"] }], holdFirstDelivery: new Promise<void>((resolve) => { release = resolve }) })
+  const pending = app.remind()
+  while (!app.deliveries.length) await new Promise<void>((resolve) => setImmediate(resolve))
+  try { app.changeStaff((staff) => staff.map((entry) => ({ ...entry, email: entry.code === "OL" ? "current-ol@example.test" : entry.code === "JZ" ? "current-jz@example.test" : entry.email }))) }
+  finally { release() }
+  const result = await pending
+  assert.equal(result.status, 200)
+  assert.equal(app.staffReads(), 2)
+  assert.deepEqual(app.deliveries[1].to, ["current-ol@example.test"])
+  assert.deepEqual(app.deliveries[1].cc, ["current-jz@example.test"])
+})
+
+test("a staff account deactivated during an earlier delivery stops the next reminder without a guessed address", async () => {
+  let release!: () => void
+  const app = harness({ tasks: [task("a"), { ...task("b"), notify: ["OL"], cc: [] }], holdFirstDelivery: new Promise<void>((resolve) => { release = resolve }) })
+  const pending = app.remind()
+  while (!app.deliveries.length) await new Promise<void>((resolve) => setImmediate(resolve))
+  try { app.changeStaff((staff) => staff.filter((entry) => entry.code !== "OL")) }
+  finally { release() }
+  const result = await pending
+  assert.equal(result.status, 500)
+  assert.equal(app.staffReads(), 2)
+  assert.deepEqual(app.deliveries.map((delivery) => delivery.recordId), ["a"])
+  assert.match(result.body.failed[0].reason, /OL.*not sent/)
+  const retry = await app.remind()
+  assert.equal(retry.status, 500)
+  assert.deepEqual(retry.body.skipped, [{ id: "a", reason: "Already sent for this date." }])
+  assert.deepEqual(app.deliveries.map((delivery) => delivery.recordId), ["a"])
+})
+
+test("a staff read failure after an earlier delivery never reuses the earlier directory", async () => {
+  let release!: () => void
+  const app = harness({ tasks: [task("a"), task("b")], holdFirstDelivery: new Promise<void>((resolve) => { release = resolve }) })
+  const pending = app.remind()
+  while (!app.deliveries.length) await new Promise<void>((resolve) => setImmediate(resolve))
+  try { app.failStaffReads() }
+  finally { release() }
+  const result = await pending
+  assert.equal(result.status, 500)
+  assert.equal(app.staffReads(), 2)
+  assert.deepEqual(app.deliveries.map((delivery) => delivery.recordId), ["a"])
+  assert.deepEqual(result.body.failed, [{ id: "b", reason: "The staff directory is unavailable. No recipient addresses were guessed." }])
+})
+
+test("already delivered slots skip directory reads and cannot become false staff failures", async () => {
+  const app = harness({ tasks: [task("a"), task("b")] })
+  assert.equal((await app.remind()).status, 200)
+  assert.equal(app.staffReads(), 2)
+  app.failStaffReads()
+  const retry = await app.remind()
+  assert.equal(retry.status, 200)
+  assert.equal(app.staffReads(), 2)
+  assert.equal(retry.body.failed.length, 0)
+  assert.equal(retry.body.skipped.length, 2)
+  assert.equal(app.deliveries.length, 2)
 })
