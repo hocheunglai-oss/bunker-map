@@ -5240,6 +5240,14 @@ body:has(.spc-statistics-page) .spc-main {
   text-transform: uppercase;
 }
 
+.spc-stat-verified {
+  margin: 0;
+  color: #596273;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .spc-stat-toolbar-panel,
 .spc-stat-card,
 .spc-stat-table-panel {
@@ -5492,7 +5500,8 @@ body:has(.spc-statistics-page) .spc-main {
 }
 
 .spc-table.spc-stat-table {
-  table-layout: fixed;
+  table-layout: auto;
+  min-width: 480px;
   border-collapse: collapse;
   font-family: Roboto, Arial, sans-serif;
   text-transform: uppercase;
@@ -5559,6 +5568,15 @@ body:has(.spc-statistics-page) .spc-main {
 }
 
 @media (max-width: 720px) {
+  .spc-stat-bar-row {
+    grid-template-columns: minmax(0, 1fr) minmax(48px, 1fr) minmax(48px, max-content);
+  }
+
+  .spc-stat-bar-row span {
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
   body:has(.spc-statistics-page) .spc-main {
     padding: 8px;
   }
