@@ -23,7 +23,7 @@ const app=createRoot(document.getElementById("root"));function render(){writeCli
     builder.onLoad({filter:/.*/,namespace:"fixture"},args=>({resolveDir:root,loader:"tsx",contents:args.path.endsWith("/supabase")
       ?'import{createClient}from"@supabase/supabase-js";export const supabase=createClient(location.origin,"synthetic-only",{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});'
       :args.path.endsWith("/ccinfoSave")?`import{createCcinfoSaveQueue as original}from${JSON.stringify(join(root,"lib/ccinfoSave.ts"))};export*from${JSON.stringify(join(root,"lib/ccinfoSave.ts"))};export function createCcinfoSaveQueue(write){const q=original(write),loaded=q.loaded.bind(q);q.loaded=(...args)=>{loaded(...args);window.__activeCoreQueue=q;};return q;}`
-      :args.path.endsWith("/useSimpleAdminAuth")?'export const useSimpleAdminAuth=()=>window.__coreAuth;':mocks[args.path]
+      :args.path.endsWith("/useSimpleAdminAuth")?'export const useSimpleAdminAuth=()=>window.__coreAuth; export const clearAdminClientSessionCache=()=>{};':mocks[args.path]
     }))
   }}]})
   const assets=new Map(bundle.outputFiles.map(file=>[`/${basename(file.path)}`,file.contents]))

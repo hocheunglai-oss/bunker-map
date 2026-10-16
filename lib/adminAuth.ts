@@ -1,4 +1,5 @@
 import { cookies } from "next/headers"
+import { browserSessionActorKey } from "@/lib/browserSessionOwner"
 import {
   canAccessAdminPage,
   isAdminRole,
@@ -316,7 +317,7 @@ export async function getAdminSession(): Promise<AdminSession> {
   return (await resolveAdminSession()).publicSession
 }
 
-export async function getRefreshedAdminSession(): Promise<AdminSession> {
+export async function getRefreshedAdminSession(): Promise<AdminSession & { actorKey: string | null }> {
   const resolved = await resolveAdminSession()
 
   if (resolved.publicSession.authenticated && resolved.expiresAt) {
@@ -332,7 +333,7 @@ export async function getRefreshedAdminSession(): Promise<AdminSession> {
     }
   }
 
-  return resolved.publicSession
+  return { ...resolved.publicSession, actorKey: browserSessionActorKey("fcuno", resolved.adminUserId) }
 }
 
 export async function requireAdminSession() {

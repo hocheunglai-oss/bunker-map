@@ -192,7 +192,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          npx --no-install tsx --test tests/client-storage.test.ts tests/outlook-exchange-sync-trigger.test.ts tests/outlook-recipient-map-continuity.test.ts 2>&1 | tee session-trigger-tests.tap
+          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/client-storage.test.ts tests/client-session-store.test.ts tests/browser-session-owner.test.ts tests/outlook-exchange-sync-trigger.test.ts tests/outlook-recipient-map-continuity.test.ts 2>&1 | tee session-trigger-tests.tap
 
       - name: Preserve reviewed live Exchange worker and isolated retry/notification regressions
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -357,6 +357,55 @@ jobs:
             ${{ runner.temp }}/fcuno-directory-browser-runtime/directory.log
             ${{ runner.temp }}/fcuno-directory-browser-runtime/feedback.log
             ${{ runner.temp }}/fcuno-directory-browser-runtime/core.log
+          if-no-files-found: warn
+          retention-days: 90
+
+  calendar-session-browser-regressions:
+    name: Calendar and session ownership desktop and mobile
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Verify calendar reads and account replacement in isolated browsers
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_runtime="${RUNNER_TEMP}/fcuno-calendar-session-browser-runtime"
+          evidence_dir="${RUNNER_TEMP}/fcuno-calendar-session-browser-evidence"
+          npm install --prefix "$test_runtime" --ignore-scripts --no-fund playwright@1.62.1
+          npm audit --prefix "$test_runtime" --audit-level=high
+          npm audit signatures --prefix "$test_runtime"
+          export NODE_PATH="$test_runtime/node_modules"
+          export PLAYWRIGHT_BROWSERS_PATH="${RUNNER_TEMP}/fcuno-calendar-session-browser-cache"
+          "$test_runtime/node_modules/.bin/playwright" install --with-deps chromium webkit
+          EVENT_CALENDAR_RESPONSE_SCREENSHOTS="$evidence_dir/calendar" node tests/event-calendar-response.browser.test.cjs 2>&1 | tee "$test_runtime/calendar.log"
+          CLIENT_SESSION_OWNERSHIP_SCREENSHOTS="$evidence_dir/ownership" node tests/client-session-ownership.browser.test.cjs 2>&1 | tee "$test_runtime/ownership.log"
+          node tests/client-session-storage.browser.test.cjs 2>&1 | tee "$test_runtime/storage.log"
+
+      - name: Retain synthetic calendar and session verification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: calendar-session-browser-evidence-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/fcuno-calendar-session-browser-evidence
+            ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/calendar.log
+            ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/ownership.log
+            ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/storage.log
           if-no-files-found: warn
           retention-days: 90
 

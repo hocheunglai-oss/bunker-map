@@ -3,15 +3,18 @@ import { ADMIN_PAGE_DEFINITIONS } from "../../lib/adminPages"
 import { addCalendarDays, getHongKongDateKey } from "../../lib/eventCalendarDates"
 import { EVENT_CALENDAR_PROTOCOL_VERSION } from "../../lib/eventCalendarProtocol"
 import { googleMeetingRoomDates, normalizeMeetingRoomGoogleEvent } from "../../lib/eventCalendarMeeting"
+import { eventCalendarResponseVersion } from "../../lib/eventCalendarResponse"
 
 type Harness = { requests: Array<{ method: string; path: string; body: Record<string, unknown> | null }>; events: OfficeCalendarEvent[]; viewOnly: boolean; today: string; emailStatus: string; recoveryResult?: { restoredCount: number; remainingCount: number; skippedInvalidCount: number; historyComplete: boolean } }
 declare global { interface Window { __eventCalendarHarness: Harness } }
 
 const version = "a".repeat(64)
-function state() {
+async function state() {
   const events = window.__eventCalendarHarness.events
-  return { payload: { events, people: ["OL", "VL"], emailRecipientsText: "synthetic@example.test", deletedEventIds: [] }, protocolVersion: EVENT_CALENDAR_PROTOCOL_VERSION,
-    eventVersions: Object.fromEntries(events.map((event) => [event.id, version])), settingVersions: { people: version, emailRecipientsText: version }, storeVersion: version }
+  const payload = { events, people: ["OL", "VL"], emailRecipientsText: "synthetic@example.test", deletedEventIds: [] }
+  return { payload, protocolVersion: EVENT_CALENDAR_PROTOCOL_VERSION,
+    eventVersions: Object.fromEntries(await Promise.all(events.map(async (event) => [event.id, await eventCalendarResponseVersion(event)]))),
+    settingVersions: { people: await eventCalendarResponseVersion(payload.people), emailRecipientsText: await eventCalendarResponseVersion(payload.emailRecipientsText) }, storeVersion: await eventCalendarResponseVersion(payload) }
 }
 
 export function installEventCalendarHarness() {
@@ -32,11 +35,11 @@ export function installEventCalendarHarness() {
     const json = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } })
     if (h.viewOnly && method !== "GET") return json({ message: "Forbidden" }, 403)
     if (url.pathname === "/api/office-calendar-store/event-calendar") {
-      if (method === "GET") return json(state())
+      if (method === "GET") return json(await state())
       if (method === "PATCH") {
         if (body.operation === "update") h.events = h.events.map((event) => body.events.find((next: OfficeCalendarEvent) => next.id === event.id) || event)
         if (body.operation === "create") h.events.push(...body.events)
-        return json({ success: true, ...state() })
+        return json({ success: true, ...await state() })
       }
     }
     if (url.pathname === "/api/event-calendar/public-holidays") {
@@ -44,13 +47,13 @@ export function installEventCalendarHarness() {
       if (method === "GET") return json({ events: [holiday], ...coverage })
       const plan = { additions: [holiday], updates: [], removals: [], preserved: [], complete: true }
       if (body.action === "preview") return json({ plan, storeVersion: version, ...coverage })
-      if (body.action === "apply") { h.events.push(holiday); return json({ plan, ...coverage, ...state() }) }
+      if (body.action === "apply") { h.events.push(holiday); return json({ plan, ...coverage, ...await state() }) }
     }
     if (url.pathname === "/api/event-calendar/google-sync") return json({ success: true, updated: 0, inserted: 0, deleted: 0, queued: 0 })
     if (url.pathname === "/api/event-calendar/recover-missing" && method === "POST" && h.recoveryResult) {
       // Status/layout only. The actual API/CAS logic is exercised independently
       // by calendar-recovery.test.ts; no real history, writes or jobs run here.
-      return json({ ...h.recoveryResult, restoredEvents: [], ...state() })
+      return json({ ...h.recoveryResult, restoredEvents: [], ...await state() })
     }
     if (url.pathname === "/api/event-calendar/google-events") {
       const dates = googleMeetingRoomDates({ startDate: addCalendarDays(today, -1), endDate: addCalendarDays(today, -1), title: "23:30-01:00 EXISTING OVERNIGHT BOOKING" })

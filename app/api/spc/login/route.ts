@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { browserSessionActorKey } from "@/lib/browserSessionOwner"
 import {
   clearSpcSession,
   setSpcSession,
@@ -393,6 +394,7 @@ export async function POST(request: Request) {
     {
       success: true,
       user: {
+        actorKey: browserSessionActorKey("spc", user.id),
         username: user.username,
         displayName: user.displayName || user.username,
         role: user.role,

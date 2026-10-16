@@ -1,19 +1,17 @@
 "use client"
 
-import { createContext, createElement, useContext, useEffect, useState } from "react"
+import { createContext, createElement, Fragment, useContext, useEffect, useState } from "react"
 import type { ReactNode } from "react"
-import {
-  ADMIN_PAGE_DEFINITIONS,
-  normaliseAdminPagePermissions,
-  type AdminPageDefinition,
-  type AdminPagePermissionMap,
-} from "@/lib/adminPages"
+import { ADMIN_PAGE_DEFINITIONS, normaliseAdminPagePermissions, type AdminPageDefinition, type AdminPagePermissionMap } from "@/lib/adminPages"
 import { normaliseAdminPageDefinitions } from "@/lib/adminPageRegistry"
-import { readClientStorage, removeClientStorage, writeClientStorage } from "@/lib/clientStorage"
+import { removeClientStorage, writeClientStorage } from "@/lib/clientStorage"
+import { clearAdminClientCache } from "@/lib/adminClientCache"
+import { browserSessionOwnerKey, createBrowserSessionStore, parseBrowserSessionPayload, type BrowserSessionPayload } from "@/lib/clientSessionStore"
 
 type AuthState = {
   loading: boolean
   authenticated: boolean
+  actorKey: string | null
   resetRequired: boolean
   username: string | null
   displayName: string | null
@@ -22,151 +20,119 @@ type AuthState = {
   pages: AdminPageDefinition[]
 }
 
-type AdminSessionPayload = {
-  authenticated?: boolean
-  resetRequired?: boolean
-  username?: string | null
-  displayName?: string | null
-  role?: string | null
-  permissions?: AdminPagePermissionMap
-  pages?: AdminPageDefinition[]
-}
-
 const AdminAuthContext = createContext<AuthState | null>(null)
+const ADMIN_ACTOR_STORAGE_KEY = "bunker_admin_actor"
+const ADMIN_SESSION_CHANGED_EVENT = "fcuno-admin-session-changed"
+const adminSessionStore = createBrowserSessionStore("/api/admin/session", 5000)
 
-let sharedSessionPromise: Promise<AdminSessionPayload> | null = null
-let sharedSessionResult: { data: AdminSessionPayload; loadedAt: number } | null = null
-
-function loadAdminSession() {
-  if (sharedSessionResult && Date.now() - sharedSessionResult.loadedAt < 5000) {
-    return Promise.resolve(sharedSessionResult.data)
+function persistAdminActor(data: BrowserSessionPayload) {
+  if (!data.authenticated || !data.username) {
+    removeClientStorage(ADMIN_ACTOR_STORAGE_KEY)
+    return
   }
-  if (sharedSessionPromise) return sharedSessionPromise
-
-  sharedSessionPromise = fetch("/api/admin/session", { cache: "no-store" })
-    .then(async (response) => {
-      if (!response.ok) throw new Error("Unable to load admin session.")
-      const data = (await response.json()) as AdminSessionPayload
-      sharedSessionResult = { data, loadedAt: Date.now() }
-      return data
-    })
-    .finally(() => {
-      sharedSessionPromise = null
-    })
-
-  return sharedSessionPromise
+  writeClientStorage(ADMIN_ACTOR_STORAGE_KEY, JSON.stringify({
+    actorKey: data.actorKey, username: data.username, displayName: data.displayName || data.username,
+    role: data.role, resetRequired: data.resetRequired === true,
+    permissions: data.permissions, pages: data.pages,
+  }))
 }
 
-function readCachedAdminActor(): AdminSessionPayload | null {
-  if (typeof window === "undefined") return null
+export function clearAdminClientSessionCache() {
+  adminSessionStore.invalidate()
+  clearAdminClientCache()
+  removeClientStorage(ADMIN_ACTOR_STORAGE_KEY)
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(ADMIN_SESSION_CHANGED_EVENT))
+}
 
-  try {
-    const raw = readClientStorage("bunker_admin_actor")
-    if (!raw) return null
-    const actor = JSON.parse(raw) as AdminSessionPayload
-    if (!actor.username) return null
-    return { ...actor, authenticated: true }
-  } catch {
-    return null
-  }
+export function primeAdminClientSessionCache(value: unknown) {
+  const data = adminSessionStore.prime(value)
+  clearAdminClientCache()
+  persistAdminActor(data)
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(ADMIN_SESSION_CHANGED_EVENT))
+}
+
+function signedOutState(loading = false): AuthState {
+  return { loading, authenticated: false, actorKey: null, resetRequired: false, username: null,
+    displayName: null, role: null, permissions: normaliseAdminPagePermissions(null), pages: ADMIN_PAGE_DEFINITIONS }
 }
 
 function useSimpleAdminAuthState(): AuthState {
-  const [loading, setLoading] = useState(true)
-  const [authenticated, setAuthenticated] = useState(false)
-  const [resetRequired, setResetRequired] = useState(false)
-  const [username, setUsername] = useState<string | null>(null)
-  const [displayName, setDisplayName] = useState<string | null>(null)
-  const [role, setRole] = useState<string | null>(null)
-  const [permissions, setPermissions] = useState<AdminPagePermissionMap>(
-    normaliseAdminPagePermissions(null)
-  )
-  const [pages, setPages] = useState<AdminPageDefinition[]>(ADMIN_PAGE_DEFINITIONS)
-
+  const [state, setState] = useState<AuthState>(() => signedOutState(true))
   useEffect(() => {
-    const cachedActor = readCachedAdminActor()
+    let active = true
+    let requestSequence = 0
+    let ownerKey = "signed-out"
 
-    function applySession(data: AdminSessionPayload) {
-      const isAuthenticated = Boolean(data.authenticated)
-      const requiresPasswordReset =
-        isAuthenticated && data.resetRequired === true
-      const nextUsername = typeof data.username === "string" ? data.username : null
-      const nextDisplayName =
-        typeof data.displayName === "string" ? data.displayName : nextUsername
-      const nextRole = typeof data.role === "string" ? data.role : null
-      const nextPages = normaliseAdminPageDefinitions(data.pages)
-      const nextPermissions = normaliseAdminPagePermissions(
-        data.permissions,
-        "none",
-        nextPages
-      )
-
-      setAuthenticated(isAuthenticated)
-      setResetRequired(requiresPasswordReset)
-      setUsername(isAuthenticated ? nextUsername : null)
-      setDisplayName(isAuthenticated ? nextDisplayName : null)
-      setRole(isAuthenticated ? nextRole : null)
-      setPermissions(isAuthenticated ? nextPermissions : normaliseAdminPagePermissions(null))
-      setPages(nextPages)
-      setLoading(false)
-
-      if (isAuthenticated && nextUsername) {
-        writeClientStorage(
-          "bunker_admin_actor",
-          JSON.stringify({
-            username: nextUsername,
-            displayName: nextDisplayName || nextUsername,
-            role: nextRole,
-            // Persist only a literal display flag, never credential material.
-            resetRequired: requiresPasswordReset ? true : false,
-            permissions: nextPermissions,
-            pages: nextPages,
-          })
-        )
-      } else {
-        removeClientStorage("bunker_admin_actor")
-      }
+    function applySession(data: BrowserSessionPayload, persist = true) {
+      if (!active) return
+      const pages = normaliseAdminPageDefinitions(data.pages)
+      const permissions = data.authenticated ? normaliseAdminPagePermissions(data.permissions, "none", pages) : normaliseAdminPagePermissions(null)
+      const next = { ...data, pages, permissions }
+      const nextOwner = browserSessionOwnerKey(next)
+      if (nextOwner !== ownerKey) clearAdminClientCache()
+      ownerKey = nextOwner
+      if (persist) persistAdminActor(next)
+      setState(data.authenticated ? {
+        loading: false, authenticated: true, actorKey: data.actorKey, resetRequired: data.resetRequired,
+        username: data.username, displayName: data.displayName, role: data.role, permissions, pages,
+      } : signedOutState())
     }
 
-    async function checkSession() {
+    async function checkSession(cacheMs = 5000) {
+      const sequence = ++requestSequence
+      const version = adminSessionStore.version()
       try {
-        const data = await loadAdminSession()
-        applySession(data)
+        const data = await adminSessionStore.load(cacheMs)
+        if (active && sequence === requestSequence && version === adminSessionStore.version()) applySession(data)
       } catch {
-        setAuthenticated(false)
-        setResetRequired(false)
-        setUsername(null)
-        setDisplayName(null)
-        setRole(null)
-        setPermissions(normaliseAdminPagePermissions(null))
-        setPages(ADMIN_PAGE_DEFINITIONS)
-        if (typeof window !== "undefined") {
-          removeClientStorage("bunker_admin_actor")
-        }
-      } finally {
-        setLoading(false)
+        if (!active || sequence !== requestSequence || version !== adminSessionStore.version()) return
+        // A temporary refresh failure does not undo a previously verified session.
+        if (!adminSessionStore.current()) applySession(parseBrowserSessionPayload({ authenticated: false }))
       }
     }
 
-    if (cachedActor) applySession(cachedActor)
-    void checkSession()
-  }, [])
+    function refreshActiveSession() { void checkSession(0) }
+    function handleVisibilityChange() { if (document.visibilityState === "visible") refreshActiveSession() }
+    function handleSessionChanged() {
+      requestSequence += 1
+      applySession(adminSessionStore.current() || parseBrowserSessionPayload({ authenticated: false }))
+    }
+    function handleStorage(event: StorageEvent) {
+      if (event.key !== null && event.key !== ADMIN_ACTOR_STORAGE_KEY) return
+      try {
+        if (event.newValue && browserSessionOwnerKey(parseBrowserSessionPayload({ ...JSON.parse(event.newValue), authenticated: true })) === ownerKey) return
+      } catch { /* A malformed/replaced actor is not proof of the current session. */ }
+      adminSessionStore.invalidate()
+      requestSequence += 1
+      clearAdminClientCache()
+      applySession(parseBrowserSessionPayload({ authenticated: false }), false)
+      void checkSession(0)
+    }
 
-  return {
-    loading,
-    authenticated,
-    resetRequired,
-    username,
-    displayName,
-    role,
-    permissions,
-    pages,
-  }
+    window.addEventListener(ADMIN_SESSION_CHANGED_EVENT, handleSessionChanged)
+    window.addEventListener("storage", handleStorage)
+    window.addEventListener("focus", refreshActiveSession)
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    const interval = window.setInterval(refreshActiveSession, 12 * 60 * 60 * 1000)
+    // Persisted display metadata is never accepted as a verified sign-in.
+    void checkSession()
+    return () => {
+      active = false
+      requestSequence += 1
+      window.removeEventListener(ADMIN_SESSION_CHANGED_EVENT, handleSessionChanged)
+      window.removeEventListener("storage", handleStorage)
+      window.removeEventListener("focus", refreshActiveSession)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+      window.clearInterval(interval)
+    }
+  }, [])
+  return state
 }
 
 export function SimpleAdminAuthProvider({ children }: { children: ReactNode }) {
   const state = useSimpleAdminAuthState()
-  return createElement(AdminAuthContext.Provider, { value: state }, children)
+  return createElement(AdminAuthContext.Provider, { value: state },
+    createElement(Fragment, { key: browserSessionOwnerKey(state) }, children))
 }
 
 export function useSimpleAdminAuth(): AuthState {

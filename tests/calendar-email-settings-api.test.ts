@@ -4,6 +4,7 @@ import test from "node:test"
 import { transformSync } from "esbuild"
 import ts from "typescript"
 import * as calendarStore from "../lib/eventCalendarStore"
+import * as calendarResponse from "../lib/eventCalendarResponse"
 import { EVENT_CALENDAR_PROTOCOL_VERSION } from "../lib/eventCalendarProtocol"
 import { validateCalendarEmailList, resolveEventCalendarRecipients } from "../lib/calendarRecipients"
 
@@ -41,6 +42,7 @@ function apiHarness(options: { payload?: Record<string, unknown>; permission?: "
     "@/lib/adminAudit": { createAdminAuditContext: () => ({}), createAdminAuditedSupabaseClient: () => client },
     "@/lib/eventCalendarStore": calendarStore,
     "@/lib/eventCalendarProtocol": { EVENT_CALENDAR_PROTOCOL_VERSION },
+    "@/lib/eventCalendarResponse": calendarResponse,
     "@/data/taskCalendar": {},
     "@/lib/taskCalendarStore": {},
     "@/lib/calendarStaff": {},
@@ -193,7 +195,9 @@ function editorHarness(options: { initial?: string; draft?: string; confirm?: bo
     emailRecipientsText: initial, settingVersions: { emailRecipientsText: version },
     validateCalendarEmailList, canEdit: true, SHARED_STORE_KEY: "event-calendar", EVENT_CALENDAR_PROTOCOL_VERSION,
     calendarMutationPendingRef: { current: false }, calendarStateSequenceRef: { current: 0 },
-    setCalendarMutationPending() {}, setSaveStatus() {}, setCalendarLoadError() {},
+    setCalendarMutationPending() {}, setSaveStatus() {}, setCalendarLoadError() {}, setCalendarRefreshError() {},
+    parseEventCalendarResponse: calendarResponse.parseEventCalendarResponse,
+    componentLifetimeRef: { current: { active: true, sequence: 1 } }, ownsCalendar: (owner: number) => owner === 1,
     setEmailModalOpen(value: boolean) { state.open = value }, setEmailRecipientsText(value: string) { state.saved = value },
     setDraftEmailRecipientsText(value: string) { state.draft = value },
     setDraftEmailRecipientsInitialText(value: string) { state.initialDraft = value },
@@ -204,7 +208,10 @@ function editorHarness(options: { initial?: string; draft?: string; confirm?: bo
       const body = JSON.parse(String(request.body))
       calls.push(body)
       const status = options.status ?? 200
-      return Response.json({ payload: { ...payload, ...body.settings }, eventVersions: {}, settingVersions: { emailRecipientsText: version }, ...(status === 200 ? {} : { message: "Synthetic conflict or save failure" }) }, { status })
+      const saved = { ...payload, ...body.settings }
+      return Response.json({ payload: saved, protocolVersion: EVENT_CALENDAR_PROTOCOL_VERSION,
+        eventVersions: calendarStore.getEventCalendarEventVersions(saved), settingVersions: calendarStore.getEventCalendarSettingVersions(saved), storeVersion: calendarStore.getEventCalendarStoreVersion(saved),
+        ...(status === 200 ? { success: true } : { message: "Synthetic conflict or save failure" }) }, { status })
     },
   }
   const page = readFileSync(new URL("../app/admin/eventcalendar/page.tsx", import.meta.url), "utf8")

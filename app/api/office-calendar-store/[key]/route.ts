@@ -18,6 +18,7 @@ import {
   mutateEventCalendarStore,
 } from "@/lib/eventCalendarStore"
 import { EVENT_CALENDAR_PROTOCOL_VERSION } from "@/lib/eventCalendarProtocol"
+import { validateEventCalendarPayload } from "@/lib/eventCalendarResponse"
 import { TASK_CALENDAR_PROTOCOL_VERSION, TaskCalendarValidationError, validateTaskCalendarTask } from "@/data/taskCalendar"
 import { getTaskCalendarVersions, mutateTaskCalendarStore, TaskCalendarConflictError } from "@/lib/taskCalendarStore"
 import { loadCalendarStaffDirectory, resolveCalendarStaffRecipients } from "@/lib/calendarStaff"
@@ -87,7 +88,9 @@ export async function GET(request: Request, context: { params: Promise<{ key: st
       .maybeSingle()
 
     if (error) throw error
-    const payload = data?.payload || null
+    const payload = storeKey === "event-calendar"
+      ? validateEventCalendarPayload(data?.payload ?? null)
+      : data?.payload || null
     return NextResponse.json({
       payload,
       updatedAt: data?.updated_at || null,
@@ -102,11 +105,11 @@ export async function GET(request: Request, context: { params: Promise<{ key: st
         taskVersions: getTaskCalendarVersions(payload),
         staff: await loadCalendarStaffDirectory(supabase),
       } : {}),
-    })
+    }, storeKey === "event-calendar" ? { headers: { "Cache-Control": "private, no-store" } } : undefined)
   } catch (error) {
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Could not load shared calendar data." },
-      { status: 500 }
+      { status: 500, ...(storeKey === "event-calendar" ? { headers: { "Cache-Control": "private, no-store" } } : {}) }
     )
   }
 }
