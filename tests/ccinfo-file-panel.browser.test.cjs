@@ -25,7 +25,7 @@ async function main() {
       builder.onLoad({ filter: /.*/, namespace: "fixture" }, args => ({ resolveDir: root, contents: args.path.endsWith("/supabase")
         ? 'import {createClient} from "@supabase/supabase-js"; export const supabase=createClient(location.origin,"synthetic-local-only",{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});'
         : args.path.endsWith("/useIsMobile") ? "export const useIsMobile=()=>innerWidth<768;"
-          : 'export const useSimpleAdminAuth=()=>({loading:false,authenticated:!new URL(location.href).searchParams.has("signedout")});' }))
+          : 'export const useSimpleAdminAuth=()=>({loading:false,authenticated:!new URL(location.href).searchParams.has("signedout"),username:"SYNTHETIC EDITOR",role:"ADMIN",permissions:{ccinfo:"edit"}});' }))
     } }],
   })
   const assets = new Map(bundle.outputFiles.map(file => [`/${basename(file.path)}`, file.contents]))

@@ -8,6 +8,11 @@ import { normaliseSpcRole } from "@/lib/spcPages"
 import {
   SPC_FEEDBACK_CATEGORIES,
   SPC_FEEDBACK_STATUSES,
+  SpcFeedbackError,
+  isSpcFeedbackId,
+  parseSpcFeedbackRecord,
+  spcFeedbackTimestampMicros,
+  verifySpcFeedbackReview,
   type SpcFeedbackCategory,
   type SpcFeedbackRecord,
   type SpcFeedbackStatus,
@@ -31,7 +36,7 @@ type SpcFeedbackRow = {
 }
 
 function mapFeedback(row: SpcFeedbackRow): SpcFeedbackRecord {
-  return {
+  return parseSpcFeedbackRecord({
     id: row.id,
     category: row.category,
     title: row.title,
@@ -44,14 +49,14 @@ function mapFeedback(row: SpcFeedbackRow): SpcFeedbackRecord {
     reviewedByDisplayName: row.reviewed_by_display_name || "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-  }
+  })
 }
 
 function cleanText(value: unknown, label: string, maximumLength: number, required = false) {
   const clean = typeof value === "string" ? value.trim() : ""
-  if (required && !clean) throw new Error(`${label} is required.`)
-  if (clean.length > maximumLength) throw new Error(`${label} is too long.`)
-  if (/\u0000/.test(clean)) throw new Error(`${label} is invalid.`)
+  if (required && !clean) throw new SpcFeedbackError(`${label} is required.`)
+  if (clean.length > maximumLength) throw new SpcFeedbackError(`${label} is too long.`)
+  if (/\u0000/.test(clean)) throw new SpcFeedbackError(`${label} is invalid.`)
   return clean
 }
 
@@ -70,7 +75,8 @@ export async function loadSpcFeedback(session: SpcSession, context: SpcAuditCont
 
   const { data, error } = await query
   if (error) throw error
-  return ((data || []) as SpcFeedbackRow[]).map(mapFeedback)
+  if (!Array.isArray(data)) throw new SpcFeedbackError("Feedback could not be loaded. Please try again.", 503)
+  return (data as SpcFeedbackRow[]).map(mapFeedback)
 }
 
 export async function createSpcFeedback(
@@ -81,7 +87,7 @@ export async function createSpcFeedback(
   if (!session.userId || !session.username) throw new Error("Unauthorized")
   const category = cleanText(input.category, "Category", 40, true).toUpperCase()
   if (!SPC_FEEDBACK_CATEGORIES.includes(category as SpcFeedbackCategory)) {
-    throw new Error("Category is invalid.")
+    throw new SpcFeedbackError("Category is invalid.")
   }
 
   const context = createSpcAuditContext(session, request, "spc-feedback", {
@@ -109,15 +115,23 @@ export async function createSpcFeedback(
 export async function reviewSpcFeedback(
   session: SpcSession,
   request: Request,
-  input: { id?: unknown; status?: unknown; adminResponse?: unknown },
+  input: { id?: unknown; status?: unknown; adminResponse?: unknown; expectedUpdatedAt?: unknown },
 ) {
   if (!session.userId || !session.username) throw new Error("Unauthorized")
   if (normaliseSpcRole(session.role) !== "ADMIN") throw new Error("Forbidden")
-  const id = cleanText(input.id, "Feedback record", 64, true)
+  const id = cleanText(input.id, "Feedback record", 64, true).toLowerCase()
+  if (!isSpcFeedbackId(id)) throw new SpcFeedbackError("Feedback record is invalid.")
+  if (input.expectedUpdatedAt === undefined || input.expectedUpdatedAt === null || input.expectedUpdatedAt === "") {
+    throw new SpcFeedbackError("Refresh this feedback before saving its review.", 409)
+  }
+  spcFeedbackTimestampMicros(input.expectedUpdatedAt)
+  // The parser above verifies this string without normalizing its precision.
+  const expectedUpdatedAt = input.expectedUpdatedAt as string
   const status = cleanText(input.status, "Status", 40, true).toUpperCase()
   if (!SPC_FEEDBACK_STATUSES.includes(status as SpcFeedbackStatus)) {
-    throw new Error("Status is invalid.")
+    throw new SpcFeedbackError("Status is invalid.")
   }
+  const adminResponse = cleanText(input.adminResponse, "Response", 2000)
 
   const context = createSpcAuditContext(session, request, "spc-feedback", {
     action: "review-feedback",
@@ -129,15 +143,21 @@ export async function reviewSpcFeedback(
     .from("spc_feedback")
     .update({
       status,
-      admin_response: cleanText(input.adminResponse, "Response", 2000),
+      admin_response: adminResponse,
       reviewed_by_username: session.username,
       reviewed_by_display_name: session.displayName || session.username,
     })
     .eq("id", id)
+    .eq("updated_at", expectedUpdatedAt)
     .select("*")
-    .single()
+    .maybeSingle()
   if (error) throw error
-  return mapFeedback(data as SpcFeedbackRow)
+  if (!data) throw new SpcFeedbackError("This feedback has changed. Refresh before saving your review.", 409)
+  const row = data as SpcFeedbackRow
+  if (row.reviewed_by_username !== session.username || row.reviewed_by_display_name !== (session.displayName || session.username)) {
+    throw new SpcFeedbackError("The saved review could not be verified. Refresh before trying again.", 503)
+  }
+  return verifySpcFeedbackReview(mapFeedback(row), { id, expectedUpdatedAt, status: status as SpcFeedbackStatus, adminResponse })
 }
 
 export function createSpcFeedbackReadContext(session: SpcSession, request: Request) {

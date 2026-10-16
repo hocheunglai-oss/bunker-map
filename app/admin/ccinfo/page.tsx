@@ -10,6 +10,8 @@ import SimpleTable from "@/components/ccinfo/SimpleTable"
 import BcCalculator from "@/components/ccinfo/BcCalculator"
 import { normalizeBcCalculator, type BcCalculatorValues } from "@/lib/bcCalculator"
 import { CcinfoSaveConflict, createCcinfoSaveQueue, type CcinfoRecordChanges } from "@/lib/ccinfoSave"
+import { deleteCcinfoRecord } from "@/lib/ccinfoDelete"
+import { isAdminRole } from "@/lib/adminPages"
 
 type RecordKind = "company" | "country" | "port"
 
@@ -1248,8 +1250,25 @@ function AutoSizeTextarea({
   )
 }
 
+function createRecordLifetime() {
+  let active = true
+  return { isActive: () => active, activate: () => { active = true }, deactivate: () => { active = false } }
+}
+
 export default function CountryCompanyInfoPage() {
-  const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
+  const auth = useSimpleAdminAuth()
+  const permission = isAdminRole(auth.role) ? "edit" : auth.permissions?.ccinfo || "none"
+  if (auth.loading) return <p style={{ padding: 40 }}>Loading...</p>
+  if (!auth.authenticated || auth.resetRequired || permission === "none") return <p style={{ padding: 40 }}>Access Denied</p>
+  // A live identity/permission change remounts ALL record-local refs/state.
+  // Old asynchronous callbacks then belong only to the unmounted old owner.
+  const owner = JSON.stringify([auth.username, auth.role, permission])
+  return <CountryCompanyInfoContent key={owner} readOnly={permission !== "edit"} />
+}
+
+function CountryCompanyInfoContent({ readOnly }: { readOnly: boolean }) {
+  const adminLoading = false
+  const authenticated = true
   const isMobile = useIsMobile()
   const filePickerRef = useRef<HTMLInputElement | null>(null)
   const suggestionRefs = useRef<Array<HTMLButtonElement | null>>([])
@@ -1301,6 +1320,7 @@ export default function CountryCompanyInfoPage() {
   const [recordNameDraft, setRecordNameDraft] = useState("")
   const [recordRenameError, setRecordRenameError] = useState("")
   const [recordRenaming, setRecordRenaming] = useState(false)
+  const [recordDeleting, setRecordDeleting] = useState(false)
   const [addPortModalOpen, setAddPortModalOpen] = useState(false)
   const [addPortDraft, setAddPortDraft] = useState({ name: "", notes: "", countryId: "", countryName: "" })
   const [sectionSaving, setSectionSaving] = useState(false)
@@ -1331,13 +1351,20 @@ export default function CountryCompanyInfoPage() {
   const mainSectionEditStartRef = useRef<Record<number, HighlightCard>>({})
   const nestedSectionEditStartRef = useRef<Record<string, HighlightCard>>({})
   const recordRenamePendingRef = useRef(false)
+  const recordDeletePendingRef = useRef(false)
   const fileMutationLocksRef = useRef(new Set<string>())
   const filePanelRefreshGenerationRef = useRef(0)
   const recordOwnerRef = useRef(0)
+  const [recordLifetime] = useState(createRecordLifetime)
+  useLayoutEffect(() => {
+    recordLifetime.activate()
+    return () => { recordLifetime.deactivate(); recordOwnerRef.current += 1 }
+  }, [recordLifetime])
   const [renderOwner, setRenderOwner] = useState(0)
   const setMessage = (value: string) => { if (recordOwnerRef.current === renderOwner) setPageMessage(value) }
   const setSaving = (value: boolean) => { if (recordOwnerRef.current === renderOwner) setPageSaving(value) }
   const saveQueueRef = useRef(createCcinfoSaveQueue(async (target, version, changes) => {
+    if (!recordLifetime.isActive()) throw new Error("This entry is no longer open. No queued changes were submitted.")
     if (target.kind === "country" && Object.keys(changes).length === 1 && typeof changes.name === "string") {
       const uncertainMessage = "The rename could not be confirmed. Your text is still here. Please try Save again before reopening this entry."
       const controller = new AbortController()
@@ -2337,7 +2364,7 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function loadSelected(kind: RecordKind, id: string) {
-    if (saveQueueRef.current.pending()) {
+    if (saveQueueRef.current.pending() || recordRenamePendingRef.current) {
       setPageMessage("Please wait for the current save before opening another entry. Your edits are still here.")
       return false
     }
@@ -2367,6 +2394,10 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function createNew(kind: RecordKind) {
+    if (recordRenamePendingRef.current || saveQueueRef.current.pending()) {
+      setMessage("Wait for the current entry action before creating another entry.")
+      return
+    }
     setMenuOpen(false)
     setMessage("")
     if (kind === "company") {
@@ -2507,30 +2538,44 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function deleteRecord() {
+    if (readOnly) return
     if (recordRenamePendingRef.current) return
-    if (!selectedId || !selectedKind) return
-    if (!confirm(`Delete ${currentRecord.name}?`)) return
+    if (!selectedId || !selectedKind || recordLoading || currentRecord.id !== selectedId || recordOwnerRef.current !== renderOwner) return
+    if (saveQueueRef.current.pending() || fileMutationLocksRef.current.size || uploadingFile) {
+      setMessage("Wait for the current save or upload before deleting. Your draft is still here.")
+      return
+    }
+    const owner = recordOwnerRef.current
+    const target = { kind: selectedKind, id: selectedId, expectedUpdatedAt: currentRecord.updated_at || "", deletePorts: false }
+    recordRenamePendingRef.current = true
+    recordDeletePendingRef.current = true
+    setRecordDeleting(true)
+    setRecordRenameError("")
     try {
-      if (selectedKind === "country") {
+      if (!confirm(`Delete ${currentRecord.name}?`)) return
+      if (target.kind === "country") {
         const deletePorts = confirm(`Also delete all ports under ${currentRecord.name}?`)
         if (deletePorts) {
           const extraWarning = confirm(`Final warning: this will permanently delete ${currentRecord.name} and all ports under this country. Continue?`)
           if (!extraWarning) return
-          const { error: portError } = await supabase
-            .from("cc_ports")
-            .delete()
-            .or(buildPostgrestCountryMatchFilter(selectedId, currentRecord.name, "eq"))
-          if (portError) throw portError
+          target.deletePorts = true
         }
       }
-      const table = selectedKind === "company" ? "cc_companies" : selectedKind === "country" ? "cc_countries" : "cc_ports"
-      const { error } = await supabase.from(table).delete().eq("id", selectedId)
-      if (error) throw error
+      if (recordOwnerRef.current !== owner) return
+      await deleteCcinfoRecord(target)
+      if (recordOwnerRef.current !== owner) return
       setMessage("Deleted.")
       setRecordModalOpen(false)
       resetSelection()
-    } catch {
-      setMessage("Unable to delete.")
+    } catch (error) {
+      if (recordOwnerRef.current !== owner) return
+      const failure = error instanceof Error ? error.message : "The deletion could not be confirmed. Your draft is still here."
+      setRecordRenameError(failure)
+      setMessage(failure)
+    } finally {
+      recordRenamePendingRef.current = false
+      recordDeletePendingRef.current = false
+      setRecordDeleting(false)
     }
   }
 
@@ -2583,7 +2628,7 @@ export default function CountryCompanyInfoPage() {
   }
 
   async function persistContent(parts: Partial<typeof contentState>, changes: CcinfoRecordChanges = {}) {
-    if (!selectedId || !selectedKind || recordLoading || currentRecord.id !== selectedId || recordOwnerRef.current !== renderOwner) throw new Error("Wait for this entry to finish loading before saving.")
+    if (!selectedId || !selectedKind || recordLoading || currentRecord.id !== selectedId || recordOwnerRef.current !== renderOwner || recordDeletePendingRef.current) throw new Error("Wait for the current entry action before saving. Your draft is still here.")
     const owner = recordOwnerRef.current
     const countryAtSave = { id: currentCountry.id, name: currentCountry.name }
     Object.assign(contentDraftRef.current, parts)
@@ -2748,7 +2793,7 @@ export default function CountryCompanyInfoPage() {
   }
 
   function beginFileMutation() {
-    if (!selectedKind || !selectedId || recordLoading || recordOwnerRef.current !== renderOwner) return null
+    if (!selectedKind || !selectedId || recordLoading || recordOwnerRef.current !== renderOwner || recordDeletePendingRef.current) return null
     const key = `${selectedKind}:${selectedId}`
     if (fileMutationLocksRef.current.has(key)) {
       setMessage("Please wait for the current file change to finish before starting another one. You can keep browsing other entries.")
@@ -4686,7 +4731,7 @@ export default function CountryCompanyInfoPage() {
               <div style={{ fontSize: "12px", color: "var(--fc-admin-muted)", marginBottom: "6px" }}>{mainLabel}</div>
               <input
                 value={recordNameDraft}
-                disabled={recordRenaming}
+                disabled={recordRenaming || recordDeleting}
                 onChange={(event) => setRecordNameDraft(event.target.value.toUpperCase())}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
@@ -4699,22 +4744,22 @@ export default function CountryCompanyInfoPage() {
                 autoFocus
               />
             </div>
-            {recordRenameError && <div role="alert" style={{ color: "var(--fc-admin-danger-text)", fontSize: "12px", lineHeight: 1.5 }}>{recordRenameError}</div>}
+            {recordRenameError && <div role="alert" style={{ color: "var(--fc-admin-danger-bg)", fontSize: "12px", lineHeight: 1.5 }}>{recordRenameError}</div>}
             <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
               <button
                 type="button"
                 onClick={() => void deleteRecord()}
-                disabled={!selectedId || recordRenaming}
+                disabled={readOnly || !selectedId || recordRenaming || recordDeleting}
                 style={{ ...buttonStyle, background: "var(--fc-admin-danger-bg)", color: "var(--fc-admin-danger-text)", border: "1px solid var(--fc-admin-danger-border)" }}
               >
-                {recordDeleteLabel}
+                {recordDeleting ? "Deleting…" : recordDeleteLabel}
               </button>
               <div style={{ display: "flex", gap: "8px" }}>
-                <button type="button" onClick={closeRecordModal} disabled={recordRenaming} style={buttonStyle}>Cancel</button>
+                <button type="button" onClick={closeRecordModal} disabled={recordRenaming || recordDeleting} style={buttonStyle}>Cancel</button>
                 <button
                   type="button"
                   onClick={() => void saveRecordNameFromModal()}
-                  disabled={recordRenaming || saving || !recordNameDraft.trim()}
+                  disabled={recordRenaming || recordDeleting || saving || !recordNameDraft.trim()}
                   style={{ ...buttonStyle, background: "var(--fc-admin-success-bg)", color: "var(--fc-admin-success-text)", border: "1px solid var(--fc-admin-success-border)" }}
                 >
                   {saving ? "Saving" : "Save"}

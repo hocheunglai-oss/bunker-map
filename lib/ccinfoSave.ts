@@ -53,7 +53,9 @@ const RECORD_TABLES = new Set(["cc_companies", "cc_countries", "cc_ports"])
 
 /** Old tabs must not bypass the version check through the privileged database proxy. */
 export function ccinfoLegacyContentWriteMessage(pageId: string, table: string, method: string, target: URL, prefer: string | null, body: ArrayBuffer | undefined) {
-  if (pageId !== "ccinfo" || !RECORD_TABLES.has(table) || method !== "PATCH" || !body) return null
+  if (pageId !== "ccinfo" || !RECORD_TABLES.has(table)) return null
+  if (method === "DELETE") return "Refresh this page before deleting. No entry was deleted; your current draft is still here."
+  if (method !== "PATCH" || !body) return null
   let payload: unknown
   try { payload = JSON.parse(new TextDecoder().decode(body)) } catch { return null }
   const refresh = "Refresh this page before saving. Your edits have not been saved; copy them first."

@@ -75,7 +75,7 @@ async function main() {
           contents: args.path.endsWith("/supabase")
             ? 'import { createClient } from "@supabase/supabase-js"; export const supabase = createClient(location.origin, "synthetic-local-only-key", { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });'
             : args.path.endsWith("/useSimpleAdminAuth")
-              ? "export const useSimpleAdminAuth = () => ({ loading: false, authenticated: true });"
+              ? 'export const useSimpleAdminAuth = () => ({ loading: false, authenticated: true, username:"SYNTHETIC EDITOR",role:"ADMIN",permissions:{ccinfo:"edit"} });'
               : "export const useIsMobile = () => false;",
         }))
       },

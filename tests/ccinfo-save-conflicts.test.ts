@@ -93,12 +93,13 @@ test("CCINFO proxy blocks old/unversioned content writes and accepts bounded ret
   assert.ok(check(repeated))
 })
 
-test("CCINFO guard leaves other pages, file/folder writes, inserts and deletes unchanged", () => {
+test("CCINFO guard preserves other pages, file/folder deletes and inserts, but fences legacy record deletion", () => {
   const content = new TextEncoder().encode(JSON.stringify({ notes: "changed" })).buffer
   const url = new URL("https://example.test/rest/v1/cc_ports")
-  for (const [page, table, method, body] of [["phonebook", "cc_ports", "PATCH", content], ["ccinfo", "cc_entry_files", "PATCH", content], ["ccinfo", "cc_ports", "POST", content], ["ccinfo", "cc_ports", "DELETE", content]] as const) {
+  for (const [page, table, method, body] of [["phonebook", "cc_ports", "PATCH", content], ["ccinfo", "cc_entry_files", "PATCH", content], ["ccinfo", "cc_ports", "POST", content], ["ccinfo", "cc_entry_files", "DELETE", content], ["ccinfo", "cc_entry_folders", "DELETE", content]] as const) {
     assert.equal(ccinfoLegacyContentWriteMessage(page, table, method, url, null, body), null)
   }
+  for (const table of ["cc_companies","cc_countries","cc_ports"]) assert.ok(ccinfoLegacyContentWriteMessage("ccinfo",table,"DELETE",url,null,undefined))
 })
 
 test("country names require atomic rename; legacy bulk cascades fail closed but versioned port reparenting still works", () => {
