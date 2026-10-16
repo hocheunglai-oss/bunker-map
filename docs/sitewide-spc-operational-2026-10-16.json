@@ -1,0 +1,37 @@
+{
+  "schema": "fcuno.sitewide-spc-operational-review/v1",
+  "date": "2026-10-16",
+  "baseline": "015a5a4588f263df5e5ae4746a70bc582b45a3a6",
+  "scope": [
+    "SPC System Health and Tech Stack read/retry/response ownership",
+    "Daily Briefing previous-vessel matching",
+    "Cancelled Lost Record read permission"
+  ],
+  "corrections": [
+    "Health refresh failure explicitly marks the last successful check stale; later cache hits retain that disclosure until a new check succeeds. The page shows UNKNOWN rather than presenting old green checks as current.",
+    "Health checks have a bounded15-second server deadline and reject unverified table counts instead of manufacturing zero. Fresh/cached/stale attempt metadata uses one captured start timestamp for every check.",
+    "Both operational pages validate responses, retain only previously loaded data on transient failure, provide refresh/retry, clear private data on401/403 or account/access change, and fence ignored-abort fetch and body completions. Client deadlines are30seconds.",
+    "SPC Tech Stack uses canonical connection identifiers and clearly labels masked environment values as presence only, not credential validation. Both API success and error responses are private/no-store.",
+    "Operational text and database identifiers wrap on narrow screens; the existing service table remains horizontally scrollable with its final column reachable.",
+    "Historical candidates retain their own identity keys. Different known IMOs cannot match through a shared vessel name; exact IMO priority and the existing missing-IMO name fallback are preserved.",
+    "Lost Record View/Edit authorizes cancelled-record reads without an unrelated New Enquiry permission. That scope accepts only unique scope/status/limit parameters and cannot expand to open/all feeds, bootstrap or incremental cursors. Own and shared Speed Board permissions/filters are unchanged."
+  ],
+  "regressions": {
+    "operationalApi": "Actual route/cache/private response helpers and actual Supabase SDK, synthetic clock/actor/HEAD transport. Includes advancing clock, cached failure disclosure, auth-before-cache, invalid counts, coalescing and ignored-abort server deadline.",
+    "operationalBrowser": "Actual pages, SPC shell and global CSS. Chromium/WebKit,320/390/1440, light/dark OS preferences, View/Edit/none/signed-out, malformed/error/access responses, actor replacement, deferred JSON, ignored-abort timeout, table scrolling and long identifiers. Only the shipped30-second deadline is clock-scaled in the isolated fixture.",
+    "historicalApi": "Actual Today route/library/identity predicate, synthetic identity/transport. Conflicting known IMOs in both previous fixtures and lost records, rename/legacy fallback, strictly earlier history, Hong Kong day boundaries and no internal identity metadata leakage.",
+    "listPermissionApi": "Actual enquiries GET/scope/normalizer/mapper with synthetic auth and read transport; separate Lost/own/shared/legacy-shared/none/unsigned boundaries and13 unsupported records shapes.",
+    "ci": "Permanent response/API and operational-browser checks added without removing existing calendar/session, audit or security checks. Production dependencies must pass; only the already-standing development-only braces advisory may remain."
+  },
+  "unchanged": [
+    "No migration, dependency, credential, actual account permission, provider, email, scheduled job, federation contract or OIDC/synchronization implementation change.",
+    "No live enquiry, fixture, lost record or other business-data write. No personal browser tab was navigated or modified."
+  ],
+  "stillOpen": [
+    "Lost Record/Daily Briefing still have250-row lists and global1000-row historical cutoffs; complete pagination and targeted historical reads need a separate tested implementation.",
+    "Daily Briefing and Lost Record list/draft refresh ownership and false-empty states remain a separate repair scope.",
+    "Canonical account/group atomic changes and SPC user metadata changes remain held separately for writer drain/rollout compatibility; this ordinary read-page release does not waive those safeguards or establish a cross-project federation mutex.",
+    "Signed-in behavior is exercised with isolated synthetic identities and real components/routes. This does not certify a physical iPhone/Safari or a signed-in production mutation. Static service descriptions are repository descriptions, not proof of every external integration's current health.",
+    "The broad sitewide-debug goal is not complete. This record describes only this bounded batch; immutable release and live-verification receipts are maintained separately."
+  ]
+}

@@ -1,12 +1,14 @@
-import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { requireSpcPagePermission } from "@/lib/spcAuth"
 import { getEmailNoticeConfigStatus } from "@/lib/emailNotice"
 import { timedJson } from "@/lib/serverTiming"
+import { spcPrivateJson } from "@/lib/spcResponse"
+import { fcunoConnectionPolicy } from "@/config/fcunoConnections"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
 const HEALTH_CACHE_MS = 60_000
+const HEALTH_TIMEOUT_MS = 15_000
 
 type HealthStatus = "ok" | "warning" | "error"
 
@@ -40,20 +42,20 @@ function getHealthSupabaseClient() {
   )
 }
 
-async function countRows(supabase: ReturnType<typeof getHealthSupabaseClient>, table: string) {
-  const { count, error } = await supabase.from(table).select("id", { count: "exact", head: true })
+async function countRows(supabase: ReturnType<typeof getHealthSupabaseClient>, table: string, signal: AbortSignal) {
+  const { count, error } = await supabase.from(table).select("id", { count: "exact", head: true }).abortSignal(signal)
   if (error) throw error
-  return count || 0
+  if (count === null || !Number.isSafeInteger(count) || count < 0) throw new Error("A table count could not be verified.")
+  return count
 }
 
-async function getSpcHealth() {
-  const checkedAt = new Date().toISOString()
+async function getSpcHealth(signal: AbortSignal, checkedAt: string) {
   const supabase = getHealthSupabaseClient()
   const emailNotice = getEmailNoticeConfigStatus()
   const [users, enquiries, fixtures] = await Promise.all([
-    countRows(supabase, "spc_users"),
-    countRows(supabase, "spc_enquiries"),
-    countRows(supabase, "spc_fixtures"),
+    countRows(supabase, "spc_users", signal),
+    countRows(supabase, "spc_enquiries", signal),
+    countRows(supabase, "spc_fixtures", signal),
   ])
   const checks = [
     {
@@ -84,9 +86,9 @@ async function getSpcHealth() {
       id: "spc-domain",
       label: "SPC DOMAIN",
       status: "ok" as const,
-      message: "spc.fcuno.com is served by this Vercel project",
+      message: "Configured SPC domain; this is not a live DNS check",
       checkedAt,
-      details: { domain: "spc.fcuno.com" },
+      details: { domain: new URL(fcunoConnectionPolicy.vercel.productionOrigins[1]).hostname },
     },
     {
       id: "spc-speedboard-update-email",
@@ -94,7 +96,7 @@ async function getSpcHealth() {
       status: emailNotice.missing.length ? "warning" as const : "ok" as const,
       message: emailNotice.missing.length
         ? "Exchange notice email configuration incomplete"
-        : "Exchange notice email configured",
+        : "Exchange notice email settings present; delivery is not tested",
       checkedAt,
       details: {
         sender: emailNotice.from,
@@ -113,29 +115,46 @@ async function getSpcHealth() {
 }
 
 type SpcHealth = Awaited<ReturnType<typeof getSpcHealth>>
-let cachedHealth: { value: SpcHealth; expiresAt: number } | null = null
-let healthPromise: Promise<SpcHealth> | null = null
+type HealthResult = { value: SpcHealth & { freshness: { state: "fresh" | "cached" | "stale"; attemptedAt: string } }; cacheStatus: "fresh" | "cached" | "stale" }
+let cachedHealth: { value: SpcHealth; expiresAt: number; failedAttemptAt?: string } | null = null
+let healthPromise: Promise<HealthResult> | null = null
+
+function result(value: SpcHealth, state: "fresh" | "cached" | "stale", attemptedAt: string): HealthResult {
+  return { value: { ...value, freshness: { state, attemptedAt } }, cacheStatus: state }
+}
 
 async function loadHealth(forceRefresh: boolean) {
   if (!forceRefresh && cachedHealth && cachedHealth.expiresAt > Date.now()) {
-    return { value: cachedHealth.value, cacheStatus: "hit" as const }
+    return result(cachedHealth.value, cachedHealth.failedAttemptAt ? "stale" : "cached", cachedHealth.failedAttemptAt || new Date().toISOString())
   }
   if (healthPromise) {
-    return { value: await healthPromise, cacheStatus: "deduped" as const }
+    return healthPromise
   }
 
-  const stale = cachedHealth?.value || null
-  healthPromise = getSpcHealth()
-  try {
-    const value = await healthPromise
-    cachedHealth = { value, expiresAt: Date.now() + HEALTH_CACHE_MS }
-    return { value, cacheStatus: forceRefresh ? "refresh" as const : "miss" as const }
-  } catch (error) {
-    if (stale) return { value: stale, cacheStatus: "stale" as const }
-    throw error
-  } finally {
-    healthPromise = null
-  }
+  const attemptedAt = new Date().toISOString()
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  healthPromise = (async () => {
+    try {
+      const deadline = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => {
+        controller.abort()
+        reject(new Error("SPC health check timed out."))
+      }, HEALTH_TIMEOUT_MS) })
+      const value = await Promise.race([getSpcHealth(controller.signal, attemptedAt), deadline])
+      cachedHealth = { value, expiresAt: Date.now() + HEALTH_CACHE_MS }
+      return result(value, "fresh", attemptedAt)
+    } catch (error) {
+      if (cachedHealth) {
+        cachedHealth.failedAttemptAt = attemptedAt
+        return result(cachedHealth.value, "stale", attemptedAt)
+      }
+      throw error
+    } finally {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  })()
+  try { return await healthPromise } finally { healthPromise = null }
 }
 
 export async function GET(request: Request) {
@@ -153,7 +172,7 @@ export async function GET(request: Request) {
     )
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load SPC system health."
-    return NextResponse.json(
+    return spcPrivateJson(
       { message },
       { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 },
     )

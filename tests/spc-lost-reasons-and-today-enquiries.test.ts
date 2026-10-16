@@ -11,6 +11,7 @@ import {
   SPC_PAGE_DEFINITIONS,
 } from "../lib/spcPages"
 import { firstPreviousSpcIdentityMatch } from "../lib/spcTodayEnquiries"
+import { addSpcHistoricalMatch, type SpcHistoricalMatch } from "../lib/spcVesselIdentity"
 
 function source(path: string) {
   return readFileSync(new URL(path, import.meta.url), "utf8")
@@ -130,10 +131,13 @@ test("Daily Briefing is chronological, matches IMO before vessel, and supports b
 })
 
 test("Daily Briefing prefers an earlier IMO match over a newer vessel-name match", () => {
-  const matches = new Map([
-    ["imo:1234567", [{ at: Date.parse("2026-08-20T01:00:00Z"), value: "IMO MATCH" }]],
-    ["vessel:test vessel", [{ at: Date.parse("2026-08-20T02:00:00Z"), value: "VESSEL MATCH" }]],
-  ])
+  const matches = new Map<string, SpcHistoricalMatch<string>[]>()
+  addSpcHistoricalMatch(matches, ["imo:1234567", "vessel:renamed vessel"], {
+    at: Date.parse("2026-08-20T01:00:00Z"), value: "IMO MATCH",
+  })
+  addSpcHistoricalMatch(matches, ["vessel:test vessel"], {
+    at: Date.parse("2026-08-20T02:00:00Z"), value: "VESSEL MATCH",
+  })
   assert.equal(
     firstPreviousSpcIdentityMatch(
       matches,

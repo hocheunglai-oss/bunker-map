@@ -93,8 +93,6 @@ async function enqueueAndScheduleSpcMobileDelivery(enquiry: SpcEnquiry) {
 export async function GET(request: Request) {
   const startedAt = Date.now()
   try {
-    const session = await requireSpcPagePermission("spc-buyer-enquiries", "view")
-    if (!session.username) throw new Error("Unauthorized")
     const searchParams = new URL(request.url).searchParams
     const status = searchParams.get("status")?.trim() || undefined
     const limit = Number(searchParams.get("limit") || 250)
@@ -112,10 +110,25 @@ export async function GET(request: Request) {
     }
     const sharedScope = requestedScope === "shared"
     const recordsScope = requestedScope === "records"
-    if (sharedScope && !hasSpcPagePermission(session, "spc-chrome-extension", "view")) {
-      throw new Error("Forbidden")
+    const session = await requireSpcPagePermission(
+      recordsScope ? "spc-lost-record" : "spc-buyer-enquiries",
+      "view",
+    )
+    if (!session.username) throw new Error("Unauthorized")
+    if (recordsScope) {
+      const allowedKeys = new Set(["scope", "status", "limit"])
+      if (
+        status !== "cancelled" ||
+        !Number.isSafeInteger(limit) || limit < 1 || limit > 250 ||
+        [...searchParams.keys()].some((key) => !allowedKeys.has(key) || searchParams.getAll(key).length !== 1)
+      ) {
+        return NextResponse.json(
+          { message: "Lost Record requests must select cancelled records without other feed options." },
+          { status: 400, headers: { "Cache-Control": "private, no-store" } },
+        )
+      }
     }
-    if (recordsScope && !hasSpcPagePermission(session, "spc-lost-record", "view")) {
+    if (sharedScope && !hasSpcPagePermission(session, "spc-chrome-extension", "view")) {
       throw new Error("Forbidden")
     }
     const createdByUsername = sharedScope || recordsScope ? undefined : session.username

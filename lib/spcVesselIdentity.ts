@@ -3,6 +3,7 @@ import { readSpcEnquiryMeta } from "@/lib/spcEnquiryText"
 export type SpcHistoricalMatch<T> = {
   at: number
   value: T
+  identityKeys: readonly string[]
 }
 
 export function normalizeSpcVesselIdentity(value: string | null | undefined) {
@@ -34,7 +35,7 @@ export function spcVesselIdentityKeys(
   return spcVesselIdentityKeysFromValues(vesselName, readSpcEnquiryMeta(notes).imo)
 }
 
-export function spcVesselIdentitiesMatch(targetKeys: string[], candidateKeys: string[]) {
+export function spcVesselIdentitiesMatch(targetKeys: readonly string[], candidateKeys: readonly string[]) {
   const targetImo = targetKeys.find((key) => key.startsWith("imo:"))
   const candidateImo = candidateKeys.find((key) => key.startsWith("imo:"))
 
@@ -48,11 +49,12 @@ export function spcVesselIdentitiesMatch(targetKeys: string[], candidateKeys: st
 export function addSpcHistoricalMatch<T>(
   map: Map<string, SpcHistoricalMatch<T>[]>,
   keys: string[],
-  match: SpcHistoricalMatch<T>,
+  match: Omit<SpcHistoricalMatch<T>, "identityKeys">,
 ) {
+  const candidate: SpcHistoricalMatch<T> = { ...match, identityKeys: [...keys] }
   for (const key of keys) {
     const matches = map.get(key) || []
-    matches.push(match)
+    matches.push(candidate)
     map.set(key, matches)
   }
 }
@@ -65,7 +67,9 @@ export function firstPreviousSpcIdentityMatch<T>(
   const beforeTime = Date.parse(before)
   for (const key of keys) {
     const candidates = [...(map.get(key) || [])].sort((left, right) => right.at - left.at)
-    const match = candidates.find((candidate) => candidate.at < beforeTime)
+    const match = candidates.find((candidate) =>
+      candidate.at < beforeTime && spcVesselIdentitiesMatch(keys, candidate.identityKeys),
+    )
     if (match) return match.value
   }
   return null

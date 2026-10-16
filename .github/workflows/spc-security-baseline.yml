@@ -148,6 +148,14 @@ jobs:
           set -o pipefail
           NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/openai-usage-report.test.ts tests/spc-statistics*.test.ts 2>&1 | tee report-correctness-tests.tap
 
+      - name: Verify SPC operational reads and historical vessel matching
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --no-install tsx --test tests/spc-operational-response.test.ts 2>&1 | tee spc-operational-response-tests.tap
+          node --test tests/spc-operational-api.test.mjs tests/spc-today-enquiries-api.test.mjs tests/spc-enquiry-list-permissions.test.mjs 2>&1 | tee spc-operational-api-tests.tap
+
       - name: Verify directory query boundaries and feedback revision ownership
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
@@ -248,6 +256,8 @@ jobs:
             supplier-outlook-reliability-tests.tap
             state-integrity-tests.tap
             report-correctness-tests.tap
+            spc-operational-response-tests.tap
+            spc-operational-api-tests.tap
             directory-feedback-tests.tap
             directory-sdk-tests.tap
             backup-stream-tests.tap
@@ -395,6 +405,7 @@ jobs:
           EVENT_CALENDAR_RESPONSE_SCREENSHOTS="$evidence_dir/calendar" node tests/event-calendar-response.browser.test.cjs 2>&1 | tee "$test_runtime/calendar.log"
           CLIENT_SESSION_OWNERSHIP_SCREENSHOTS="$evidence_dir/ownership" node tests/client-session-ownership.browser.test.cjs 2>&1 | tee "$test_runtime/ownership.log"
           node tests/client-session-storage.browser.test.cjs 2>&1 | tee "$test_runtime/storage.log"
+          SPC_OPERATIONAL_SCREENSHOTS="$evidence_dir/spc-operational" node tests/spc-operational-state.browser.test.cjs 2>&1 | tee "$test_runtime/spc-operational.log"
 
       - name: Retain synthetic calendar and session verification evidence
         if: always()
@@ -406,6 +417,7 @@ jobs:
             ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/calendar.log
             ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/ownership.log
             ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/storage.log
+            ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/spc-operational.log
           if-no-files-found: warn
           retention-days: 90
 
