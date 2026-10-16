@@ -30,6 +30,8 @@ type UploadResponse = {
 }
 
 type ChunkDraft = {
+  id: string
+  revision: number
   chapterLabel: string
   sectionLabel: string
   title: string
@@ -41,6 +43,16 @@ type ChunkDraft = {
   visualCopy: SpcPresentationChunk["visualCopy"]
   durationSeconds: string
   status: "draft" | "published"
+}
+
+type MediaAttachmentIntent = {
+  id: string
+  revision: number
+  kind: "video" | "narration"
+  path: string
+  mimeType: string
+  mediaVersion: number
+  expectedBytes: number
 }
 
 type MediaSource = {
@@ -73,6 +85,8 @@ function formatBytes(value: number) {
 
 function chunkDraft(chunk: SpcPresentationChunk): ChunkDraft {
   return {
+    id: chunk.id,
+    revision: chunk.revision,
     chapterLabel: chunk.chapterLabel,
     sectionLabel: chunk.sectionLabel,
     title: chunk.title,
@@ -85,6 +99,22 @@ function chunkDraft(chunk: SpcPresentationChunk): ChunkDraft {
     durationSeconds: chunk.durationSeconds ? String(chunk.durationSeconds) : "",
     status: chunk.status,
   }
+}
+
+function verifiedChunk(value: unknown, id: string, revision: number): value is SpcPresentationChunk {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const chunk = value as Record<string, unknown>
+  return chunk.id === id && chunk.revision === revision
+    && ["chapterLabel", "sectionLabel", "title", "summary", "narration", "questionPrompt", "visualKind", "updatedAt"].every((key) => typeof chunk[key] === "string")
+    && Array.isArray(chunk.keyPoints) && chunk.keyPoints.every((item) => typeof item === "string")
+    && Array.isArray(chunk.visualCopy) && chunk.visualCopy.every((item) => item && typeof item === "object" && ["id", "label", "text"].every((key) => typeof item[key] === "string"))
+    && typeof chunk.sortOrder === "number" && Number.isFinite(chunk.sortOrder)
+    && typeof chunk.mediaVersion === "number" && Number.isSafeInteger(chunk.mediaVersion) && chunk.mediaVersion > 0
+    && (chunk.status === "draft" || chunk.status === "published")
+    && ["videoPath", "narrationPath", "videoUrl", "narrationUrl", "videoMimeType", "narrationMimeType"].every((key) => chunk[key] === null || typeof chunk[key] === "string")
+    && ["videoBytes", "narrationBytes"].every((key) => typeof chunk[key] === "number" && Number.isFinite(chunk[key]) && chunk[key] >= 0)
+    && (chunk.durationSeconds === null || typeof chunk.durationSeconds === "number" && Number.isFinite(chunk.durationSeconds))
+    && typeof chunk.videoHasEmbeddedAudio === "boolean" && typeof chunk.narrationIsAi === "boolean"
 }
 
 function mediaCacheKey(chunk: SpcPresentationChunk, kind: "video" | "narration") {
@@ -174,6 +204,9 @@ export default function SpcReadmePage() {
   const [error, setError] = useState("")
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState<"video" | "narration" | "">("")
+  const [pendingMedia, setPendingMedia] = useState<MediaAttachmentIntent | null>(null)
+  const editorBusyRef = useRef(false)
+  const draftOwnerRef = useRef("")
   const [mediaSource, setMediaSource] = useState<MediaSource>(EMPTY_MEDIA_SOURCE)
   const [offlineState, setOfflineState] = useState<OfflineState>("idle")
   const [offlineProgress, setOfflineProgress] = useState({ complete: 0, total: 0, bytes: 0 })
@@ -249,9 +282,9 @@ export default function SpcReadmePage() {
   }, [])
 
   useEffect(() => {
-    if (!selected) return
+    if (!selected || draftOwnerRef.current === selected.id) return
+    draftOwnerRef.current = selected.id
     // A newly selected chunk starts from its current stored revision.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDraft(chunkDraft(selected))
     setQuestionBreak(false)
   }, [selected])
@@ -381,7 +414,11 @@ export default function SpcReadmePage() {
     }
   }, [presenterMode, questionBreak, selected?.id, selectedMedia.narration])
 
-  function updateChunk(chunk: SpcPresentationChunk) {
+  function updateChunk(chunk: SpcPresentationChunk, preserveDraft = false) {
+    draftOwnerRef.current = chunk.id
+    setDraft((current) => preserveDraft && current?.id === chunk.id
+      ? { ...current, revision: chunk.revision }
+      : chunkDraft(chunk))
     setChunks((current) =>
       current
         .map((item) => (item.id === chunk.id ? chunk : item))
@@ -402,7 +439,8 @@ export default function SpcReadmePage() {
   }
 
   async function saveDraft() {
-    if (!selected || !draft) return
+    if (!selected || !draft || draft.id !== selected.id || editorBusyRef.current || pendingMedia) return
+    editorBusyRef.current = true
     setSaving(true)
     setError("")
     setMessage("")
@@ -411,7 +449,7 @@ export default function SpcReadmePage() {
         action: "save",
         chunk: {
           id: selected.id,
-          revision: selected.revision,
+          revision: draft.revision,
           chapterLabel: draft.chapterLabel,
           sectionLabel: draft.sectionLabel,
           title: draft.title,
@@ -425,18 +463,23 @@ export default function SpcReadmePage() {
           status: draft.status,
         },
       })
-      if (result.chunk) updateChunk(result.chunk)
+      if (result.success !== true || !verifiedChunk(result.chunk, draft.id, draft.revision + 1)) {
+        throw new Error("The saved section could not be verified. Your draft is kept. Refresh and review it before saving again.")
+      }
+      updateChunk(result.chunk)
       setEditing(false)
       setMessage("README section updated.")
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save the section.")
     } finally {
+      editorBusyRef.current = false
       setSaving(false)
     }
   }
 
   async function moveChunk(direction: "earlier" | "later") {
-    if (!selected) return
+    if (!selected || !confirmLeaveEditor()) return
+    editorBusyRef.current = true
     setSaving(true)
     setError("")
     try {
@@ -445,16 +488,18 @@ export default function SpcReadmePage() {
     } catch (moveError) {
       setError(moveError instanceof Error ? moveError.message : "Could not move the section.")
     } finally {
+      editorBusyRef.current = false
       setSaving(false)
     }
   }
 
   async function deleteChunk() {
-    if (!selected || !window.confirm(`Delete "${selected.title}"? This cannot be undone.`)) return
+    if (!selected || editorBusyRef.current || !window.confirm(`Delete "${selected.title}"? This cannot be undone.`)) return
+    editorBusyRef.current = true
     setSaving(true)
     setError("")
     try {
-      await postAction({ action: "delete", id: selected.id })
+      await postAction({ action: "delete", id: selected.id, revision: selected.revision })
       const remaining = chunks.filter((chunk) => chunk.id !== selected.id)
       setChunks(remaining)
       setSelectedId(remaining[Math.max(0, selectedIndex - 1)]?.id || "")
@@ -463,42 +508,90 @@ export default function SpcReadmePage() {
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : "Could not delete the section.")
     } finally {
+      editorBusyRef.current = false
       setSaving(false)
     }
   }
 
   async function uploadMedia(kind: "video" | "narration", file: File) {
-    if (!selected) return
+    if (!selected || !draft || draft.id !== selected.id || editorBusyRef.current || pendingMedia) return
+    editorBusyRef.current = true
     setUploading(kind)
     setError("")
     setMessage("")
+    const mimeType = file.type || "application/octet-stream"
     try {
       const prepared = await postAction({
         action: "prepare-upload",
         id: selected.id,
         kind,
         fileName: file.name,
-        mimeType: file.type,
+        mimeType,
         fileBytes: file.size,
       })
       if (!prepared.upload) throw new Error("Could not prepare the media upload.")
       await uploadToSignedStorageUrl(prepared.upload.signedUrl, file)
 
-      const completed = await postAction({
-        action: "complete-upload",
+      const intent: MediaAttachmentIntent = {
         id: selected.id,
-        revision: selected.revision,
+        revision: draft.revision,
         kind,
         path: prepared.upload.path,
-        mimeType: file.type,
-      })
-      if (completed.chunk) updateChunk(completed.chunk)
-      setMessage(kind === "video" ? "Video attached." : "Narration attached.")
+        mimeType,
+        mediaVersion: Number(selected.mediaVersion),
+        expectedBytes: file.size,
+      }
+      setPendingMedia(intent)
+      await attachUploadedMedia(intent)
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Could not upload media.")
     } finally {
+      editorBusyRef.current = false
       setUploading("")
     }
+  }
+
+  async function attachUploadedMedia(intent: MediaAttachmentIntent) {
+    const completed = await postAction({ action: "complete-upload", id: intent.id, revision: intent.revision, kind: intent.kind, path: intent.path, mimeType: intent.mimeType })
+    const chunk = completed.chunk
+    if (completed.success !== true || !verifiedChunk(chunk, intent.id, intent.revision + 1)
+      || chunk.mediaVersion !== intent.mediaVersion + 1
+      || (intent.kind === "video" ? chunk.videoPath : chunk.narrationPath) !== intent.path
+      || (intent.kind === "video" ? chunk.videoMimeType : chunk.narrationMimeType) !== intent.mimeType
+      || (intent.kind === "video" ? chunk.videoBytes : chunk.narrationBytes) !== intent.expectedBytes) {
+      throw new Error("The attachment could not be verified. Your draft is kept. Retry the same attachment to check its result.")
+    }
+    updateChunk(chunk, true)
+    setPendingMedia(null)
+    setMessage(intent.kind === "video" ? "Video attached." : "Narration attached.")
+  }
+
+  async function retryMediaAttachment() {
+    if (!pendingMedia || editorBusyRef.current) return
+    editorBusyRef.current = true
+    setUploading(pendingMedia.kind)
+    setError("")
+    try {
+      await attachUploadedMedia(pendingMedia)
+    } catch (attachmentError) {
+      setError(attachmentError instanceof Error ? attachmentError.message : "Could not attach media. Your draft is kept.")
+    } finally {
+      editorBusyRef.current = false
+      setUploading("")
+    }
+  }
+
+  function confirmLeaveEditor() {
+    if (editorBusyRef.current) return false
+    if (editorMode && selected && draft && (pendingMedia || JSON.stringify(draft) !== JSON.stringify(chunkDraft(selected)))) {
+      if (!window.confirm("Leave this section and discard your unsaved text or attachment retry?")) return false
+    }
+    setPendingMedia(null)
+    return true
+  }
+
+  function selectSection(id: string) {
+    if (id !== selected?.id && confirmLeaveEditor()) setSelectedId(id)
   }
 
   async function prepareOffline() {
@@ -606,7 +699,7 @@ export default function SpcReadmePage() {
 
   function selectChapter(chapterLabel: string) {
     const firstChunk = chunks.find((chunk) => chunk.chapterLabel === chapterLabel)
-    if (!firstChunk) return
+    if (!firstChunk || !confirmLeaveEditor()) return
     setSelectedId(firstChunk.id)
     setEditing(false)
     setQuestionBreak(false)
@@ -668,6 +761,7 @@ export default function SpcReadmePage() {
               type="button"
               role="tab"
               aria-selected={chapterLabel === activeChapter}
+              disabled={saving || Boolean(uploading)}
               className={chapterLabel === activeChapter ? "is-active" : ""}
               onClick={() => selectChapter(chapterLabel)}
               key={chapterLabel}
@@ -688,7 +782,8 @@ export default function SpcReadmePage() {
                 <button
                   type="button"
                   className={chunk.id === selected?.id ? "is-active" : ""}
-                  onClick={() => setSelectedId(chunk.id)}
+                  onClick={() => selectSection(chunk.id)}
+                  disabled={saving || Boolean(uploading)}
                   key={chunk.id}
                 >
                   <span>{String(index + 1).padStart(2, "0")}</span>
@@ -737,12 +832,13 @@ export default function SpcReadmePage() {
             <aside className="spc-readme-editor">
               <div className="spc-readme-editor-header">
                 <strong>PRIVATE EDITOR</strong>
-                <button type="button" onClick={() => router.push("/spc/presentation")}>VIEW</button>
+                <button type="button" disabled={saving || Boolean(uploading)} onClick={() => { if (confirmLeaveEditor()) router.push("/spc/presentation") }}>VIEW</button>
               </div>
               <label>
                 <span>CHAPTER</span>
                 <input
                   value={draft.chapterLabel}
+                  disabled={saving || Boolean(uploading)}
                   onChange={(event) => setDraft({ ...draft, chapterLabel: event.target.value })}
                 />
               </label>
@@ -751,6 +847,7 @@ export default function SpcReadmePage() {
                   <span>SECTION</span>
                   <input
                     value={draft.sectionLabel}
+                    disabled={saving || Boolean(uploading)}
                     onChange={(event) => setDraft({ ...draft, sectionLabel: event.target.value })}
                   />
                 </label>
@@ -759,6 +856,7 @@ export default function SpcReadmePage() {
                   <input
                     inputMode="decimal"
                     value={draft.durationSeconds}
+                    disabled={saving || Boolean(uploading)}
                     onChange={(event) => setDraft({ ...draft, durationSeconds: event.target.value })}
                   />
                 </label>
@@ -766,6 +864,7 @@ export default function SpcReadmePage() {
                   <span>STATUS</span>
                   <select
                     value={draft.status}
+                    disabled={saving || Boolean(uploading)}
                     onChange={(event) => setDraft({ ...draft, status: event.target.value as ChunkDraft["status"] })}
                   >
                     <option value="published">PUBLISHED</option>
@@ -777,6 +876,7 @@ export default function SpcReadmePage() {
                 <span>TITLE</span>
                 <input
                   value={draft.title}
+                  disabled={saving || Boolean(uploading)}
                   onChange={(event) => setDraft({ ...draft, title: event.target.value })}
                 />
               </label>
@@ -785,6 +885,7 @@ export default function SpcReadmePage() {
                 <textarea
                   rows={22}
                   value={draft.narration}
+                  disabled={saving || Boolean(uploading)}
                   onChange={(event) => setDraft({ ...draft, narration: event.target.value })}
                 />
               </label>
@@ -794,7 +895,7 @@ export default function SpcReadmePage() {
                   <input
                     type="file"
                     accept="video/mp4,video/webm"
-                    disabled={Boolean(uploading) || saving}
+                    disabled={Boolean(uploading) || saving || Boolean(pendingMedia)}
                     onChange={(event) => {
                       const file = event.target.files?.[0]
                       if (file) void uploadMedia("video", file)
@@ -807,7 +908,7 @@ export default function SpcReadmePage() {
                   <input
                     type="file"
                     accept="audio/mpeg,audio/mp4,audio/wav"
-                    disabled={Boolean(uploading) || saving}
+                    disabled={Boolean(uploading) || saving || Boolean(pendingMedia)}
                     onChange={(event) => {
                       const file = event.target.files?.[0]
                       if (file) void uploadMedia("narration", file)
@@ -818,10 +919,11 @@ export default function SpcReadmePage() {
               </div>
               {uploading ? <div className="spc-readme-upload-status">UPLOADING {uploading.toUpperCase()}...</div> : null}
               <div className="spc-readme-editor-actions">
+                {pendingMedia ? <button type="button" disabled={saving || Boolean(uploading)} onClick={() => void retryMediaAttachment()}>RETRY ATTACHMENT</button> : null}
                 <button
                   type="button"
                   className="is-primary"
-                  disabled={saving || Boolean(uploading)}
+                  disabled={saving || Boolean(uploading) || Boolean(pendingMedia)}
                   onClick={() => void saveDraft()}
                 >
                   {saving ? "SAVING..." : "SAVE"}

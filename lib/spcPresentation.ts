@@ -90,10 +90,12 @@ export type SpcPresentationChunk = {
   questionPrompt: string
   visualKind: string
   visualCopy: SpcPresentationVisualText[]
+  videoPath: string | null
   videoUrl: string | null
   videoMimeType: string | null
   videoBytes: number
   videoHasEmbeddedAudio: boolean
+  narrationPath: string | null
   narrationUrl: string | null
   narrationMimeType: string | null
   narrationBytes: number
@@ -247,10 +249,12 @@ function presentRow(row: PresentationRow, mediaUrls: Map<string, string>): SpcPr
     questionPrompt: row.q_and_a_prompt,
     visualKind: row.visual_kind,
     visualCopy: cleanVisualCopy(row.visual_copy),
+    videoPath: row.video_path,
     videoUrl: row.video_path ? mediaUrls.get(row.video_path) || null : null,
     videoMimeType: row.video_mime_type,
     videoBytes: bytes(row.video_bytes),
     videoHasEmbeddedAudio: /(?:^|[-_])synced\.(?:mp4|webm)$/i.test(row.video_path || ""),
+    narrationPath: row.narration_path,
     narrationUrl: row.narration_path ? mediaUrls.get(row.narration_path) || null : null,
     narrationMimeType: row.narration_mime_type,
     narrationBytes: bytes(row.narration_bytes),
@@ -395,20 +399,21 @@ export async function moveSpcPresentationChunk(
   return listSpcPresentationChunks(true)
 }
 
-export async function deleteSpcPresentationChunk(id: string, context: SpcAuditContext) {
-  const { data: row, error } = await presentationClient()
-    .from(PRESENTATION_TABLE)
-    .select("video_path,narration_path")
-    .eq("id", id)
-    .maybeSingle()
-  if (error) throw new Error(`Could not load presentation section: ${error.message}`)
-  if (!row) throw new Error("Presentation section was not found.")
-
-  const { error: deleteError } = await createSpcAuditedSupabaseClient(context)
+export async function deleteSpcPresentationChunk(id: string, revision: unknown, context: SpcAuditContext) {
+  const changed = () => new Error("This section changed in another session. Refresh and review it before deleting.")
+  if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 1) throw changed()
+  // The returned paths belong to the exact revision deleted by this statement.
+  // A separate pre-read could remove media belonging to a concurrent edit.
+  const { data: row, error: deleteError } = await createSpcAuditedSupabaseClient(context)
     .from(PRESENTATION_TABLE)
     .delete()
     .eq("id", id)
+    .eq("revision", revision)
+    .select("id,revision,video_path,narration_path")
+    .single()
+  if (deleteError?.code === "PGRST116") throw changed()
   if (deleteError) throw new Error(`Could not delete presentation section: ${deleteError.message}`)
+  if (!row || row.id !== id || row.revision !== revision) throw changed()
 
   const paths = [row.video_path, row.narration_path].filter(
     (path): path is string => typeof path === "string" && Boolean(path),
@@ -486,14 +491,23 @@ export async function completeSpcPresentationUpload(
   context: SpcAuditContext,
 ) {
   if (!path.startsWith(`${id}/${kind}-`)) throw new Error("Invalid presentation media path.")
+  if (!Number.isSafeInteger(revision) || revision < 1) throw new Error("This section changed in another session. Refresh before attaching media.")
   const client = presentationClient()
-  const { data: current, error } = await client
+  const { data: currentData, error } = await client
     .from(PRESENTATION_TABLE)
-    .select("video_path,narration_path,media_version,revision")
+    .select(PRESENTATION_COLUMNS)
     .eq("id", id)
     .maybeSingle()
   if (error) throw new Error(`Could not load presentation section: ${error.message}`)
+  const current = currentData as unknown as PresentationRow | null
   if (!current) throw new Error("Presentation section was not found.")
+  const currentPath = kind === "video" ? current.video_path : current.narration_path
+  const currentMimeType = kind === "video" ? current.video_mime_type : current.narration_mime_type
+  // Retry only the same completed attachment, at its exact resulting revision.
+  // Never adopt a later colleague edit or remove any file on an uncertain retry.
+  if (Number(current.revision) === revision + 1 && currentPath === path && currentMimeType === mimeType) {
+    return presentSingleRow(current)
+  }
   if (Number(current.revision) !== revision) {
     throw new Error("This section changed in another session. Refresh before attaching media.")
   }
@@ -522,7 +536,8 @@ export async function completeSpcPresentationUpload(
     .eq("id", id)
     .eq("revision", revision)
     .select(PRESENTATION_COLUMNS)
-    .maybeSingle()
+    .single()
+  if (updateError?.code === "PGRST116") throw new Error("This section changed in another session. Refresh before attaching media.")
   if (updateError) throw new Error(`Could not attach presentation media: ${updateError.message}`)
   if (!updated) throw new Error("This section changed in another session. Refresh before attaching media.")
 

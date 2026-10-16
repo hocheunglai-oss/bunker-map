@@ -1,55 +1,19 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
 import { DEFAULT_PARSER_AI_MODEL } from "@/lib/parserAiConfig"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { fcunoConnectionPolicy } from "@/config/fcunoConnections"
+import { isTechStackResponse, type TechStackResponse } from "@/lib/techStackClient"
 import styles from "./techStack.module.css"
-
-type SecretItem = {
-  name: string
-  configured: boolean | null
-  status: string
-  storage: string
-  value: string
-}
-
-type TechStackResponse = {
-  generatedAt: string
-  deployment: {
-    platform: string
-    project: string
-    productionUrl: string
-    gitRepository: string
-    environment: string
-    branch: string
-    commit: string
-    functionRegion: string
-    configuredRegions: string[]
-  }
-  databaseInventory: {
-    schema: string
-    migrationHead: string
-    tables: string[]
-    checkedAt: string
-  }
-  verification: {
-    responseTimeOnly: boolean
-    externalServices: string
-    environmentValues: string
-  }
-  schedules: Array<{ path: string; schedule: string }>
-  secrets: SecretItem[]
-  message?: string
-}
 
 const SERVICES = [
   ["APPLICATION", "NEXT.JS 16 / REACT 19 / TYPESCRIPT", "VERCEL", "FCUNO.COM"],
   ["PERFORMANCE MONITORING", "SPEED INSIGHTS / WEB ANALYTICS", "VERCEL", "REAL-USER CORE WEB VITALS"],
   ["SOURCE CONTROL", "GIT / GITHUB", "GITHUB", fcunoConnectionPolicy.github.repository],
-  ["PRIMARY DATABASE", "POSTGRESQL 17 (17.6.1.084 VERIFIED 2026-10-15)", "SUPABASE", `PROJECT ${fcunoConnectionPolicy.supabase.projectRef}`],
+  ["PRIMARY DATABASE", "POSTGRESQL 17 (17.6.1.084 VERIFIED 2026-10-16)", "SUPABASE", `PROJECT ${fcunoConnectionPolicy.supabase.projectRef}`],
   ["DATABASE LOGICAL ARCHIVE", "MUTATION-FENCED PAGED JSON V2 / GZIP-BOUNDED TEMP STAGING / STREAMED JSON UPLOAD / SHA-256 PREDECESSOR CHAIN", "VERCEL / GOOGLE DRIVE", "LATEST TWO VERIFIED ARTIFACTS; NOT A FULL-DATABASE RESTORE IMAGE"],
   ["OFFLINE ARCHIVE VALIDATION", "NODE 24 / STREAMED JSON / PRIVATE SQLITE SPOOL / BOUNDED DIAGNOSTICS", "LOCAL RECOVERY HOST", "FULL 2.535 GB SYNTHETIC ARCHIVE TESTED UNDER 256 MB HEAP; NOT A HOSTED-ARTIFACT OR RESTORE PROOF"],
   ["FILE SOURCE", "GOOGLE DRIVE", "GOOGLE WORKSPACE", "WIDER.CUSTOM@GMAIL.COM"],
@@ -64,11 +28,11 @@ const SERVICES = [
   ["EXCHANGE WORKER", "POWERSHELL RUNBOOK / BOUNDED STARTUP AND EXCHANGE CONNECTION RETRIES / ACTIONABLE INCIDENT NOTICES / QUIET TRANSIENT RECOVERY / SIMPLE SUMMARY EMAILS / 180-MIN FULL LEASE / STAGED SNAPSHOT CERTIFICATION", "AZURE AUTOMATION", "REPOSITORY: FCUNO-EXCHANGE-RUNBOOK/2026-10-09.1; PUBLISHED AZURE VERSION NOT VERIFIED BY THIS PAGE"],
   ["OUTLOOK TEMPLATE SOURCE", "EMAIL_TEMPLATES ONLY / TRANSACTIONAL RPC / OPTIMISTIC REVISION / RESTRICTED FILE:///H:/ LINK COMPATIBILITY", "SUPABASE", "AUDITED CANONICAL LIBRARY; LEGACY STORE ARCHIVED; WEB, MAIL, TEL, AND FCUNO H-DRIVE TEMPLATE LINKS SURVIVE SAFE NORMALISATION"],
   ["OUTLOOK ADD-IN ACCESS", "OFFICE DIALOG API / HTTP-ONLY PARTITIONED 400-DAY SESSION / AUTOMATIC LEGACY-SESSION MIGRATION / NON-CACHEABLE TASKPANE AND AUTH SHELL / MANUAL SIGN-OUT / SUPPORTED READ-MODE NEW-MESSAGE FORM / GUARDED BLANK-COMPOSE INSERT / COALESCED TEMPLATE DETAIL + CERTIFIED DIRECTORY PRELOAD / TWO-PHASE APPEND-ONLY INSERT AUDIT", "NEXT.JS / OFFICE.JS / OUTLOOK WEB", "FROM A BLANK NEW MAIL, THE TEMPLATE FILLS THE CURRENT EDITABLE MESSAGE WITH FULL HTML AND CERTIFIED RECIPIENTS WITHOUT A CONFIRMATION OR DRAFTS DETOUR; FROM READ MODE, OUTLOOK OPENS A SEPARATE NEW MESSAGE; EXISTING USER CONTENT IS NEVER OVERWRITTEN; PARTIAL FAILURES RESTORE THE VERIFIED SNAPSHOT; NO GRAPH DRAFT OR MICROSOFT TOKEN PROMPT; PASSWORD CHANGE, ACCOUNT DISABLEMENT, REVOCATION, OR PERMISSION REMOVAL FAILS CLOSED"],
-  ["OUTLOOK RECIPIENT TRUTH", "STABLE FCUNO IDS / CERTIFIED EXACT EXCHANGE ADDRESSES / DEEP DATABASE GUARD", "SUPABASE / EXCHANGE ONLINE", "UNRESOLVED RECIPIENTS ARE NORMAL SEND BLOCKS; STALE OR UNVERIFIED TRUTH FAILS CLOSED"],
+  ["OUTLOOK RECIPIENT TRUTH", "STABLE FCUNO IDS / CERTIFIED EXACT EXCHANGE ADDRESSES / DEEP DATABASE GUARD", "SUPABASE / EXCHANGE ONLINE", "RECENT INTACT CERTIFICATION REMAINS USABLE DURING NORMAL QUEUED DELIVERY; FAILED, STALE OR INVALID EVIDENCE FAILS CLOSED; SIX SERVER-ONLY RPCS HAVE BOUNDED 20-SECOND DEADLINES"],
   ["RELIABILITY MONITORING", "LIVE INVENTORY / FULL STREAMED BACKUP + PREDECESSOR BYTE VERIFICATION / EXCHANGE VERIFIER", "SYSTEM HEALTH", "/ADMIN/SYSTEMHEALTH"],
   ["SALESFORCE DATA", "EXTERNAL DATA PORTAL", "FCOS", fcunoConnectionPolicy.federation.fcos.productionOrigin],
   ["SINGAPORE PURCHASING CENTER", "NEXT.JS SUBDOMAIN APP / LINKED FCUNO IDENTITY / SEPARATE SPC PERMISSIONS", "VERCEL", fcunoConnectionPolicy.vercel.productionOrigins[1]],
-  ["SPC SUPPLIER DATABASE", "GOOGLE SHEETS READ SOURCE / SUPABASE EDIT OVERRIDES", "GOOGLE WORKSPACE / SUPABASE", "OFFICE_CALENDAR_STORE: SPC-SUPPLIER-OVERRIDES"],
+  ["SPC SUPPLIER DATABASE", "GOOGLE SHEETS READ SOURCE / ATOMIC SECTION-VERSIONED SUPABASE OVERRIDES / TRANSACTIONAL AUDIT", "GOOGLE WORKSPACE / SUPABASE", "SPC-SUPPLIER-OVERRIDES; UNRELATED EDITS SURVIVE; STALE DRAFTS ARE PRESERVED; SAVE RECEIPTS RETAINED FOR THE LATEST 256 OPERATIONS"],
   ["IDENTITY FEDERATION", "FCUNO OIDC AUTHORITY / SIGNED IDENTITY OUTBOX / FEATURE-GATED FCOS CONSUMER", "FCUNO / FCOS", "SEPARATE DATABASES; NO PASSWORD OR SESSION COPYING; FLAGS SHOWN AS PRESENCE ONLY"],
   ["BRENT MARKET DATA", "OFFICIAL FRONT-MONTH FUTURES / CONTRACT, FRESHNESS, RANGE, AND CHART VALIDATION / FAIL-CLOSED", "INTERCONTINENTAL EXCHANGE (ICE)", "/API/MARKET/BRENT / MINIMUM 15-MINUTE DELAY"],
   ["ATTENDANCE RECORDS", "IMMUTABLE DINGTALK RAW PUNCHES / 7-DAY ROLLING RECONCILIATION / MANUAL LEAVE LEDGER / AUDITED CORRECTIONS / USER-MANAGEMENT ACCESS", "SUPABASE / DINGTALK / MOREDIAN MCE-M2+", "/ADMIN/ATTENDANCERECORD"],
@@ -222,7 +186,7 @@ const RELIABILITY_MODEL = [
   [
     "TEMPLATE WRITE SAFETY",
     "TRANSACTIONAL REPLACEMENT + SERVER REVISION",
-    "NO EMPTY-TABLE WINDOW. STALE EDITORS RECEIVE A CONFLICT INSTEAD OF OVERWRITING A NEWER CHANGE.",
+    "NO EMPTY-TABLE WINDOW. STALE EDITORS RECEIVE A CONFLICT AND KEEP THEIR DRAFT UNTIL EXPLICIT RELOAD OR CHANGED-FIELD REAPPLICATION; COLLEAGUE EDITS ARE NOT SILENTLY OVERWRITTEN.",
   ],
   [
     "INDEPENDENT ANCHORS",
@@ -257,11 +221,11 @@ const CRON_DESCRIPTIONS: Record<string, readonly [string, string]> = {
   "/api/cron/attendance-sync": ["ATTENDANCE RECONCILIATION", "EVERY 15 MINUTES / ROLLING SEVEN DAYS"],
   "/api/cron/phonebook-carddav-reconcile": ["PHONEBOOK / CARDDAV RECONCILIATION", "EVERY FIVE MINUTES / SERVER CONTACT RECONCILIATION AND SAVED RETRIES; MAY DEFER DURING VERIFIED BACKUP; PHONE REFRESH TIMING DEPENDS ON THE DEVICE"],
   "/api/admin/system-health/notify": ["SYSTEM HEALTH CHECK / EMAIL", "08:30 HKT; RELEASE POLICY: NEW INCIDENT / ESCALATION ONLY, WITH EXISTING MUTES"],
-  "/api/event-calendar/daily-reminder": ["EVENT REMINDERS", "08:00 HKT MONDAY–FRIDAY"],
-  "/api/task-calendar/daily-reminder": ["TASK REMINDERS", "08:00 HKT DAILY"],
+  "/api/event-calendar/daily-reminder": ["EVENT REMINDERS", "08:00 HKT MONDAY–FRIDAY; 08:15 / 08:30 RETRIES USE THE SAME OCCURRENCE RECEIPT"],
+  "/api/task-calendar/daily-reminder": ["TASK REMINDERS", "08:00 HKT DAILY; 08:15 / 08:30 RETRIES USE THE SAME OCCURRENCE RECEIPT"],
   "/api/event-calendar/google-sync": ["MEETING-ROOM SYNC OUTBOX", "EVERY MINUTE / DURABLE GOOGLE CALENDAR DELIVERY"],
   "/api/cron/attendance-month-end-reminder": ["ATTENDANCE CONFIRMATION / ANNUAL REMINDER CHECK", "08:00 HKT DAILY CHECK; MONTHLY EMAIL ON FIRST HONG KONG WORKING DAY; NO REPEAT REMINDER"],
-  "/api/cron/attendance-auto-confirm": ["ATTENDANCE AUTO-CONFIRM CHECK", "18:00 HKT DAILY CHECK; UNCONFIRMED MONTH AUTO-CONFIRMS ON THIRD HONG KONG WORKING DAY; DISPUTES REMAIN POSSIBLE"],
+  "/api/cron/attendance-auto-confirm": ["ATTENDANCE AUTO-CONFIRM CHECK", "18:10 HKT DAILY CHECK AFTER THE 18:00 DEADLINE; UNCONFIRMED MONTH AUTO-CONFIRMS ON THIRD HONG KONG WORKING DAY; DISPUTES REMAIN POSSIBLE"],
   "/api/spc/security-maintenance": ["SPC SECURITY MAINTENANCE", "02:17 HKT DAILY / EXPIRED SECURITY STATE CLEANUP"],
   "/api/cron/spc-mobile-deliveries": ["SPC MOBILE / GROUP DELIVERY", "EVERY MINUTE / DURABLE DELIVERY QUEUES"],
   "/api/cron/fcos-identity-sync": ["FCOS IDENTITY SYNC", "EVERY FIVE MINUTES / FEATURE-GATED SIGNED OUTBOX"],
@@ -271,18 +235,37 @@ export default function TechStackPage() {
   const router = useRouter()
   const { loading: authLoading, authenticated, permissions, role } = useSimpleAdminAuth()
   const [data, setData] = useState<TechStackResponse | null>(null)
+  const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState("")
+  const requestController = useRef<AbortController | null>(null)
+  const lastVerifiedData = useRef<TechStackResponse | null>(null)
   const canView = isAdminRole(role) || canAccessAdminPage(permissions, "tech-stack", "view")
 
   const loadData = useCallback(async () => {
     if (!authenticated || !canView) return
-    const response = await fetch("/api/admin/tech-stack", { cache: "no-store" })
-    const result = (await response.json()) as TechStackResponse
-    if (!response.ok) {
-      setMessage(result.message || "COULD NOT LOAD TECH STACK.")
-      return
+    requestController.current?.abort()
+    const controller = new AbortController()
+    requestController.current = controller
+    setLoading(true)
+    setMessage("")
+    try {
+      const response = await fetch("/api/admin/tech-stack", { cache: "no-store", signal: controller.signal })
+      const result: unknown = await response.json()
+      if (controller.signal.aborted || requestController.current !== controller) return
+      if (!response.ok || !isTechStackResponse(result)) throw new Error("Current system details are unavailable.")
+      lastVerifiedData.current = result
+      setData(result)
+    } catch {
+      if (controller.signal.aborted || requestController.current !== controller) return
+      setMessage(lastVerifiedData.current
+        ? "Current system details could not be refreshed. The last loaded values are shown below."
+        : "Current system details are unavailable. Please retry.")
+    } finally {
+      if (requestController.current === controller) {
+        requestController.current = null
+        setLoading(false)
+      }
     }
-    setData(result)
   }, [authenticated, canView])
 
   useEffect(() => {
@@ -294,36 +277,45 @@ export default function TechStackPage() {
   }, [authLoading, authenticated, canView, router])
 
   useEffect(() => {
-    loadData()
+    const initialLoad = window.setTimeout(() => void loadData(), 0)
+    return () => {
+      window.clearTimeout(initialLoad)
+      requestController.current?.abort()
+      requestController.current = null
+    }
   }, [loadData])
 
   if (authLoading || !authenticated || !canView) {
     return <div className={styles.page}>LOADING...</div>
   }
+  const unavailable = loading ? "LOADING" : "UNAVAILABLE"
 
   return (
     <div className={styles.page}>
       <main className={styles.shell}>
-        {message ? <div className={styles.error}>{message}</div> : null}
+        {message ? <div className={styles.error} role="alert">{message}</div> : null}
 
         <section className={styles.section}>
           <div className={styles.sectionTitle}>
             <h2>CURRENT DEPLOYMENT</h2>
+            <button className={styles.refreshButton} type="button" onClick={() => void loadData()} disabled={loading}>
+              {loading ? "REFRESHING..." : "REFRESH"}
+            </button>
           </div>
           <div className={styles.factGrid}>
             <div><span>PLATFORM</span><strong>{data?.deployment.platform || "VERCEL"}</strong></div>
             <div><span>PROJECT</span><strong>{data?.deployment.project || fcunoConnectionPolicy.vercel.project}</strong></div>
             <div><span>PRODUCTION DOMAIN</span><strong>{fcunoConnectionPolicy.vercel.productionOrigins[0]}</strong></div>
             <div><span>GITHUB</span><strong>{data?.deployment.gitRepository || fcunoConnectionPolicy.github.repository}</strong></div>
-            <div><span>ENVIRONMENT / BRANCH</span><strong>{data ? `${data.deployment.environment} / ${data.deployment.branch}` : "LOADING"}</strong></div>
+            <div><span>ENVIRONMENT / BRANCH</span><strong>{data ? `${data.deployment.environment} / ${data.deployment.branch}` : unavailable}</strong></div>
             <div><span>COMMIT</span><strong>{data?.deployment.commit?.slice(0, 7) || "-"}</strong></div>
             <div><span>OBSERVED FUNCTION REGION</span><strong>{data?.deployment.functionRegion?.toUpperCase() || "UNKNOWN"}</strong></div>
             <div><span>DATABASE MIGRATION</span><strong>{data?.databaseInventory.migrationHead || "-"}</strong></div>
             <div><span>LIVE PUBLIC TABLES</span><strong>{data?.databaseInventory.tables.length ?? "-"}</strong></div>
           </div>
           <div className={styles.notes}>
-            <p>RESPONSE GENERATED: {data?.generatedAt || "LOADING"}. THIS IS NOT AN INFRASTRUCTURE VERIFICATION TIME.</p>
-            <p>PUBLIC DATABASE INVENTORY CHECKED: {data?.databaseInventory.checkedAt || "LOADING"}. CONFIGURED FUNCTION REGIONS: {data?.deployment.configuredRegions.join(", ") || "LOADING"}.</p>
+            <p>RESPONSE GENERATED: {data?.generatedAt || unavailable}. THIS IS NOT AN INFRASTRUCTURE VERIFICATION TIME.</p>
+            <p>PUBLIC DATABASE INVENTORY CHECKED: {data?.databaseInventory.checkedAt || unavailable}. CONFIGURED FUNCTION REGIONS: {data?.deployment.configuredRegions.join(", ") || unavailable}.</p>
             <p>DESCRIPTIONS BELOW DOCUMENT THIS RELEASE&apos;S SOURCE CONFIGURATION. EXTERNAL LIVE CHECKS ARE DATED SEPARATELY; UNKNOWN SETTINGS ARE NOT CERTIFIED.</p>
           </div>
         </section>
@@ -353,7 +345,7 @@ export default function TechStackPage() {
         <section className={styles.section}>
           <div className={styles.sectionTitle}>
             <h2>LIVE PUBLIC DATABASE INVENTORY</h2>
-            <span>MIGRATION {data?.databaseInventory.migrationHead || "LOADING"}</span>
+            <span>MIGRATION {data?.databaseInventory.migrationHead || unavailable}</span>
           </div>
           <div className={styles.inventoryList}>
             {(data?.databaseInventory.tables || []).map((table) => <code key={table}>{table}</code>)}
@@ -394,13 +386,14 @@ export default function TechStackPage() {
             <p>PRESENTATION MEDIA — VERIFIED 2026-10-14: THE PRIVATE SUPABASE BUCKET HAS 15 OBJECTS (224,309,367 BYTES). THESE BYTES ARE OUTSIDE THE DATABASE JSON AND DRIVE-TO-GCS BACKUP; INDEPENDENT RECOVERY COVERAGE HAS NOT BEEN ESTABLISHED.</p>
             <p>V2 EXPORT CHECKS THE LIVE TABLE INVENTORY, MUTATION FENCE, SECTION HASHES AND EXCHANGE TRUTH EVIDENCE. A NEW UPLOAD MUST MATCH DRIVE&apos;S MD5 AND SIZE RECEIPTS BEFORE IT IS MARKED VERIFIED. SHA-256 FULL READBACK CHECKS THE PREDECESSOR DURING EXPORT AND THE LATEST ARTIFACT DURING SYSTEM HEALTH; IT IS NOT A NEW-ARTIFACT READBACK BEFORE PRUNING.</p>
             <p>FILE-BACKUP ALERT RELEASE POLICY: NEW FILES HAVE UNTIL THE NEXT OVERNIGHT BACKUP DEADLINE; NOTIFICATION STATE DEDUPLICATES AN ONGOING INCIDENT AND ALLOWS ESCALATION AFTER 48 HOURS WITHOUT VERIFIED SUCCESS. THE PRIVATE INCIDENT MIGRATION AND APPLICATION RELEASE MUST BOTH BE ACTIVE; THIS PAGE DOES NOT CERTIFY ROLLOUT COMPLETION.</p>
-            <p>DATABASE-BACKUP ALERT LIMIT: ALL WARNING-LEVEL RESULTS ARE CURRENTLY MUTED, INCLUDING AN OLD OR MISSING VERIFIED DAILY BACKUP. INTEGRITY ERRORS ARE NOT MUTED. THIS NOTIFICATION BLIND SPOT IS A SEPARATE FOLLOW-UP; THE OFFLINE VALIDATOR DOES NOT CHANGE ALERT POLICY.</p>
+            <p>DATABASE-BACKUP ALERT POLICY: NORMAL OVERNIGHT WAITING AND UNVERIFIED CHECKS DO NOT SEND FAILURE EMAILS OR CLEAR AN EXISTING INCIDENT. A MISSING OR OVERDUE VERIFIED BACKUP, OR SYSTEM CHANGES STILL UNCOVERED AFTER THEIR DEADLINE, CAN NOTIFY ONCE; PERSISTENT PROTECTION GAPS ESCALATE AFTER 48 HOURS. REAL INTEGRITY ERRORS REMAIN ACTIONABLE. SYSTEM HEALTH SHOWS THE CURRENT EVIDENCE AND DEADLINE.</p>
             <p>GOOGLE CLOUD COST CONTROL — VERIFIED 2026-09-24: PROJECT MONTHLY ALERT BUDGET HKD77.50 (CONSERVATIVE APPROXIMATION OF USD10). SEPARATE CLOUD RUN MONTHLY SPEND CAP HKD77.50: CONFIGURED, NOT CURRENTLY ENFORCED; NOTIFICATIONS AT 50%, 80% AND 100%. THE CAP USES GROSS ESTIMATED COSTS AND MAY PAUSE NEW BACKUP JOBS UNTIL MANUALLY LIFTED. A CLOUD RUN SPEND CAP DOES NOT CAP STORAGE CHARGES OR GUARANTEE AN EXACT TOTAL BILL; ENFORCEMENT CAN LAG. AN ALERTS-ONLY BUDGET DOES NOT STOP SPENDING.</p>
             <p>GCS FOOTPRINT — VERIFIED 2026-09-24: APPROXIMATELY 8.53 GIB INCLUDING LIVE, NONCURRENT AND SOFT-DELETED OBJECTS. THE SOURCE MANIFEST&apos;S 3.90 GIB ESTIMATE IS NOT TOTAL BILLED STORAGE; NO CLEANUP WAS PERFORMED.</p>
             <p>EXCHANGE DATED LIVE CHECK — 2026-10-14: ACCOUNT FCUNO-EXCHANGE-SYNC; RUNBOOK SYNC-FCUNO-OUTLOOKADDRESSBOOK; PUBLISHED WORKER 2026-10-09.1 MATCHED THE PRESERVED REPOSITORY BYTES; POWERSHELL 7.6 / EXCHANGEONLINEMANAGEMENT 3.10.1. HOURLY :31 AND DAILY 06:10 HKT SCHEDULES WERE VERIFIED. THIS PAGE DOES NOT RECHECK AZURE AT LOAD TIME. THE WEBHOOK EXPIRY 2035-05-29 IS AN OLDER JULY RECORD, NOT REVERIFIED.</p>
             <p>EXCHANGE EMAIL POLICY: HEALTHY RUNS, INCLUDING SUCCESSFUL CHANGES, AND VERIFIED RECOVERY ARE SILENT. TEMPORARY HOURLY DELAYS MUST PERSIST ACROSS RUNS; ACCESS/TERMINAL ISSUES AND FULL-VERIFICATION FAILURES CAN ALERT IMMEDIATELY. NOTICES ARE DEDUPLICATED WITH DELIVERY RECEIPTS AND SIMPLE SUMMARIES; INTERNAL DIAGNOSTICS REMAIN IN THE SYNC RECORD.</p>
             <p>ON-DEMAND FULL CERTIFICATION STARTS IN AZURE WITH SYNCMODE FULL. THE FCUNO SYNC EXCHANGE BUTTON STARTS INCREMENTAL ONLY. RECHECK AZURE BEFORE RELYING ON THIS DATED RECORD.</p>
             <p>SUPABASE BACKUPS — API VERIFIED 2026-10-14: EIGHT PHYSICAL RESTORE POINTS LISTED FOR OCTOBER 7–14, LATEST OCTOBER 14 AT 10:04:53 HKT. THIS IS AN OBSERVED SEVEN-DAY SPAN, NOT A GUARANTEE OF EIGHT-DAY RETENTION. PITR IS NOT ENABLED. MANAGED DATABASE BACKUPS EXCLUDE STORAGE OBJECT BYTES. NO RESTORE WAS RUN; FULL RECOVERY AND RECOVERY TIME REMAIN UNTESTED.</p>
+            <p>DATABASE MAINTENANCE — READ-ONLY CHECK 2026-10-16: THE PROJECT REMAINS ON 17.6.1.084. SUPABASE&apos;S 17.11 SECURITY UPDATE IS AVAILABLE. NO AFFECTED LTREE / FLOAT GIST INDEXES, NON-EXTENSION CUSTOM ESTIMATOR OPERATORS, APPLICATION PGP FUNCTION REFERENCES OR APPLICATION BYTEA COLUMNS WERE FOUND. THIS DOES NOT CERTIFY EXTERNAL ENCRYPTED DATA OR OLDER CLIENT TLS SUPPORT. NO UPGRADE OR RESTORE WAS RUN; ARRANGE A SEPARATE MAINTENANCE WINDOW. <a href="https://supabase.com/changelog/postgres-15-19-17-11-breaking-changes" target="_blank" rel="noreferrer">SUPABASE UPGRADE GUIDANCE</a>.</p>
             <p>BACKUPS CONTAIN BUSINESS AND PERSONAL DATA. ACCESS MUST REMAIN RESTRICTED; ADMIN AND SPC PASSWORD HASHES ARE EXCLUDED FROM THE JSON ARTIFACT.</p>
             <p>DETAILED RESTORE AND REHEARSAL PROCEDURE: DOCS/BACKUP-RESTORE-RUNBOOK.MD IN THE SOURCE REPOSITORY.</p>
           </div>

@@ -66,12 +66,31 @@
 
 .sectionTitle {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--fc-admin-border-soft);
   background: var(--fc-admin-panel-soft-bg);
+}
+
+.sectionTitle .refreshButton {
+  flex: 0 0 auto;
+  padding: 7px 12px;
+  border: 1px solid var(--fc-admin-button-border);
+  border-radius: 6px;
+  background: var(--fc-admin-button-bg);
+  color: var(--fc-admin-button-text);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.sectionTitle .refreshButton:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .sectionTitle h2,

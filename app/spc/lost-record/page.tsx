@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { useSpcAuth } from "@/lib/useSpcAuth"
@@ -26,6 +26,7 @@ type LostReasonResponse = {
 }
 
 type ReviewDraft = {
+  expectedUpdatedAt: string
   supplierLostReason: string
   supplierLostReasonDetails: string
   spcComments: string
@@ -59,6 +60,7 @@ function displayDate(value: string | null | undefined) {
 
 function reviewDraft(enquiry: SpcEnquiry): ReviewDraft {
   return {
+    expectedUpdatedAt: enquiry.updatedAt,
     supplierLostReason: enquiry.meta?.supplierLostReason || "",
     supplierLostReasonDetails: enquiry.meta?.supplierLostReasonDetails || "",
     spcComments: enquiry.meta?.spcComments || "",
@@ -84,6 +86,7 @@ export default function SpcLostRecordPage() {
   const [drafts, setDrafts] = useState<Record<string, ReviewDraft>>({})
   const [loading, setLoading] = useState(false)
   const [savingId, setSavingId] = useState("")
+  const savingIdRef = useRef("")
   const [message, setMessage] = useState("")
   const [notice, setNotice] = useState("")
   const [reasonDialogOpen, setReasonDialogOpen] = useState(false)
@@ -139,11 +142,11 @@ export default function SpcLostRecordPage() {
     void loadData()
   }, [loadData])
 
-  function updateReviewDraft(id: string, field: keyof ReviewDraft, value: string) {
+  function updateReviewDraft(id: string, field: Exclude<keyof ReviewDraft, "expectedUpdatedAt">, value: string) {
     setDrafts((current) => ({
       ...current,
       [id]: {
-        ...(current[id] || { supplierLostReason: "", supplierLostReasonDetails: "", spcComments: "" }),
+        ...(current[id] || { expectedUpdatedAt: "", supplierLostReason: "", supplierLostReasonDetails: "", spcComments: "" }),
         [field]: value,
         ...(field === "supplierLostReason" && value !== "OTHER" ? { supplierLostReasonDetails: "" } : {}),
       },
@@ -151,11 +154,13 @@ export default function SpcLostRecordPage() {
   }
 
   async function saveReview(enquiry: SpcEnquiry) {
+    if (savingIdRef.current) return
     const draft = drafts[enquiry.id] || reviewDraft(enquiry)
     if (draft.supplierLostReason === "OTHER" && !draft.supplierLostReasonDetails.trim()) {
       setMessage("Please specify the supplier reason for OTHER.")
       return
     }
+    savingIdRef.current = enquiry.id
     setSavingId(enquiry.id)
     setMessage("")
     setNotice("")
@@ -166,19 +171,38 @@ export default function SpcLostRecordPage() {
         body: JSON.stringify({ id: enquiry.id, ...draft }),
       })
       const data = (await response.json()) as {
-        review?: { meta?: SpcEnquiryMeta; updatedAt?: string }
+        success?: boolean
+        review?: { id?: string; meta?: SpcEnquiryMeta; updatedAt?: string }
         message?: string
       }
       if (!response.ok) throw new Error(data.message || "Failed to update lost record.")
+      const review = data.review
+      if (data.success !== true || review?.id !== enquiry.id || !review.meta || typeof review.meta !== "object" || Array.isArray(review.meta) || Object.values(review.meta).some((value) => typeof value !== "string") || typeof review.updatedAt !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(review.updatedAt) || !Number.isFinite(Date.parse(review.updatedAt))) {
+        throw new Error("The saved record could not be verified. Your draft is kept. Refresh and review the record before saving again.")
+      }
+      const saved = { ...enquiry, meta: review.meta, updatedAt: review.updatedAt }
       setEnquiries((current) => current.map((item) => item.id === enquiry.id
-        ? { ...item, meta: data.review?.meta || item.meta, updatedAt: data.review?.updatedAt || item.updatedAt }
+        ? { ...item, meta: saved.meta, updatedAt: saved.updatedAt }
         : item))
+      setDrafts((current) => ({ ...current, [enquiry.id]: reviewDraft(saved) }))
       setNotice("Lost record updated.")
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to update lost record.")
     } finally {
+      savingIdRef.current = ""
       setSavingId("")
     }
+  }
+
+  function refreshData() {
+    if (savingIdRef.current) return
+    const hasDraft = enquiries.some((enquiry) => {
+      const draft = drafts[enquiry.id]
+      const saved = reviewDraft(enquiry)
+      return draft && (draft.supplierLostReason !== saved.supplierLostReason || draft.supplierLostReasonDetails !== saved.supplierLostReasonDetails || draft.spcComments !== saved.spcComments)
+    })
+    if (hasDraft && !window.confirm("Refresh and discard your unsaved lost-record changes?")) return
+    void loadData()
   }
 
   async function saveReasonList(audience: "BUYER TRADER" | "SUPPLIER TRADER") {
@@ -225,10 +249,11 @@ export default function SpcLostRecordPage() {
               EDIT LOST REASONS
             </button>
           ) : null}
-          <button type="button" className="spc-fixture-refresh-button" onClick={() => void loadData()} disabled={loading}>
+          <button type="button" className="spc-fixture-refresh-button" onClick={refreshData} disabled={loading || Boolean(savingId)}>
             {loading ? "REFRESHING..." : "REFRESH"}
           </button>
         </div>
+        {message ? <div className="spc-alert is-error" role="alert">{message.toUpperCase()}</div> : null}
         <div className="spc-table-wrap">
           <table className="spc-table spc-fixture-table spc-lost-record-table" style={{ width: lostRecordTableWidth, minWidth: lostRecordTableWidth }}>
             <colgroup>
@@ -253,11 +278,6 @@ export default function SpcLostRecordPage() {
               <tr className="spc-fixture-section-row">
                 <td colSpan={lostRecordColumnSpan}>LOST RECORD</td>
               </tr>
-              {message ? (
-                <tr className="spc-fixture-status-row is-error">
-                  <td colSpan={lostRecordColumnSpan}>{message.toUpperCase()}</td>
-                </tr>
-              ) : null}
               {tableRows.map((enquiry) => {
                 const draft = drafts[enquiry.id] || reviewDraft(enquiry)
                 const supplierReasonText = enquiry.meta?.supplierLostReason
@@ -291,7 +311,7 @@ export default function SpcLostRecordPage() {
                     </td>
                     <td>
                       {canReview ? (
-                        <button type="button" className="spc-fixture-save-button" onClick={() => void saveReview(enquiry)} disabled={savingId === enquiry.id}>
+                        <button type="button" className="spc-fixture-save-button" onClick={() => void saveReview(enquiry)} disabled={Boolean(savingId)}>
                           {savingId === enquiry.id ? "SAVING" : "SAVE"}
                         </button>
                       ) : "-"}

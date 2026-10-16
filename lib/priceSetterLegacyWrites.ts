@@ -13,6 +13,7 @@ export function priceSetterLegacyWriteMessage(
   const historyPage = ["hongkong-price-history", "taiwan-price-history"].includes(pageId)
   if (historyPage && ["price_history", "ports", "remarks"].includes(table)) return message
   if (pageId === "pricesetter" && table === "remarks") return message
+  if (pageId === "taiwan-remarks" && table === "remarks") return message
   if (pageId !== "pricesetter" && !(pageId === "taiwan-remarks" && table === "remarks")) return null
   if (table === "price_history" || table === "ports") return message
   if (table !== "remarks") return null

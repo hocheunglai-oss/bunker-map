@@ -14,16 +14,21 @@ async function main() {
       writes: [], failLoad: params.has("failLoad"), failNext: false, rejectNext: false, deferNext: false, release: null
     };
     export function useSimpleAdminAuth() { return {loading:false, authenticated:true, role:"BT", permissions:{"taiwan-remarks":params.get("access") || "edit"}}; }
+    window.fetch=async(url,init)=>{
+      if(url!=="/api/admin/taiwan-remarks")throw Error("Unexpected request");
+      const changes=JSON.parse(init.body).changes;
+      const rows=changes.map(({id,content})=>({id,content}));
+      state.writes.push(structuredClone(rows));
+      if(state.deferNext) { state.deferNext=false; await new Promise(resolve=>{state.release=resolve}); }
+      if(state.rejectNext) {state.rejectNext=false; throw Error("Synthetic transport failure");}
+      if(state.failNext) {state.failNext=false; return Response.json({message:"Error saving remarks"},{status:503});}
+      const replayed=rows.every(row=>state.rows.some(saved=>saved.id===row.id&&saved.content===row.content));
+      if(!replayed&&changes.some(({id,expected})=>{const saved=state.rows.find(row=>row.id===id);return Boolean(saved)!==expected.exists||(saved?.content??null)!==expected.content}))return Response.json({code:"REMARKS_CONFLICT",message:"The remarks changed in another session. Your draft is still here; reload the saved remarks before trying again."},{status:409});
+      for(const row of rows) { const index=state.rows.findIndex(item=>item.id===row.id); if(index>=0) state.rows[index]=structuredClone(row); else state.rows.push(structuredClone(row)); }
+      return Response.json({rows,replayed});
+    };
     export const supabase = {from(table) { if(table !== "remarks") throw Error("Unexpected table"); return {
       select() { return {async in() { if(state.failLoad) return {data:null,error:{message:"Synthetic load failure"}}; return {data:structuredClone(state.rows),error:null}; }}; },
-      async upsert(rows) {
-        state.writes.push(structuredClone(rows));
-        if(state.deferNext) { state.deferNext=false; await new Promise(resolve=>{state.release=resolve}); }
-        if(state.rejectNext) {state.rejectNext=false; throw Error("Synthetic transport failure");}
-        if(state.failNext) {state.failNext=false; return {error:{message:"Synthetic save failure"}};}
-        for(const row of rows) { const index=state.rows.findIndex(item=>item.id===row.id); if(index>=0) state.rows[index]=structuredClone(row); else state.rows.push(structuredClone(row)); }
-        return {error:null};
-      }
     }; }};
   `
   const bundle = await build({
@@ -118,6 +123,22 @@ async function main() {
     await button("Saved").waitFor()
     assert.equal((await writes()).length,3)
     console.log("PASS: save validation, in-flight edit locking, rejected and failed save retain drafts, explicit retry")
+
+    await reset()
+    await page.getByLabel("Special Notice",{exact:true}).fill("KEEP MY CONFLICTED DRAFT")
+    await page.evaluate(()=>{window.__taiwanHarness.rows.find(row=>row.id===2).content="COLLEAGUE SAVED NOTICE"})
+    await button("Save").click()
+    await page.getByText(/remarks changed in another session/).first().waitFor()
+    assert.equal(await page.getByLabel("Special Notice",{exact:true}).inputValue(),"KEEP MY CONFLICTED DRAFT")
+    assert.equal(await button("Save").isDisabled(),true)
+    page.once("dialog",dialog=>dialog.dismiss())
+    await button("Reload saved remarks").click()
+    assert.equal(await page.getByLabel("Special Notice",{exact:true}).inputValue(),"KEEP MY CONFLICTED DRAFT")
+    page.once("dialog",dialog=>dialog.accept())
+    await button("Reload saved remarks").click()
+    await button("Saved").waitFor()
+    assert.equal(await page.getByLabel("Special Notice",{exact:true}).inputValue(),"COLLEAGUE SAVED NOTICE")
+    console.log("PASS: captured conflict retains draft; only explicit confirmed reload discards it")
 
     await page.goto(origin+"?failLoad=1")
     await page.getByRole("alert").waitFor()

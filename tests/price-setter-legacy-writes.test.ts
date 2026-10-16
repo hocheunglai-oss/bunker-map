@@ -29,11 +29,11 @@ test("legacy report and port upserts/deletions are blocked; notice edits and rea
   for (const page of ["taiwan-remarks", "ccinfo", "phonebook", "outlook-addressbook"]) assert.equal(priceSetterLegacyWriteMessage(page, "ports", "PATCH"), null)
 })
 
-test("Taiwan Remarks permits only exact notice upserts, not an alternative privileged snapshot/settings writer", () => {
+test("Taiwan Remarks requires the atomic baseline endpoint even for former exact notice upserts", () => {
   for (const id of [1, 2, 3]) for (const value of [{ id, content: "NOTICE" }, [{ id, content: "NOTICE" }]]) {
-    assert.equal(priceSetterLegacyWriteMessage("taiwan-remarks", "remarks", "POST", body(value)), null)
+    assert.ok(priceSetterLegacyWriteMessage("taiwan-remarks", "remarks", "POST", body(value)))
   }
-  assert.equal(priceSetterLegacyWriteMessage("taiwan-remarks", "remarks", "POST", body([{ id: 1, content: "" }, { id: 2, content: "" }, { id: 3, content: "{}" }])), null)
+  assert.ok(priceSetterLegacyWriteMessage("taiwan-remarks", "remarks", "POST", body([{ id: 1, content: "" }, { id: 2, content: "" }, { id: 3, content: "{}" }])))
   for (const method of ["PATCH", "DELETE"]) assert.ok(priceSetterLegacyWriteMessage("taiwan-remarks", "remarks", method, body({ id: 1, content: "" })))
   for (const value of [null, [], {}, { id: "1", content: "" }, { id: 1, content: null }, { id: 1, content: "", extra: true }, { id: 105, content: "{}" }, [{ id: 1, content: "" }, { id: 101, content: "{}" }]]) {
     assert.ok(priceSetterLegacyWriteMessage("taiwan-remarks", "remarks", "POST", body(value)))

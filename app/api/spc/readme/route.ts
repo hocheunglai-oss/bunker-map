@@ -93,7 +93,7 @@ export async function POST(request: Request) {
 
     if (payload.action === "delete") {
       if (!payload.id) throw new Error("Section id is required.")
-      await deleteSpcPresentationChunk(payload.id, context)
+      await deleteSpcPresentationChunk(payload.id, payload.revision, context)
       return NextResponse.json({ success: true })
     }
 
@@ -117,9 +117,12 @@ export async function POST(request: Request) {
       if (payload.kind !== "video" && payload.kind !== "narration") {
         throw new Error("Invalid media type.")
       }
+      if (typeof payload.revision !== "number" || !Number.isSafeInteger(payload.revision) || payload.revision < 1) {
+        throw new Error("This section changed in another session. Refresh before attaching media.")
+      }
       const chunk = await completeSpcPresentationUpload(
         payload.id,
-        Math.max(Number(payload.revision || 0), 1),
+        payload.revision,
         payload.kind,
         payload.path,
         payload.mimeType || "application/octet-stream",

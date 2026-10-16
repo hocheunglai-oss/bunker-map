@@ -1,0 +1,57 @@
+{
+  "schema": "fcuno.sitewide-audit-checkpoint/v1",
+  "date": "2026-10-16",
+  "goalComplete": false,
+  "status": "source-release-candidate",
+  "releaseEvidence": "This checkpoint describes source changes, not deployment. Confirm the merged source tree, migration history and both production deploy-info responses before treating the batch as live.",
+  "baseProductionCommit": "a61176f981463f659de100030c003297f5cfdd8c",
+  "baseProductionTree": "b3ae719f0e0f8d9cd6910d4aaf3985756801d143",
+  "scopedRepairs": [
+    "Taiwan remark saves use browser-reviewed baselines, atomically validate all requested rows and require exact committed content and row-audit acknowledgements. Conflicts retain the draft; identical committed retries are read-only.",
+    "General Taiwan remarks remain unpublished after Save. Instructions point to Taiwan Price History and its separate Publish action, as chosen by the user. Special Notice and typhoon overlays keep their existing Save-and-refresh behavior.",
+    "Enquiry Worksheet send acknowledgements and report-close timers belong to the request and dialog that created them, not a later edited draft or reopened dialog.",
+    "SPC lost-record reviews compare the revision captured when the draft opened, acknowledge exact committed metadata and keep drafts on conflicts.",
+    "SPC presentation deletion requires the captured revision and cleans up only media returned by the successful deletion. Media completion retries preserve their original intent, validate the exact acknowledgement and retain unsaved text.",
+    "Valid supplier audit receipts are visible in the intended SPC Audit Log scope. Whole-store Undo remains unavailable so it cannot overwrite unrelated supplier edits.",
+    "Tech Stack validates the response before rendering, offers retry after failure, labels retained data and ignores cancelled responses from an older authenticated session. Backup-alert and cron descriptions match current source behavior."
+  ],
+  "plannedMigrations": [
+    "20261016033635_atomic_taiwan_remarks_save.sql"
+  ],
+  "userDecision": {
+    "generalTaiwanRemarks": "Wait for Publish; make the instructions clear",
+    "pricesAndQuoteDate": "Preserve the existing saved values; no automatic update to today."
+  },
+  "preservedBoundaries": [
+    "No dependency, Exchange worker, federation, FCOS, retention, cost-control or holiday-policy changes.",
+    "No business notices, quotes, supplier records, contacts, templates, reminders or emails changed for testing.",
+    "No backup, contact sync, recovery or third-party delivery triggered for testing.",
+    "All automated browser writes use isolated synthetic data. Personal tabs and unrelated local changes are preserved."
+  ],
+  "requiredReleaseChecks": [
+    "Frozen source tree remains unchanged across broad TypeScript, offline SQL, native PostgreSQL, browser, type, lint, build and contract gates.",
+    "Narrow and representative phone widths plus desktop, Chromium and WebKit, both OS color preferences and affected Edit/View/signed-out states.",
+    "Production dependency audit passes; full audit evidence retains only the unchanged authorized development-tool warning.",
+    "One append-only migration is dry-run and applied only to the pinned FCUNO project; exact privileges, audit/fence triggers and unchanged business data are checked afterward.",
+    "The exact staged production build is promoted, both production hostnames are verified and owned browser sessions are closed."
+  ],
+  "releasePolicy": {
+    "knownDevelopmentOnlyAdvisory": "GHSA-vfj7-8cjw-p6xm",
+    "standingAuthorization": "docs/known-development-warning-release-authorization-2026-10-15.json",
+    "newAdvisoriesNotWaived": true,
+    "allOtherChecksMustPass": true
+  },
+  "remainingGoalWork": [
+    "Complete the requirement-by-requirement sitewide evidence matrix, including remaining reporting and permission workflows.",
+    "Complete a full isolated recovery restore drill, including separately stored object bytes; existing backup and validation evidence is not a full restore proof.",
+    "Review permanent newest-two backup retention and project-wide cloud spending controls with the business owner.",
+    "Keep unresolved business recipient, fixture and attendance-mapping choices explicit rather than guessing.",
+    "Plan PostgreSQL security maintenance without disrupting office hours and verify any remaining legacy client compatibility."
+  ],
+  "verificationLimits": [
+    "Synthetic browser/database tests do not establish actual third-party delivery.",
+    "Physical iPhone and Android devices are not controlled or tested.",
+    "The admin palette is fixed light; testing dark OS preference does not claim a separate shipped dark theme.",
+    "A backup generated before this migration is not proof of post-migration recovery coverage."
+  ]
+}
