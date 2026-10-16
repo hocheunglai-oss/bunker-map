@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
   applyVlsfoMaxRemarksToShortenedEnquiry,
   buildShortenedEnquiry,
@@ -457,9 +457,23 @@ export default function EnquiryWorksheetPage() {
   const parserAiGenerationRef = useRef(0)
   const parserAiRequestRef = useRef<ParserAiRequest | null>(null)
   const whatsappRequestIdRef = useRef("")
+  const whatsappSubmittedDraftRef = useRef<{ text: string; buyer: string } | null>(null)
+  const whatsappCurrentDraftRef = useRef({ text: "", buyer: "" })
   const whatsappTimeoutRef = useRef<number | null>(null)
+  const parserReportSessionRef = useRef(0)
+  const parserReportSaveRef = useRef<{ session: number; pending: boolean } | null>(null)
+  const parserReportCloseTimeoutRef = useRef<number | null>(null)
+
+  const invalidateWhatsappRequest = useCallback(() => {
+    whatsappRequestIdRef.current = ""
+    whatsappSubmittedDraftRef.current = null
+    if (whatsappTimeoutRef.current !== null) window.clearTimeout(whatsappTimeoutRef.current)
+    whatsappTimeoutRef.current = null
+    setWhatsappStatus("idle")
+  }, [])
 
   const invalidateParserAiRequest = useCallback(() => {
+    invalidateWhatsappRequest()
     const wasPending = parserAiRequestRef.current?.pending
     parserAiGenerationRef.current += 1
     parserAiRequestRef.current = null
@@ -467,7 +481,7 @@ export default function EnquiryWorksheetPage() {
       setParserAiStatus("idle")
       setParserAiMessage("")
     }
-  }, [])
+  }, [invalidateWhatsappRequest])
 
   const updatePortIndex = useCallback((ports: string[]) => {
     const previous = portIndexRef.current
@@ -480,6 +494,9 @@ export default function EnquiryWorksheetPage() {
   useEffect(() => () => {
     parserAiGenerationRef.current += 1
     parserAiRequestRef.current = null
+    parserReportSessionRef.current += 1
+    parserReportSaveRef.current = null
+    if (parserReportCloseTimeoutRef.current !== null) window.clearTimeout(parserReportCloseTimeoutRef.current)
   }, [])
 
   useEffect(() => {
@@ -627,6 +644,12 @@ export default function EnquiryWorksheetPage() {
     [cleanedEnquiryText, enquiryText, guesses.imo, guesses.port, guesses.vesselName, portIndex, vlsfoMaxRemarks],
   )
   const shortenedDraft = shortenedDraftOverride ?? shortenedEnquiry
+  useLayoutEffect(() => {
+    whatsappCurrentDraftRef.current = {
+      text: shortenedDraft.trim(),
+      buyer: (guesses.buyer || worksheet.buyer).trim(),
+    }
+  }, [shortenedDraft, guesses.buyer, worksheet.buyer])
 
   useEffect(() => {
     if (!cacheReady) return
@@ -677,8 +700,8 @@ export default function EnquiryWorksheetPage() {
 
   useEffect(() => {
     setCopyStatus("idle")
-    setWhatsappStatus("idle")
-  }, [shortenedEnquiry])
+    invalidateWhatsappRequest()
+  }, [shortenedEnquiry, invalidateWhatsappRequest])
 
   function isCurrentParserAiRequest(request: ParserAiRequest) {
     return parserAiRequestRef.current === request &&
@@ -690,6 +713,7 @@ export default function EnquiryWorksheetPage() {
     fields: ParserAiFields,
     request: ParserAiRequest,
   ) {
+    invalidateWhatsappRequest()
     const correctedGuess = parseEnquiryWorksheetGuess(correctedOutput, { portNames: portIndex })
     const hasCorrectedFields = Boolean(
       correctedGuess.vesselName ||
@@ -795,10 +819,16 @@ export default function EnquiryWorksheetPage() {
         ? (event.data as { type?: unknown; ok?: unknown; requestId?: unknown; message?: unknown })
         : null
       if (!payload || payload.type !== WHATSAPP_EXTENSION_RESPONSE_TYPE) return
+      if (typeof payload.ok !== "boolean") return
       if (!whatsappRequestIdRef.current || payload.requestId !== whatsappRequestIdRef.current) return
+      const submitted = whatsappSubmittedDraftRef.current
+      const current = whatsappCurrentDraftRef.current
+      if (!submitted || submitted.text !== current.text || submitted.buyer !== current.buyer) return
 
       if (whatsappTimeoutRef.current !== null) window.clearTimeout(whatsappTimeoutRef.current)
       whatsappTimeoutRef.current = null
+      whatsappRequestIdRef.current = ""
+      whatsappSubmittedDraftRef.current = null
       setWhatsappStatus(payload.ok ? "sent" : "failed")
     }
 
@@ -842,6 +872,8 @@ export default function EnquiryWorksheetPage() {
 
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`
     whatsappRequestIdRef.current = requestId
+    const buyer = (guesses.buyer || worksheet.buyer).trim()
+    whatsappSubmittedDraftRef.current = { text, buyer }
     if (whatsappTimeoutRef.current !== null) window.clearTimeout(whatsappTimeoutRef.current)
     setWhatsappStatus("sending")
     window.postMessage(
@@ -849,19 +881,30 @@ export default function EnquiryWorksheetPage() {
         type: WHATSAPP_EXTENSION_REQUEST_TYPE,
         requestId,
         text,
-        buyer: (guesses.buyer || worksheet.buyer).trim(),
+        buyer,
       },
       window.location.origin,
     )
 
     whatsappTimeoutRef.current = window.setTimeout(() => {
       if (whatsappRequestIdRef.current !== requestId) return
+      const current = whatsappCurrentDraftRef.current
+      if (current.text !== text || current.buyer !== buyer) {
+        invalidateWhatsappRequest()
+        return
+      }
       whatsappTimeoutRef.current = null
+      whatsappRequestIdRef.current = ""
+      whatsappSubmittedDraftRef.current = null
       setWhatsappStatus("failed")
     }, 2500)
   }
 
   function openParserReport() {
+    if (parserReportSaveRef.current?.pending) return
+    parserReportSessionRef.current += 1
+    if (parserReportCloseTimeoutRef.current !== null) window.clearTimeout(parserReportCloseTimeoutRef.current)
+    parserReportCloseTimeoutRef.current = null
     const aiOutput = parserAiSuggestion?.correctedOutput.trim() || ""
     const parserOutput = parserAiSuggestion?.parserOutput.trim() || shortenedEnquiry.trim()
     setParserReportDraft({
@@ -874,11 +917,24 @@ export default function EnquiryWorksheetPage() {
     setParserReportStatus("idle")
   }
 
+  function closeParserReport() {
+    if (parserReportSaveRef.current?.pending) return
+    parserReportSessionRef.current += 1
+    if (parserReportCloseTimeoutRef.current !== null) window.clearTimeout(parserReportCloseTimeoutRef.current)
+    parserReportCloseTimeoutRef.current = null
+    setParserReportDraft((current) => ({ ...current, open: false }))
+    setParserReportStatus("idle")
+  }
+
   async function submitParserReport() {
     const rawText = enquiryText.trim()
     const parserOutput = parserReportDraft.parserOutput.trim() || shortenedEnquiry.trim()
     const correctedOutput = parserReportDraft.correctedOutput.trim()
-    if (!rawText || !correctedOutput || parserReportStatus === "saving") return
+    if (!rawText || !correctedOutput || parserReportSaveRef.current?.pending) return
+
+    const request = { session: parserReportSessionRef.current, pending: true }
+    parserReportSaveRef.current = request
+    const isCurrent = () => parserReportSaveRef.current === request && parserReportSessionRef.current === request.session
 
     setParserReportStatus("saving")
     try {
@@ -909,16 +965,21 @@ export default function EnquiryWorksheetPage() {
         }),
       })
       const payload = (await response.json().catch(() => ({}))) as { message?: string }
+      if (!isCurrent()) return
       if (!response.ok) throw new Error(payload.message || "Failed to save report.")
 
       notifyParserReportCountChanged("enquiryworksheet")
       setParserReportStatus("saved")
-      window.setTimeout(() => {
+      parserReportCloseTimeoutRef.current = window.setTimeout(() => {
+        if (!isCurrent()) return
+        parserReportCloseTimeoutRef.current = null
         setParserReportDraft((current) => ({ ...current, open: false }))
         setParserReportStatus("idle")
       }, 900)
     } catch {
-      setParserReportStatus("failed")
+      if (isCurrent()) setParserReportStatus("failed")
+    } finally {
+      if (isCurrent()) request.pending = false
     }
   }
 
@@ -1324,7 +1385,7 @@ export default function EnquiryWorksheetPage() {
               <h2 id="parser-report-title">Report Parser Output</h2>
               <button
                 type="button"
-                onClick={() => setParserReportDraft((current) => ({ ...current, open: false }))}
+                onClick={closeParserReport}
                 disabled={parserReportStatus === "saving"}
                 aria-label="Close report dialog"
                 data-admin-button-style="preserve"
@@ -1361,7 +1422,7 @@ export default function EnquiryWorksheetPage() {
             <div className={styles.reportActions}>
               <button
                 type="button"
-                onClick={() => setParserReportDraft((current) => ({ ...current, open: false }))}
+                onClick={closeParserReport}
                 disabled={parserReportStatus === "saving"}
                 data-admin-button-style="preserve"
               >

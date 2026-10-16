@@ -4,6 +4,8 @@ import test from "node:test"
 import vm from "node:vm"
 import ts from "typescript"
 import { fcunoConnectionPolicy } from "../config/fcunoConnections"
+import { isTechStackResponse } from "../lib/techStackClient"
+import { evaluateDatabaseBackupProtection } from "../lib/backupProtectionPolicy"
 
 const routeSource = readFileSync(new URL("../app/api/admin/tech-stack/route.ts", import.meta.url), "utf8")
 const pageSource = readFileSync(new URL("../app/admin/techstack/page.tsx", import.meta.url), "utf8")
@@ -59,6 +61,7 @@ test("Tech Stack exposes canonical deployment identity and the exact repository 
   assert.ok(Date.parse(body.databaseInventory.checkedAt))
   assert.deepEqual(body.databaseInventory.tables, ["admin_users", "spc_users"])
   assert.equal((result.init?.headers as Record<string, string>)["Cache-Control"], "private, no-store, max-age=0")
+  assert.equal(isTechStackResponse(result.body), true, "The real API response satisfies the client contract.")
 })
 
 test("Tech Stack presence never certifies credentials or exposes secret values", async () => {
@@ -117,8 +120,47 @@ test("Tech Stack documents recovery limits and separates dated external checks f
   assert.match(pageSource, /ACCESS\/TERMINAL ISSUES AND FULL-VERIFICATION FAILURES CAN ALERT IMMEDIATELY/)
   assert.doesNotMatch(pageSource, /ALL FAILURES SEND DETAILED NOTICES/)
   assert.match(pageSource, /NOT A HOSTED-ARTIFACT OR RESTORE PROOF/)
-  assert.match(pageSource, /ALL WARNING-LEVEL RESULTS ARE CURRENTLY MUTED/)
+  assert.doesNotMatch(pageSource, /ALL WARNING-LEVEL RESULTS ARE CURRENTLY MUTED/)
+  assert.match(pageSource, /A MISSING OR OVERDUE VERIFIED BACKUP/)
+  assert.match(pageSource, /PERSISTENT PROTECTION GAPS ESCALATE AFTER 48 HOURS/)
+  assert.match(pageSource, /08:15 \/ 08:30 RETRIES USE THE SAME OCCURRENCE RECEIPT/)
+  assert.match(pageSource, /18:10 HKT DAILY CHECK AFTER THE 18:00 DEADLINE/)
+  assert.ok(vercelConfiguration.crons.some((row: { path: string; schedule: string }) =>
+    row.path === "/api/cron/attendance-auto-confirm" && row.schedule === "10 10 * * *"))
   for (const { path } of vercelConfiguration.crons) {
     assert.ok(pageSource.includes(`"${path}"`), `Missing readable cron description for ${path}`)
   }
+})
+
+test("Tech Stack never accepts an incomplete inventory or unmasked credential response", async () => {
+  const body = JSON.parse(JSON.stringify((await loadRoute()()).body))
+  for (const patch of [
+    { deployment: null },
+    { databaseInventory: { ...body.databaseInventory, tables: [null] } },
+    { schedules: [{ path: "/synthetic" }] },
+    { verification: null },
+    { generatedAt: "not-a-date" },
+    { secrets: [{ ...body.secrets[0], value: "a-secret-must-not-be-rendered" }] },
+    { secrets: [{ ...body.secrets[0], configured: "true" }] },
+  ]) assert.equal(isTechStackResponse({ ...body, ...patch }), false)
+  assert.equal(isTechStackResponse(null), false)
+  assert.equal(isTechStackResponse([]), false)
+})
+
+test("Tech Stack alert guidance matches the executable backup policy rather than blanket-muting warnings", () => {
+  const now = Date.parse("2026-10-16T03:00:00.000Z")
+  const waiting = evaluateDatabaseBackupProtection({
+    now, receiptCreatedAt: "2026-10-15T19:13:00.000Z", generatedAt: "2026-10-15T19:03:00.000Z", inventoryCurrent: false,
+  })
+  assert.equal(waiting.details.notificationEligible, false)
+  assert.equal(waiting.details.incidentResolved, false)
+  const missing = evaluateDatabaseBackupProtection({ now, receiptCreatedAt: null, inventoryCurrent: null })
+  assert.equal(missing.status, "warning")
+  assert.equal(missing.details.notificationEligible, true)
+  const persistent = evaluateDatabaseBackupProtection({
+    now: now + 72 * 3_600_000, receiptCreatedAt: null, inventoryCurrent: null,
+    gaps: [{ key: "availability", firstDueAt: new Date(now).toISOString(), firstUncoveredAt: new Date(now).toISOString() }],
+  })
+  assert.equal(persistent.status, "error")
+  assert.equal(persistent.details.alertLevel, 2)
 })

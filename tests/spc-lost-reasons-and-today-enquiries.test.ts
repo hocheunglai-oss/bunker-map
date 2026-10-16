@@ -81,7 +81,8 @@ test("lost record enforces separate role-aware review and comments", () => {
   assert.match(lostPage, /normalizedRole === "ADMIN" && canAccessSpcPage\(permissions, "spc-lost-record", "edit"\)/)
   assert.match(lostLibrary, /role !== "SUPPLIER TRADER" && role !== "ADMIN"/)
   assert.match(lostLibrary, /supplierLostReason === "OTHER" && !supplierLostReasonDetails/)
-  assert.match(lostLibrary, /\.eq\("updated_at", existing\.updated_at\)/)
+  assert.match(lostLibrary, /\.eq\("updated_at", expectedUpdatedAt\)/)
+  assert.match(lostPage, /expectedUpdatedAt: enquiry\.updatedAt/)
   assert.match(lostLibrary, /changed while you were editing/)
 })
 

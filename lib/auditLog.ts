@@ -591,7 +591,7 @@ export function canUndoAuditLogRecord(record: AuditLogRecord) {
   }
   if (
     record.tableName === "office_calendar_store" &&
-    ["event-calendar", "task-calendar", "spc-permission-groups"].includes(getOfficeCalendarStoreKey(record) || "")
+    ["event-calendar", "task-calendar", "spc-permission-groups", "spc-supplier-overrides"].includes(getOfficeCalendarStoreKey(record) || "")
   ) {
     return false
   }
@@ -804,6 +804,7 @@ function inferRemarksPageId(record: AuditLogRecord) {
 function inferOfficeCalendarPageId(record: AuditLogRecord) {
   const key = getOfficeCalendarStoreKey(record)
   if (key === "spc-permission-groups") return "spc-user-management"
+  if (key === "spc-supplier-overrides") return "spc-suppliers"
   if (key === "parser-reports") {
     return record.actorId?.trim().toLowerCase().startsWith("spc:")
       ? "spc-buyer-enquiries"
@@ -1176,6 +1177,7 @@ function getRecordLabel(
       "event-calendar": "event calendar",
       "task-calendar": "task calendar",
       "spc-permission-groups": "SPC permission groups",
+      "spc-supplier-overrides": "supplier data",
       "parser-reports": "parser reports",
     }
     const key = getOfficeCalendarStoreKey(record)
@@ -1542,6 +1544,25 @@ function getSpcMfaTestPresentation(record: AuditLogRecord) {
   return { summary, details }
 }
 
+function getSupplierStoreSummary(record: AuditLogRecord) {
+  if (record.tableSchema !== "public" || record.tableName !== "office_calendar_store"
+    || getOfficeCalendarStoreKey(record) !== "spc-supplier-overrides") return null
+  // This snapshot contains every supplier. Only explicit, bounded target
+  // metadata may identify the edited supplier; its first row is not the target.
+  const context = record.requestContext
+  const rawTarget = context.targetId
+  const target = context.targetType === "supplier" && typeof rawTarget === "string"
+    && rawTarget.trim().length > 0 && rawTarget.trim().length <= 180
+    && !/[\u0000-\u001f\u007f]/.test(rawTarget) ? rawTarget.trim() : null
+  switch (context.supplierAction) {
+    case "save": return target ? `Saved supplier "${target}".` : "Saved supplier details."
+    case "delete": return target ? `Deleted supplier "${target}".` : "Deleted supplier."
+    case "save-barges": return target ? `Updated barges for supplier "${target}".` : "Updated supplier barges."
+    case "save-contacts": return target ? `Updated contacts for supplier "${target}".` : "Updated supplier contacts."
+    default: return "Supplier data updated."
+  }
+}
+
 function buildSummary(
   record: AuditLogRecord,
   displayOperation: AuditOperation,
@@ -1550,6 +1571,8 @@ function buildSummary(
 ) {
   const subject = subjectFor(record, recordLabel)
   if (record.undoOfLogId) return `Undid a previous change to ${subject}.`
+  const supplierSummary = getSupplierStoreSummary(record)
+  if (supplierSummary) return supplierSummary
   const mfaTestPresentation = getSpcMfaTestPresentation(record)
   if (mfaTestPresentation) return mfaTestPresentation.summary
   if (record.tableName === "spc_user_management_events") {
@@ -1791,7 +1814,7 @@ export function isUserAuditRecord(record: AuditLogRecord) {
   }
 
   if (record.tableName === "office_calendar_store") {
-    return ["event-calendar", "task-calendar", "spc-permission-groups", "parser-reports"].includes(
+    return ["event-calendar", "task-calendar", "spc-permission-groups", "spc-supplier-overrides", "parser-reports"].includes(
       getOfficeCalendarStoreKey(record),
     )
   }

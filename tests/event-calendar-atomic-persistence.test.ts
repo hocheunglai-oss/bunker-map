@@ -455,7 +455,7 @@ test("calendar commits enqueue Google sync atomically and snapshot audit undo is
   assert.match(googleSync, /\.eq\("locked_by", workerId\)/)
   assert.match(undoGuard, /app\.audit_undo_of_log_id/)
   assert.match(undoGuard, /target_key = 'event-calendar'/)
-  assert.match(auditLog, /\["event-calendar", "task-calendar", "spc-permission-groups"\]/)
+  assert.match(auditLog, /\["event-calendar", "task-calendar", "spc-permission-groups", "spc-supplier-overrides"\]/)
 })
 
 test("the durable Google sync outbox is included in every daily-backup contract consumer", () => {

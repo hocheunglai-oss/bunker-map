@@ -109,6 +109,7 @@ export async function updateSpcLostRecordReview(
   request: Request,
   input: {
     id: unknown
+    expectedUpdatedAt: unknown
     supplierLostReason: unknown
     supplierLostReasonDetails: unknown
     spcComments: unknown
@@ -118,6 +119,11 @@ export async function updateSpcLostRecordReview(
   if (role !== "SUPPLIER TRADER" && role !== "ADMIN") throw new Error("Forbidden")
   const id = cleanComment(input.id, 80)
   if (!id) throw new Error("Enquiry id is required.")
+  const expectedUpdatedAt = typeof input.expectedUpdatedAt === "string" ? input.expectedUpdatedAt : ""
+  const changed = () => Object.assign(new Error("This lost record changed while you were editing. Your draft is kept. Refresh and review the latest record before saving."), { code: "40001" })
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(expectedUpdatedAt) || !Number.isFinite(Date.parse(expectedUpdatedAt))) {
+    throw changed()
+  }
   const supplierLostReason = cleanReason(input.supplierLostReason)
   const supplierLostReasonDetails = cleanComment(input.supplierLostReasonDetails, 500)
   const spcComments = cleanComment(input.spcComments)
@@ -144,8 +150,10 @@ export async function updateSpcLostRecordReview(
     .select("*")
     .eq("id", id)
     .eq("status", "cancelled")
+    .eq("updated_at", expectedUpdatedAt)
     .single()
-  if (loadError || !existing) throw loadError || new Error("Lost enquiry not found.")
+  if (loadError?.code === "PGRST116" || (!loadError && !existing)) throw changed()
+  if (loadError) throw loadError
 
   const now = new Date().toISOString()
   const meta = readSpcEnquiryMeta(existing.notes)
@@ -168,12 +176,13 @@ export async function updateSpcLostRecordReview(
       updated_at: now,
     })
     .eq("id", id)
-    .eq("updated_at", existing.updated_at)
+    .eq("status", "cancelled")
+    .eq("updated_at", expectedUpdatedAt)
     .select("*")
     .single()
   if (error) {
     if (error.code === "PGRST116") {
-      throw new Error("This lost record changed while you were editing. Refresh and try again.")
+      throw changed()
     }
     throw error
   }

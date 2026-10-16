@@ -66,19 +66,21 @@ test("actual proxy fences legacy Price Setter writes before any service-role fet
   }
 })
 
-test("actual proxy retains all three Taiwan notice edits and attributes writes to the server session", async () => {
+test("actual proxy rejects all three unversioned Taiwan notice writes before privileged fetch", async () => {
   for (const id of [1, 2, 3]) {
     const app = harness(), payload = { id, content: JSON.stringify({ reportDate: "09 Oct 2026" }) }
     const result = await app.request("remarks", "POST", payload, "taiwan-remarks", "?on_conflict=id&select=id")
-    assert.equal(result.status, 200); assert.equal(app.upstream.length, 1)
-    const headers = app.upstream[0].init.headers as Headers
-    assert.equal(headers.get("x-bunker-admin-user"), "SERVER-EDITOR")
-    assert.equal(headers.get("x-bunker-admin-role"), "BT")
-    assert.equal(headers.get("x-bunker-admin-page-path"), "/admin/taiwanremarks")
-    assert.equal(headers.get("authorization"), "Bearer synthetic-only")
-    assert.deepEqual(JSON.parse(new TextDecoder().decode(app.upstream[0].init.body as ArrayBuffer)), payload)
-    assert.doesNotMatch(JSON.stringify(result.body), /synthetic-only/)
+    assert.equal(result.status, 409); assert.equal(result.body.code, "REFRESH_REQUIRED")
+    assert.deepEqual(app.upstream, [])
+    assert.deepEqual(app.permissions, [{ page: "taiwan-remarks", access: "edit" }])
   }
+})
+
+test("the generic admin proxy cannot invoke the service-only Taiwan remarks RPC", async () => {
+  const app = harness()
+  const response = await app.request("rpc/save_taiwan_remarks", "POST", { p_changes: [] }, "taiwan-remarks")
+  assert.equal(response.status, 403)
+  assert.deepEqual(app.upstream, [])
 })
 
 test("all legacy publication writers and alternate Taiwan Remarks headers are rejected before privileged fetch", async () => {
@@ -108,7 +110,6 @@ test("reads and independent admin pages preserve their existing routes", async (
     assert.deepEqual(app.permissions, [{ page: "pricesetter", access: "view" }]); assert.equal(app.upstream.length, 1)
   }
   for (const [page, table, method, value] of [
-    ["taiwan-remarks", "remarks", "POST", { id: 1, content: "NOTICE" }],
     ["ccinfo", "cc_ports", "PATCH", { name: "PORT" }],
     ["phonebook", "phonebook_contacts", "PATCH", { name: "CONTACT" }],
     ["outlook-addressbook", "shared_addressbook_contacts", "PATCH", { display_name: "CONTACT", email: "contact@example.test" }],

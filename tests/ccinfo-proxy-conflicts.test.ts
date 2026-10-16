@@ -72,12 +72,18 @@ test("actual CCINFO proxy preserves exact CAS filter, representation and trusted
   assert.deepEqual(await request.json(), { summary: "SYNTHETIC DRAFT" })
 })
 
-test("actual proxy leaves noncontent CCINFO writes and other pages unchanged", async () => {
-  for (const input of [{ table: "cc_entry_files", body: { folder_path: "RENAMED" } }, { table: "cc_entry_folders", body: { name: "RENAMED" } }, { table: "cc_ports", cas: true, body: { country_name: "RENAMED", country_id: "11111111-1111-4111-8111-111111111111" } }, { table: "cc_companies", method: "POST" }, { table: "cc_companies", method: "DELETE" }, { page: "taiwan-remarks", table: "remarks", method: "POST", body: { id: 1, content: "UNCHANGED PATH" } }]) {
+test("actual proxy preserves noncontent CCINFO writes while rejecting unversioned Taiwan remarks", async () => {
+  for (const input of [{ table: "cc_entry_files", body: { folder_path: "RENAMED" } }, { table: "cc_entry_folders", body: { name: "RENAMED" } }, { table: "cc_ports", cas: true, body: { country_name: "RENAMED", country_id: "11111111-1111-4111-8111-111111111111" } }, { table: "cc_companies", method: "POST" }, { table: "cc_companies", method: "DELETE" }]) {
     const app = fixture()
     assert.equal((await app.request(input)).status, 200)
     assert.equal(app.requests.length, 1)
   }
+  const remarks = fixture()
+  const response = await remarks.request({ page: "taiwan-remarks", table: "remarks", method: "POST", body: { id: 1, content: "UNCHANGED PATH" } })
+  assert.equal(response.status, 409)
+  assert.equal((await response.json()).code, "REFRESH_REQUIRED")
+  assert.equal(remarks.requests.length, 0, "Legacy notice writes must not bypass captured baselines.")
+  assert.deepEqual(remarks.permissions, [["taiwan-remarks", "edit"]])
 })
 
 test("actual proxy prevents old tabs from directly renaming countries or cascading unbounded port labels", async () => {
