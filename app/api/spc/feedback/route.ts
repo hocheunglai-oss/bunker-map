@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { hasSpcPagePermission, requireSpcSession } from "@/lib/spcAuth"
+import { SpcFeedbackError } from "@/lib/spcFeedbackShared"
 import {
   createSpcFeedback,
   createSpcFeedbackReadContext,
@@ -7,11 +8,22 @@ import {
   reviewSpcFeedback,
 } from "@/lib/spcFeedback"
 
-function statusForMessage(message: string) {
-  if (message === "Unauthorized") return 401
-  if (message === "Forbidden") return 403
-  if (message.includes("required") || message.includes("invalid") || message.includes("too long")) return 400
-  return 500
+const headers = { "Cache-Control": "private, no-store" }
+
+function failure(error: unknown, fallback: string) {
+  if (error instanceof SpcFeedbackError) return NextResponse.json({ message: error.message }, { status: error.status, headers })
+  const message = error instanceof Error ? error.message : ""
+  if (message === "Unauthorized" || message === "Forbidden") {
+    return NextResponse.json({ message }, { status: message === "Unauthorized" ? 401 : 403, headers })
+  }
+  return NextResponse.json({ message: fallback }, { status: 500, headers })
+}
+
+async function readInput(request: Request) {
+  let input: unknown
+  try { input = await request.json() } catch { throw new SpcFeedbackError("Feedback request is invalid.") }
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new SpcFeedbackError("Feedback request is invalid.")
+  return input
 }
 
 export async function GET(request: Request) {
@@ -22,10 +34,9 @@ export async function GET(request: Request) {
       session,
       createSpcFeedbackReadContext(session, request),
     )
-    return NextResponse.json({ records }, { headers: { "Cache-Control": "private, no-store" } })
+    return NextResponse.json({ records }, { headers })
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to load feedback."
-    return NextResponse.json({ message }, { status: statusForMessage(message) })
+    return failure(error, "Feedback could not be loaded. Please try again.")
   }
 }
 
@@ -33,11 +44,10 @@ export async function POST(request: Request) {
   try {
     const session = await requireSpcSession()
     if (!hasSpcPagePermission(session, "spc-feedback", "edit")) throw new Error("Forbidden")
-    const record = await createSpcFeedback(session, request, await request.json())
-    return NextResponse.json({ record }, { status: 201 })
+    const record = await createSpcFeedback(session, request, await readInput(request))
+    return NextResponse.json({ record }, { status: 201, headers })
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to submit feedback."
-    return NextResponse.json({ message }, { status: statusForMessage(message) })
+    return failure(error, "Your submission could not be verified. Refresh feedback before sending it again.")
   }
 }
 
@@ -45,10 +55,9 @@ export async function PATCH(request: Request) {
   try {
     const session = await requireSpcSession()
     if (!hasSpcPagePermission(session, "spc-feedback", "edit")) throw new Error("Forbidden")
-    const record = await reviewSpcFeedback(session, request, await request.json())
-    return NextResponse.json({ record })
+    const record = await reviewSpcFeedback(session, request, await readInput(request))
+    return NextResponse.json({ record }, { headers })
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to review feedback."
-    return NextResponse.json({ message }, { status: statusForMessage(message) })
+    return failure(error, "The saved review could not be verified. Refresh feedback before trying again.")
   }
 }

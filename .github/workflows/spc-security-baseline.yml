@@ -148,6 +148,14 @@ jobs:
           set -o pipefail
           NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/openai-usage-report.test.ts tests/spc-statistics*.test.ts 2>&1 | tee report-correctness-tests.tap
 
+      - name: Verify directory query boundaries and feedback revision ownership
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/spc-feedback*.test.ts 2>&1 | tee directory-feedback-tests.tap
+          node --import tsx --test tests/ccinfo-index-sdk.test.mjs 2>&1 | tee directory-sdk-tests.tap
+
       - name: Verify streaming backup validation at full inventory scale
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
@@ -170,7 +178,7 @@ jobs:
           test_runtime="${RUNNER_TEMP}/fcuno-backup-gap-test-runtime"
           npm install --prefix "$test_runtime" --ignore-scripts --no-fund @electric-sql/pglite@0.5.8
           npm audit signatures --prefix "$test_runtime"
-          PGLITE_MODULE_PATH="$test_runtime/node_modules/@electric-sql/pglite/dist/index.js" node --import tsx --test tests/backup-protection-flow.test.mjs tests/backup-protection-gaps-sql.test.mjs tests/system-health-alerts-sql.test.mjs tests/outlook-template-save-policy.test.mjs tests/spc-supplier-sql.test.mjs tests/taiwan-remarks-save-sql.test.mjs tests/taiwan-remarks-publication.test.mjs tests/openai-usage-report-sql.test.mjs tests/spc-statistics-sql.test.mjs 2>&1 | tee backup-protection-sql-tests.tap
+          PGLITE_MODULE_PATH="$test_runtime/node_modules/@electric-sql/pglite/dist/index.js" node --import tsx --test tests/backup-protection-flow.test.mjs tests/backup-protection-gaps-sql.test.mjs tests/system-health-alerts-sql.test.mjs tests/outlook-template-save-policy.test.mjs tests/spc-supplier-sql.test.mjs tests/taiwan-remarks-save-sql.test.mjs tests/taiwan-remarks-publication.test.mjs tests/openai-usage-report-sql.test.mjs tests/spc-statistics-sql.test.mjs tests/ccinfo-delete-sql.test.mjs tests/spc-feedback-state.test.mjs 2>&1 | tee backup-protection-sql-tests.tap
 
       - name: Verify phonebook delivery, retry and failure reporting
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -240,6 +248,8 @@ jobs:
             supplier-outlook-reliability-tests.tap
             state-integrity-tests.tap
             report-correctness-tests.tap
+            directory-feedback-tests.tap
+            directory-sdk-tests.tap
             backup-stream-tests.tap
             backup-protection-tests.tap
             backup-protection-sql-tests.tap
@@ -298,6 +308,55 @@ jobs:
             ${{ runner.temp }}/fcuno-report-browser-evidence
             ${{ runner.temp }}/fcuno-report-browser-runtime/usage.log
             ${{ runner.temp }}/fcuno-report-browser-runtime/statistics.log
+          if-no-files-found: warn
+          retention-days: 90
+
+  directory-feedback-browser-regressions:
+    name: Directory and feedback desktop and mobile
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Verify directory and feedback ownership in isolated Chromium and WebKit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_runtime="${RUNNER_TEMP}/fcuno-directory-browser-runtime"
+          evidence_dir="${RUNNER_TEMP}/fcuno-directory-browser-evidence"
+          npm install --prefix "$test_runtime" --ignore-scripts --no-fund playwright@1.62.1
+          npm audit --prefix "$test_runtime" --audit-level=high
+          npm audit signatures --prefix "$test_runtime"
+          export NODE_PATH="$test_runtime/node_modules"
+          export PLAYWRIGHT_BROWSERS_PATH="${RUNNER_TEMP}/fcuno-directory-browser-cache"
+          "$test_runtime/node_modules/.bin/playwright" install --with-deps chromium webkit
+          CCINFO_INDEX_SCREENSHOTS="$evidence_dir/directory" node tests/ccinfo-index-state.browser.test.cjs 2>&1 | tee "$test_runtime/directory.log"
+          SPC_FEEDBACK_SCREENSHOTS="$evidence_dir/feedback" node tests/spc-feedback-state.browser.test.cjs 2>&1 | tee "$test_runtime/feedback.log"
+          CCINFO_DELETE_SCREENSHOTS="$evidence_dir/core" node tests/ccinfo-delete.browser.test.cjs 2>&1 | tee "$test_runtime/core.log"
+
+      - name: Retain synthetic directory and feedback verification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: directory-feedback-browser-evidence-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/fcuno-directory-browser-evidence
+            ${{ runner.temp }}/fcuno-directory-browser-runtime/directory.log
+            ${{ runner.temp }}/fcuno-directory-browser-runtime/feedback.log
+            ${{ runner.temp }}/fcuno-directory-browser-runtime/core.log
           if-no-files-found: warn
           retention-days: 90
 

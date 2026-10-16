@@ -123,8 +123,9 @@ test("all affected query sinks use the shared grammar-specific builders", () => 
   )
   assert.match(
     pageSource,
-    /\.or\(buildPostgrestCountryMatchFilter\(selectedId, currentRecord\.name, "eq"\)\)/,
+    /await deleteCcinfoRecord\(target\)/,
   )
+  assert.doesNotMatch(pageSource, /\.or\(buildPostgrestCountryMatchFilter\(selectedId, currentRecord\.name, "eq"\)\)/)
   assert.doesNotMatch(pageSource, /countryName\.replace\(\/,\/g/)
   assert.doesNotMatch(pageSource, /currentRecord\.name\.replace\(\/,\/g/)
 })

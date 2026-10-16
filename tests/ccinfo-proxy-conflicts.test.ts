@@ -73,7 +73,7 @@ test("actual CCINFO proxy preserves exact CAS filter, representation and trusted
 })
 
 test("actual proxy preserves noncontent CCINFO writes while rejecting unversioned Taiwan remarks", async () => {
-  for (const input of [{ table: "cc_entry_files", body: { folder_path: "RENAMED" } }, { table: "cc_entry_folders", body: { name: "RENAMED" } }, { table: "cc_ports", cas: true, body: { country_name: "RENAMED", country_id: "11111111-1111-4111-8111-111111111111" } }, { table: "cc_companies", method: "POST" }, { table: "cc_companies", method: "DELETE" }]) {
+  for (const input of [{ table: "cc_entry_files", body: { folder_path: "RENAMED" } }, { table: "cc_entry_folders", body: { name: "RENAMED" } }, { table: "cc_ports", cas: true, body: { country_name: "RENAMED", country_id: "11111111-1111-4111-8111-111111111111" } }, { table: "cc_companies", method: "POST" }, { table: "cc_entry_files", method: "DELETE" }, { table: "cc_entry_folders", method: "DELETE" }]) {
     const app = fixture()
     assert.equal((await app.request(input)).status, 200)
     assert.equal(app.requests.length, 1)

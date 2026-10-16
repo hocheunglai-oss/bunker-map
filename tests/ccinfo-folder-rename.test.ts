@@ -101,10 +101,11 @@ function pageFixture() {
   let refreshes=0
   let uploadRelease:()=>void=()=>{}
   const locks={current:new Set<string>()}
+  const deleting={current:false}
   const set=<K extends keyof State>(key:K)=>(next:State[K]|((previous:State[K])=>State[K]))=>{state[key]=typeof next==="function"?next(state[key]):next}
   const deps: Record<string,unknown>={
     window:{prompt:()=>"NEW"},joinFolderPath:(path:string,name:string)=>[path,name].filter(Boolean).join("/"),recordOwnerRef:owner,
-    fileMutationLocksRef:locks,filePanelRefreshGenerationRef:{current:0},recordLoading:false,renderOwner:1,
+    fileMutationLocksRef:locks,filePanelRefreshGenerationRef:{current:0},recordLoading:false,renderOwner:1,recordDeletePendingRef:deleting,
     selectedKind:"country",selectedId:entryId,currentRecord:{name:"SYNTHETIC"},files,
     fetch:async (_url:string,request:{body:string})=>{
       requests+=1
@@ -125,8 +126,17 @@ function pageFixture() {
     rename:(folder:typeof root,name:string)=>Promise<void>;upload:(files:File[],path:string)=>Promise<void>;
     moveFolder:(folder:typeof root,path:string)=>Promise<void>;moveFile:(file:typeof files[number],path:string)=>Promise<void>
   }
-  return {state,owner,...handlers,release:()=>release(),releaseUpload:()=>uploadRelease(),fail:()=>{status=409},invalid:()=>{invalid=true},requests:()=>requests,refreshes:()=>refreshes,locks}
+  return {state,owner,...handlers,release:()=>release(),releaseUpload:()=>uploadRelease(),fail:()=>{status=409},invalid:()=>{invalid=true},requests:()=>requests,refreshes:()=>refreshes,locks,deleting}
 }
+
+test("a pending record deletion blocks file mutations before issuing requests",async()=>{
+  const f=pageFixture()
+  f.deleting.current=true
+  await f.rename(root,"NEW")
+  assert.equal(f.requests(),0)
+  assert.equal(f.locks.current.size,0)
+  assert.deepEqual(f.state.folders,[root,child,deep,unrelated])
+})
 
 test("client installs authoritative direct/deep folder versions, file/preview paths and current descendant location", async () => {
   const f=pageFixture(),pending=f.rename(root,"NEW")
