@@ -228,6 +228,7 @@ const modalBackdropStyle: React.CSSProperties = {
   inset: 0,
   background: "#1d1d1f",
   display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr)",
   placeItems: "center",
   padding: "20px",
   zIndex: 3000,
@@ -241,6 +242,14 @@ const modalStyle: React.CSSProperties = {
   borderRadius: "22px",
   boxShadow: "0 18px 42px #0000001f",
   padding: "18px",
+}
+
+const overlayModalStyle: React.CSSProperties = {
+  ...modalStyle,
+  minWidth: 0,
+  maxWidth: "100%",
+  maxHeight: "calc(100dvh - 40px)",
+  overflowY: "auto",
 }
 
 const primaryActionButtonStyle: React.CSSProperties = {
@@ -2088,7 +2097,7 @@ export default function EventCalendarPage() {
 
       {holidayPreview && (
         <div style={modalBackdropStyle}>
-          <div role="dialog" aria-modal="true" aria-labelledby="holiday-preview-title" style={{ ...modalStyle, width: "min(720px, 100%)", maxHeight: "85vh", overflowY: "auto" }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="holiday-preview-title" style={{ ...overlayModalStyle, width: "min(720px, 100%)", maxHeight: "min(85vh, calc(100dvh - 40px))" }}>
             <h2 id="holiday-preview-title" style={{ margin: "0 0 10px" }}>Review Holiday Updates</h2>
             <p>{holidayPreview.countries.join(", ")} · {holidayPreview.years.join("–")}</p>
             <p>Only recognised imported holidays are changed. Manually edited entries, attendance selections and intentionally deleted events are protected.</p>
@@ -2117,8 +2126,8 @@ export default function EventCalendarPage() {
 
       {eventModalMode && (
         <div style={modalBackdropStyle}>
-          <div style={modalStyle}>
-            <h2 style={{ margin: "0 0 14px", fontSize: "24px" }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="event-editor-title" style={overlayModalStyle}>
+            <h2 id="event-editor-title" style={{ margin: "0 0 14px", fontSize: "24px" }}>
               {eventModalMode === "add" ? "New Event" : "Edit Event"}
             </h2>
             {draftEventChangedElsewhere && (
@@ -2137,7 +2146,7 @@ export default function EventCalendarPage() {
                 This event changed in another tab. Your draft is preserved, but it cannot overwrite the newer record. Cancel and reopen the event before saving.
               </div>
             )}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))", gap: "10px", marginBottom: "10px" }}>
               <label style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                 From
                 <input
@@ -2231,7 +2240,7 @@ export default function EventCalendarPage() {
                 )
               })}
             </div>
-            <div style={{ display: "flex", justifyContent: eventModalMode === "edit" ? "space-between" : "flex-end", gap: "9px" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: eventModalMode === "edit" ? "space-between" : "flex-end", gap: "9px" }}>
               {eventModalMode === "edit" && (
                 <button
                   type="button"
@@ -2242,7 +2251,7 @@ export default function EventCalendarPage() {
                   Delete Event
                 </button>
               )}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "9px" }}>
+              <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: "9px", marginLeft: "auto" }}>
                 <button
                   type="button"
                   onClick={closeEventModal}
@@ -2267,10 +2276,10 @@ export default function EventCalendarPage() {
 
       {recurrentModalOpen && (
         <div style={modalBackdropStyle}>
-          <div style={modalStyle}>
+          <div style={overlayModalStyle}>
             <h2 style={{ margin: "0 0 14px", fontSize: "24px" }}>Recurrent Event</h2>
             <fieldset disabled={calendarMutationPending} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))", gap: "10px", marginBottom: "10px" }}>
               <label style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                 From
                 <input
@@ -2427,10 +2436,10 @@ export default function EventCalendarPage() {
 
       {leaveModalOpen && (
         <div style={modalBackdropStyle}>
-          <div style={{ ...modalStyle, width: "min(560px, 100%)" }}>
+          <div style={{ ...overlayModalStyle, width: "min(560px, 100%)" }}>
             <h2 style={{ margin: "0 0 14px", fontSize: "24px" }}>Leave Request</h2>
             <fieldset disabled={leaveRequestDraft.status === "sending" || leaveRequestDraft.status === "sent"} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))", gap: "10px", marginBottom: "10px" }}>
               <label style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                 Leave Period From
                 <input
@@ -2558,7 +2567,7 @@ export default function EventCalendarPage() {
 
       {emailPrompt && (
         <div style={modalBackdropStyle}>
-          <div style={{ ...modalStyle, width: "min(430px, 100%)" }}>
+          <div style={{ ...overlayModalStyle, width: "min(430px, 100%)" }}>
             <h2 style={{ margin: "0 0 10px", fontSize: "22px" }}>Send Event Update?</h2>
             <p style={{ margin: "0 0 6px", color: "var(--fc-admin-panel-text)", fontSize: "14px", fontWeight: 800 }}>
               {emailPrompt.events[0]?.title || "NEW EVENT"}
@@ -2662,8 +2671,8 @@ export default function EventCalendarPage() {
 
       {peopleModalOpen && (
         <div style={modalBackdropStyle}>
-          <div style={{ ...modalStyle, width: "min(460px, 100%)" }}>
-            <h2 style={{ margin: "0 0 10px", fontSize: "24px" }}>People Columns</h2>
+          <div role="dialog" aria-modal="true" aria-labelledby="people-columns-title" style={{ ...overlayModalStyle, width: "min(460px, 100%)" }}>
+            <h2 id="people-columns-title" style={{ margin: "0 0 10px", fontSize: "24px" }}>People Columns</h2>
             <p style={{ margin: "0 0 12px", color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
               One person per line. Reorder the lines to reorder the columns.
             </p>
@@ -2704,8 +2713,8 @@ export default function EventCalendarPage() {
 
       {emailModalOpen && (
         <div style={modalBackdropStyle}>
-          <div style={{ ...modalStyle, width: "min(520px, 100%)" }}>
-            <h2 style={{ margin: "0 0 10px", fontSize: "24px" }}>Event Update Email Recipients</h2>
+          <div role="dialog" aria-modal="true" aria-labelledby="email-recipients-title" style={{ ...overlayModalStyle, width: "min(520px, 100%)" }}>
+            <h2 id="email-recipients-title" style={{ margin: "0 0 10px", fontSize: "24px" }}>Event Update Email Recipients</h2>
             <p style={{ margin: "0 0 12px", color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
               One email per line. This list is for new and edited events when you choose to send an update. Saving without changes keeps the current settings. To disable update emails, clear the listed addresses, save and confirm. The scheduled daily reminder has a separate recipient list.
             </p>
