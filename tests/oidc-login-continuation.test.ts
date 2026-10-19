@@ -147,3 +147,63 @@ test("mixed silent/interactive and duplicate prompts are rejected before accessi
     assert.equal(h.stats().codes, 0)
   }
 })
+
+test("actual admin cookie issuance and clearing use host-only scope on Vercel Preview", async () => {
+  const compiled = ts.transpileModule(readFileSync(new URL("../lib/adminAuth.ts", import.meta.url), "utf8"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText
+  const written: { name: string, value: string, options: Record<string, unknown> }[] = []
+  const modules: Record<string, unknown> = {
+    "next/headers": { cookies: async () => ({
+      set: (name: string, value: string, options: Record<string, unknown>) => written.push({ name, value, options }),
+      get: () => undefined,
+    }) },
+    "@/lib/browserSessionOwner": {}, "@/lib/adminPages": {},
+    "@/lib/adminPageDiscovery": {}, "@/lib/adminUsers": {},
+    "@/lib/adminSessions": {
+      ADMIN_SESSION_DURATION_SECONDS: 400 * 24 * 60 * 60,
+      createDatabaseAdminSession: async () => ({ token: "synthetic-session", expiresAt: "2027-01-01T00:00:00Z" }),
+    },
+  }
+  const mod = { exports: {} as {
+    setAdminSession: (user: { id: string, credentialUpdatedAt: string }) => Promise<void>,
+    clearAdminSession: () => Promise<void>,
+  } }
+  new Function("require", "module", "exports", compiled)((name: string) => {
+    assert.ok(name in modules, `Unexpected dependency: ${name}`)
+    return modules[name]
+  }, mod, mod.exports)
+  const env = process.env as Record<string, string | undefined>
+  const originalNode = env.NODE_ENV, originalVercel = env.VERCEL_ENV
+  try {
+    for (const [node, vercel, expectedDomain] of [
+      ["production", "preview", undefined],
+      ["production", "production", ".fcuno.com"],
+      ["production", undefined, ".fcuno.com"],
+      ["development", undefined, undefined],
+    ]) {
+      env.NODE_ENV = node
+      if (vercel === undefined) delete env.VERCEL_ENV; else env.VERCEL_ENV = vercel
+      written.length = 0
+      await mod.exports.setAdminSession({ id: "synthetic-user", credentialUpdatedAt: "2026-10-19T00:00:00Z" })
+      const issued = written.find(cookie => cookie.value === "synthetic-session")!
+      assert.ok(issued)
+      assert.equal(issued.options.domain, expectedDomain)
+      assert.equal(issued.options.secure, node === "production")
+      assert.equal(issued.options.httpOnly, true)
+      assert.equal(issued.options.sameSite, "lax")
+      written.length = 0
+      await mod.exports.clearAdminSession()
+      assert.equal(written.length, 4)
+      for (const cookie of written) {
+        assert.equal(cookie.options.maxAge, 0)
+        assert.equal(cookie.options.httpOnly, true)
+      }
+      if (expectedDomain === undefined) assert.ok(written.every(cookie => cookie.options.domain === undefined))
+      else assert.equal(written.filter(cookie => cookie.options.domain === expectedDomain).length, 2)
+    }
+  } finally {
+    if (originalNode === undefined) delete env.NODE_ENV; else env.NODE_ENV = originalNode
+    if (originalVercel === undefined) delete env.VERCEL_ENV; else env.VERCEL_ENV = originalVercel
+  }
+})

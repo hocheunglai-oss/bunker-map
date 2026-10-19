@@ -67,7 +67,9 @@ function cookieOptions(expiresAt?: string) {
     sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    ...(process.env.NODE_ENV === "production" ? { domain: ".fcuno.com" } : {}),
+    ...(process.env.NODE_ENV === "production" && process.env.VERCEL_ENV !== "preview"
+      ? { domain: ".fcuno.com" }
+      : {}),
     maxAge: ADMIN_SESSION_DURATION_SECONDS,
     ...(expiresAt ? { expires: new Date(expiresAt) } : {}),
   }
@@ -79,7 +81,9 @@ function expiredCookieOptions() {
     sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    ...(process.env.NODE_ENV === "production" ? { domain: ".fcuno.com" } : {}),
+    ...(process.env.NODE_ENV === "production" && process.env.VERCEL_ENV !== "preview"
+      ? { domain: ".fcuno.com" }
+      : {}),
     maxAge: 0,
   }
 }
