@@ -41,6 +41,17 @@ function promptRequiresFreshLogin(params: URLSearchParams) {
 
 function interactiveLoginRedirect(request: Request) {
   const current = new URL(request.url)
+  // This redirect is reached only after authentication was absent or the
+  // existing session was revoked. The login form resumes this request after
+  // creating a new session; repeating the handled prompt would revoke that
+  // new session as well and send the user back to the form forever.
+  const prompts = current.searchParams.getAll("prompt")
+  if (prompts.length === 1) {
+    const remaining = prompts[0].trim().split(/\s+/)
+      .filter(value => value !== "login" && value !== "select_account")
+    if (remaining.length > 0) current.searchParams.set("prompt", remaining.join(" "))
+    else current.searchParams.delete("prompt")
+  }
   const returnTo = `${current.pathname}${current.search}`
   const target = new URL("/admin", current.origin)
   target.searchParams.set("returnTo", returnTo)
@@ -71,11 +82,15 @@ export async function GET(request: Request) {
     if (parameter(params, "code_challenge_method") !== "S256") return redirectError(redirectUri, "invalid_request", state)
     const codeChallenge = parameter(params, "code_challenge")
     if (!validatePkceChallenge(codeChallenge)) return redirectError(redirectUri, "invalid_request", state)
+    const prompts = params.has("prompt") ? parameter(params, "prompt").trim().split(/\s+/) : []
+    if (prompts.includes("none") && prompts.length !== 1) throw new Error("invalid_request")
     const session = await requireAdminSessionForOidc().catch(() => null)
     if (!session) {
-      return promptIsNone(params)
-        ? redirectError(redirectUri, "login_required", state)
-        : interactiveLoginRedirect(request)
+      if (promptIsNone(params)) return redirectError(redirectUri, "login_required", state)
+      // A failed lookup can hide an existing cookie/session. Revoke it before
+      // consuming the directive so an old session cannot resume this request.
+      if (promptRequiresFreshLogin(params)) await clearAdminSession()
+      return interactiveLoginRedirect(request)
     }
     if (promptRequiresFreshLogin(params)) {
       await clearAdminSession()
