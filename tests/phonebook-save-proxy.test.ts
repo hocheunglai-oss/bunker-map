@@ -16,7 +16,7 @@ const output = ts.transpileModule(source, {
 const contactId = "11111111-1111-4111-8111-111111111111"
 const saved = { id: contactId, full_name: "SYNTHETIC CONTACT", company: "SYNTHETIC COMPANY", favorite: true, source_key: `manual-${contactId}`, mobile_1: "+85295556666" }
 
-function fixture(status = 200, payload: unknown = saved, forbidden = false) {
+function fixture(status = 200, payload: unknown = saved, forbidden: boolean | "Unauthorized" = false, emptyResponse = false) {
   const forwarded: Array<{ target: URL; method: string; headers: Headers; body: unknown }> = []
   const permissions: string[][] = []
   const dependencies: Record<string, unknown> = {
@@ -27,7 +27,7 @@ function fixture(status = 200, payload: unknown = saved, forbidden = false) {
     "@/lib/outlookGroupWriteGuard": { outlookGroupCreateValidationMessage, outlookGroupLegacyWriteMessage },
     "@/lib/adminAuth": { requireAdminPagePermission: async (...permission: string[]) => {
       permissions.push(permission)
-      if (forbidden) throw new Error("Forbidden")
+      if (forbidden) throw new Error(forbidden === "Unauthorized" ? "Unauthorized" : "Forbidden")
       return { username: "synthetic-admin", displayName: "Synthetic Admin", role: "ADMIN" }
     } },
     "@supabase/supabase-js": { createClient(url: string, key: string) {
@@ -53,8 +53,9 @@ function fixture(status = 200, payload: unknown = saved, forbidden = false) {
     require(name: string) { assert.ok(name in dependencies, `Unexpected dependency ${name}`); return dependencies[name] },
     fetch: async (target: URL, init: RequestInit) => {
       assert.equal(target.origin, "https://database-fixture.invalid", "No external request may escape the fixture")
-      forwarded.push({ target, method: init.method!, headers: new Headers(init.headers), body: init.body ? JSON.parse(new TextDecoder().decode(init.body as ArrayBuffer)) : null })
-      return Response.json(payload, { status })
+      const bodyText = init.body ? new TextDecoder().decode(init.body as ArrayBuffer) : ""
+      forwarded.push({ target, method: init.method!, headers: new Headers(init.headers), body: bodyText ? JSON.parse(bodyText) : null })
+      return emptyResponse ? new Response(null, { status }) : Response.json(payload, { status })
     },
   })
   const client = createClient("https://database-fixture.invalid", "synthetic-anonymous-key", {
@@ -115,10 +116,81 @@ test("stable manual identity create and exact replay reads are allowed without a
   assert.equal(replay.forwarded[0].method, "GET")
 })
 
+test("contact CAS preserves exact microseconds through the actual SDK and proxy for UPDATE and DELETE", async () => {
+  const revision = "2026-10-20T12:00:00.123456+00:00"
+  for (const method of ["PATCH", "DELETE"]) {
+    const f = fixture()
+    const query = method === "PATCH" ? f.client.from("phonebook_contacts").update({ mobile_1: null }) : f.client.from("phonebook_contacts").delete()
+    const result = await query.eq("id", contactId).eq("updated_at", revision).select("*").single()
+    assert.equal(result.error, null)
+    assert.deepEqual(result.data, saved)
+    assert.deepEqual(f.permissions, [["phonebook", "edit"]])
+    assert.equal(f.forwarded.length, 1)
+    assert.equal(f.forwarded[0].method, method)
+    assert.equal(f.forwarded[0].target.searchParams.get("updated_at"), `eq.${revision}`)
+    assert.equal(f.forwarded[0].target.searchParams.get("select"), "*")
+    assert.match(f.forwarded[0].headers.get("prefer") || "", /return=representation/)
+  }
+})
+
+test("zero-row CAS and denied writes never become successful returned-row acknowledgments", async () => {
+  for (const method of ["PATCH", "DELETE"]) for (const forbidden of [false, true, "Unauthorized"] as const) {
+    const f = fixture(406, { code: "PGRST116", message: "Cannot coerce the result to a single JSON object", details: "The result contains 0 rows", hint: null }, forbidden)
+    const query = method === "PATCH" ? f.client.from("phonebook_contacts").update({ mobile_1: null }) : f.client.from("phonebook_contacts").delete()
+    const { data, error } = await query.eq("id", contactId).eq("updated_at", "2026-10-20T12:00:00.123456Z").select("*").single()
+    assert.equal(data, null)
+    assert.ok(error)
+    assert.equal(f.forwarded.length, forbidden ? 0 : 1)
+    assert.deepEqual(f.permissions, [["phonebook", "edit"]])
+  }
+})
+
+test("actual SDK/proxy preserves malformed single-write JSON and empty replies rather than proving a CAS conflict", async () => {
+  for (const method of ["PATCH", "DELETE"]) for (const payload of [false, 0, "", null, {}, [], [saved]]) {
+    const f = fixture(200, payload)
+    const query = method === "PATCH" ? f.client.from("phonebook_contacts").update({ mobile_1: null }) : f.client.from("phonebook_contacts").delete()
+    const result = await query.eq("id", contactId).eq("updated_at", "2026-10-20T12:00:00.123456Z").select("*").single()
+    assert.equal(result.error, null)
+    assert.deepEqual(result.data, payload, "only native406/PGRST116, not a falsy200body, identifies a zero-row singular write")
+    assert.equal(f.forwarded.length, 1)
+  }
+  for (const status of [200, 204]) {
+    const f = fixture(status, null, false, true)
+    const result = await f.client.from("phonebook_contacts").update({ mobile_1: null }).eq("id", contactId).select("*").single()
+    assert.equal(result.error, null)
+    assert.equal(result.data, null, "an empty response is unverified, not a verified zero-row acknowledgement")
+  }
+})
+
 test("view-only permissions still prevent every source edit through the real proxy", async () => {
   const f = fixture(200, saved, true)
   const { data, error } = await f.client.from("phonebook_contacts").update({ mobile_1: saved.mobile_1 }).eq("id", contactId).select("*").single()
   assert.equal(data, null)
   assert.ok(error)
   assert.deepEqual(f.forwarded, [])
+})
+
+test("actual SDK maybeSingle collapses zero rows and malformed JSON null, while array reads retain verifiable shape", async () => {
+  for (const payload of [[], null, false, 0, "", {}, [saved], [null], [false], [{ id: contactId }], [{ ...saved, id: "other" }], [saved, saved]]) {
+    const single = fixture(200, payload)
+    const one = await single.client.from("phonebook_contacts").select("*").eq("id", contactId).maybeSingle()
+    if (Array.isArray(payload) && payload.length > 1) {
+      assert.equal(one.error?.code, "PGRST116")
+      assert.equal(one.data, null)
+    } else {
+      assert.equal(one.error, null)
+      assert.deepEqual(one.data, Array.isArray(payload) ? payload.length === 1 ? payload[0] : null : payload)
+    }
+    const array = fixture(200, payload)
+    const raw = await array.client.from("phonebook_contacts").select("*").eq("id", contactId)
+    assert.equal(raw.error, null)
+    assert.deepEqual(raw.data, payload)
+    assert.deepEqual(array.permissions, [["phonebook", "view"]])
+  }
+  for (const status of [200, 204]) {
+    const empty = fixture(status, null, false, true)
+    const result = await empty.client.from("phonebook_contacts").select("*").eq("id", contactId)
+    assert.equal(result.error, null)
+    assert.equal(result.data, null, "an empty successful response is not a verified zero-row array")
+  }
 })

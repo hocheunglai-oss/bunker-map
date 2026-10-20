@@ -1,10 +1,11 @@
 "use client"
 
-import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
+import { startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { phonebookCompanyPatch, validPhonebookCompanyVersion } from "@/lib/phonebookCompanySave"
+import { phonebookContactUndoPatch, validPhonebookContactVersion, verifiedPhonebookContactRow, phonebookContactReadResult, PHONEBOOK_CONTACT_ARCHIVE_CONFLICT, PHONEBOOK_CONTACT_SAVE_CONFLICT, PHONEBOOK_CONTACT_UNDO_CONFLICT, PHONEBOOK_CONTACT_OLD_UNDO } from "@/lib/phonebookContactWrite"
 import {
   enqueuePhonebookSync,
   loadPhonebookSyncScope,
@@ -16,6 +17,7 @@ import {
 
 type Contact = {
   id: string
+  updated_at?: string
   full_name: string
   company: string | null
   company_source_id: string | null
@@ -113,6 +115,7 @@ const PHONEBOOK_CACHE_DB_NAME = "phonebook-cache"
 const PHONEBOOK_CACHE_STORE = "entries"
 const PHONEBOOK_COMPANIES_CACHE_KEY = "companies"
 const PHONEBOOK_CONTACTS_CACHE_KEY = "contacts"
+const PHONEBOOK_CONTACTS_INVALID_KEY = "phonebook_contacts_cache_invalid:v1"
 const PHONEBOOK_CONTACTS_REFRESH_MS = 30 * 60 * 1000
 const INITIAL_RENDERED_COMPANIES = 120
 const COMPANY_RENDER_STEP = 120
@@ -500,11 +503,12 @@ async function readPhonebookCache<T>(key: string) {
   })
 }
 
-async function writePhonebookCache<T>(key: string, items: T[]) {
+async function writePhonebookCache<T>(key: string, items: T[], stillCurrent?: () => boolean) {
   const db = await openPhonebookCacheDb()
-  if (!db) return
+  if (!db) return false
+  if (stillCurrent && !stillCurrent()) { db.close(); return false }
 
-  await new Promise<void>((resolve) => {
+  return new Promise<boolean>((resolve) => {
     const transaction = db.transaction(PHONEBOOK_CACHE_STORE, "readwrite")
     transaction.objectStore(PHONEBOOK_CACHE_STORE).put({
       key,
@@ -513,13 +517,18 @@ async function writePhonebookCache<T>(key: string, items: T[]) {
     } satisfies PhonebookCacheRecord<T>)
     transaction.oncomplete = () => {
       db.close()
-      resolve()
+      resolve(true)
     }
     transaction.onerror = () => {
       db.close()
-      resolve()
+      resolve(false)
     }
+    transaction.onabort = transaction.onerror
   })
+}
+
+function contactCacheInvalidation() {
+  try { return localStorage.getItem(PHONEBOOK_CONTACTS_INVALID_KEY) } catch { return "storage-unavailable" }
 }
 
 function normalizeDialablePhone(value: string | null | undefined) {
@@ -535,7 +544,7 @@ function normalizeDialablePhone(value: string | null | undefined) {
 }
 
 export default function PhonebookPage() {
-  const { loading: adminLoading, authenticated } = useSimpleAdminAuth()
+  const { loading: adminLoading, authenticated, actorKey } = useSimpleAdminAuth()
   const isMobile = useIsMobile()
   const searchRef = useRef<HTMLInputElement | null>(null)
   const companyRefs = useRef<Record<string, HTMLButtonElement | null>>({})
@@ -555,6 +564,22 @@ export default function PhonebookPage() {
   const [saving, setSaving] = useState(false)
   const contactSaveTokenRef = useRef<string | null>(null)
   const contactMessageEpochRef = useRef(0)
+  const contactOwnerKey = JSON.stringify([authenticated, actorKey])
+  const contactOwnerKeyRef = useRef(contactOwnerKey)
+  const contactOwnerMountedRef = useRef(true)
+  const conflictedContactIdsRef = useRef(new Set<string>())
+  const contactCacheGenerationRef = useRef(0)
+  useLayoutEffect(() => {
+    contactOwnerKeyRef.current = contactOwnerKey
+    contactOwnerMountedRef.current = true
+    return () => {
+      // A completed write belongs to the session that started it, never a new
+      // account or an unmounted editor. Server-side durable sync work remains.
+      contactSaveTokenRef.current = null
+      contactMessageEpochRef.current += 1
+      contactOwnerMountedRef.current = false
+    }
+  }, [contactOwnerKey])
   const [editing, setEditing] = useState(false)
   const [creatingContact, setCreatingContact] = useState(false)
   const [contactModalOpen, setContactModalOpen] = useState(false)
@@ -850,6 +875,10 @@ export default function PhonebookPage() {
   }
 
   async function loadAllContactsForCache() {
+    const generation = contactCacheGenerationRef.current
+    const owner = contactOwnerKey
+    const invalidation = contactCacheInvalidation()
+    const stillCurrent = () => contactOwnerMountedRef.current && contactOwnerKeyRef.current === owner && contactCacheGenerationRef.current === generation && contactCacheInvalidation() === invalidation
     const startedAt = performance.now()
     const response = await fetch("/api/phonebook/contacts?all=1", { cache: "no-store" })
     const payload = (await response.json().catch(() => ({}))) as {
@@ -862,14 +891,22 @@ export default function PhonebookPage() {
     if (!Array.isArray(payload.contacts) || payload.contacts.some((contact) => !contact || typeof contact.id !== "string" || !contact.id)) {
       throw new Error("The complete phonebook contact list could not be verified. Please refresh and retry.")
     }
+    if (invalidation && payload.contacts.some((contact) => !verifiedPhonebookContactRow(contact, contact.id))) {
+      throw new Error("The latest phonebook cache could not be verified.")
+    }
 
     const normalizeStartedAt = performance.now()
     const allContacts = normalizeLoadedContacts(payload.contacts || [])
+    if (!stillCurrent()) return allContacts
     rebuildContactCaches(allContacts, {
       fetchMs: Math.round(normalizeStartedAt - startedAt),
       normalizeMs: Math.round(performance.now() - normalizeStartedAt),
     })
-    void writePhonebookCache(PHONEBOOK_CONTACTS_CACHE_KEY, allContacts)
+    void writePhonebookCache(PHONEBOOK_CONTACTS_CACHE_KEY, allContacts, stillCurrent).then((written) => {
+      if (written && stillCurrent() && invalidation) {
+        try { localStorage.removeItem(PHONEBOOK_CONTACTS_INVALID_KEY) } catch { /* Keep bypassing an unavailable cache. */ }
+      }
+    })
     return allContacts
   }
 
@@ -878,6 +915,87 @@ export default function PhonebookPage() {
     companyContactsCacheRef.current.clear()
     searchContactsCacheRef.current.clear()
     setContactSearchEntries([])
+  }
+
+  function invalidateContactConflict(id: string) {
+    conflictedContactIdsRef.current.add(id)
+    contactCacheGenerationRef.current += 1
+    const generation = contactCacheGenerationRef.current
+    const owner = contactOwnerKey
+    clearContactCaches()
+    try { localStorage.setItem(PHONEBOOK_CONTACTS_INVALID_KEY, crypto.randomUUID()) } catch { /* Unavailable storage makes hydration skip the cache. */ }
+    const invalidation = contactCacheInvalidation()
+    void writePhonebookCache<Contact>(PHONEBOOK_CONTACTS_CACHE_KEY, [], () => contactOwnerMountedRef.current && contactOwnerKeyRef.current === owner && contactCacheGenerationRef.current === generation && contactCacheInvalidation() === invalidation)
+  }
+
+  async function reopenConflictedContact(id: string) {
+    if (!authenticated || saving || contactSaveTokenRef.current) return
+    if (editing) {
+      setMessage("Your unsaved changes are still here. Cancel them before reopening the latest contact.")
+      return
+    }
+    const token = crypto.randomUUID()
+    const owner = contactOwnerKey
+    const ownsRead = () => contactSaveTokenRef.current === token && contactOwnerKeyRef.current === owner
+    contactSaveTokenRef.current = token
+    contactMessageEpochRef.current += 1
+    setSaving(true)
+    setMessage("Loading the latest contact details...")
+    try {
+      const { data, error } = await supabase.from("phonebook_contacts").select("*").eq("id", id)
+      if (!ownsRead()) return
+      const result = phonebookContactReadResult(data, id)
+      if (error || result.kind === "unverified") {
+        setMessage("The latest contact could not be loaded. Your saved details have not been changed; try reopening it again.")
+        return
+      }
+      conflictedContactIdsRef.current.delete(id)
+      if (result.kind === "missing") {
+        setContacts((prev) => prev.filter((contact) => contact.id !== id))
+        setSelectedId("")
+        setCurrent(null)
+        setDraft(null)
+        setMessage("This contact was removed from the directory.")
+      } else {
+        const verified = normalizeLoadedContacts([result.contact as Contact])[0]
+        setContacts((prev) => prev.map((contact) => contact.id === id ? verified : contact))
+        setSelectedId(id)
+        setCurrent(verified)
+        setDraft(verified)
+        setEditing(false)
+        setMessage("Latest contact details loaded. Review them, then click Edit to make changes.")
+      }
+    } catch {
+      if (ownsRead()) setMessage("The latest contact could not be loaded. Your saved details have not been changed; try reopening it again.")
+    } finally {
+      if (contactSaveTokenRef.current === token) {
+        contactSaveTokenRef.current = null
+        setSaving(false)
+      }
+    }
+  }
+
+  function selectContact(id: string) {
+    if (saving || contactSaveTokenRef.current) return
+    if (conflictedContactIdsRef.current.has(id)) {
+      void reopenConflictedContact(id)
+      return
+    }
+    contactMessageEpochRef.current += 1
+    setMessage("")
+    setSelectedId(id)
+  }
+
+  function editCurrentContact() {
+    if (!current || saving || contactSaveTokenRef.current) return
+    if (conflictedContactIdsRef.current.has(current.id)) {
+      void reopenConflictedContact(current.id)
+      return
+    }
+    contactMessageEpochRef.current += 1
+    setMessage("")
+    setDraft({ ...current })
+    setEditing(true)
   }
 
   function refreshContactCachesInBackground() {
@@ -913,7 +1031,11 @@ export default function PhonebookPage() {
   }
 
   async function hydrateCachedContacts() {
+    const generation = contactCacheGenerationRef.current
+    const owner = contactOwnerKey
+    if (contactCacheInvalidation()) return { hydrated: false, fresh: false }
     const cachedRecord = await readPhonebookCache<Contact>(PHONEBOOK_CONTACTS_CACHE_KEY)
+    if (!contactOwnerMountedRef.current || contactOwnerKeyRef.current !== owner || contactCacheGenerationRef.current !== generation || contactCacheInvalidation()) return { hydrated: false, fresh: false }
     if (!cachedRecord?.items.length) return { hydrated: false, fresh: false }
 
     const normalizeContactsStartedAt = performance.now()
@@ -1256,7 +1378,7 @@ export default function PhonebookPage() {
   const visibleContacts = filteredContacts
 
   async function saveCurrent() {
-    if (!draft || saving || contactSaveTokenRef.current) return
+    if (!authenticated || !draft || saving || contactSaveTokenRef.current) return
     contactMessageEpochRef.current += 1
     const selectedContactCompany = companies.find(
       (company) => normalizeCompanyKey(company.name) === normalizeCompanyKey(draft.company),
@@ -1269,6 +1391,8 @@ export default function PhonebookPage() {
 
     const saveToken = crypto.randomUUID()
     contactSaveTokenRef.current = saveToken
+    const saveOwner = contactOwnerKey
+    const ownsSave = () => contactSaveTokenRef.current === saveToken && contactOwnerKeyRef.current === saveOwner
     const releaseSave = () => {
       if (contactSaveTokenRef.current !== saveToken) return
       contactSaveTokenRef.current = null
@@ -1315,11 +1439,13 @@ export default function PhonebookPage() {
           source_key: `manual-${draft.id}`,
         }
         let { data, error } = await supabase.from("phonebook_contacts").insert(insertPayload).select("*").single()
+        if (!ownsSave()) return
         if (error?.code === "23505") {
           // A committed insert can lose its reply. Replay the same draft identity
           // and acknowledge only identical saved details; never upsert over a
           // contact that another user has subsequently changed.
           const existing = await supabase.from("phonebook_contacts").select("*").eq("id", draft.id).maybeSingle()
+          if (!ownsSave()) return
           const matches = !existing.error && existing.data?.id === draft.id
             && Object.entries(insertPayload).every(([field, value]) => field === "search_text"
               || (existing.data[field] ?? null) === (value ?? null))
@@ -1330,7 +1456,7 @@ export default function PhonebookPage() {
           data = existing.data
           error = null
         }
-        if (error || !data || data.id !== draft.id) {
+        if (error || !verifiedPhonebookContactRow(data, draft.id)) {
           setMessage("Unable to save contact.")
           return
         }
@@ -1360,15 +1486,19 @@ export default function PhonebookPage() {
       }
 
       const beforeContact = current ? { ...current } : { ...draft }
-      const { data, error } = await supabase.from("phonebook_contacts").update(payload).eq("id", draft.id).select("*").single()
-      if (!data || data.id !== draft.id) {
-        setMessage(error?.message && error.code !== "PGRST116"
-          ? "Unable to save contact. Your changes are still here; try Save again."
-          : "This contact no longer exists. Your changes have not been saved; refresh the directory before trying again.")
+      if (!validPhonebookContactVersion(beforeContact.updated_at)) {
+        setMessage("Reopen this contact before saving; its latest revision could not be verified. Your changes are still here.")
         return
       }
+      const { data, error } = await supabase.from("phonebook_contacts").update(payload).eq("id", draft.id).eq("updated_at", beforeContact.updated_at).select("*").single()
+      if (!ownsSave()) return
       if (error) {
-        setMessage("Unable to save contact. Your changes are still here; try Save again.")
+        if (error.code === "PGRST116") invalidateContactConflict(draft.id)
+        setMessage(error.code === "PGRST116" ? PHONEBOOK_CONTACT_SAVE_CONFLICT : "Unable to save contact. Your changes are still here; try Save again.")
+        return
+      }
+      if (!verifiedPhonebookContactRow(data, draft.id)) {
+        setMessage("Contact save response could not be verified. Your changes are still here; check the directory before trying again.")
         return
       }
 
@@ -1390,7 +1520,7 @@ export default function PhonebookPage() {
         failureMessage: "Saved locally, but CardDAV sync failed.",
       })
     } catch {
-      if (contactSaveTokenRef.current === saveToken) setMessage("Contact save was not confirmed. Your changes are still here; check the directory before trying Save again.")
+      if (ownsSave()) setMessage("Contact save was not confirmed. Your changes are still here; check the directory before trying Save again.")
     } finally {
       releaseSave()
     }
@@ -1873,36 +2003,98 @@ export default function PhonebookPage() {
     setChangeLog((prev) => [nextEntry, ...prev].slice(0, 10))
   }
 
-  async function undoLogEntry(entry: ChangeLogEntry) {
+  async function undoContactLogEntry(entry: ChangeLogEntry) {
+    if (!authenticated || saving || contactSaveTokenRef.current || undoingLogId) return
+    if (editing || creatingContact) {
+      setMessage("Finish or cancel your current contact edits before using Undo.")
+      return
+    }
+    const token = crypto.randomUUID()
+    const owner = contactOwnerKey
+    const ownsUndo = () => contactSaveTokenRef.current === token && contactOwnerKeyRef.current === owner
+    const release = () => {
+      if (contactSaveTokenRef.current !== token) return
+      contactSaveTokenRef.current = null
+      setSaving(false)
+    }
+    contactSaveTokenRef.current = token
+    contactMessageEpochRef.current += 1
+    setSaving(true)
     setUndoingLogId(entry.id)
     setMessage("")
     try {
-      if (entry.entityType === "contact") {
-        if (entry.action === "create" && entry.after) {
-          const { error } = await supabase.from("phonebook_contacts").delete().eq("id", entry.after.id)
-          if (error) throw error
-          refreshContactCachesInBackground()
-          setContacts((prev) => prev.filter((item) => item.id !== entry.after!.id))
-          if (selectedId === entry.after.id) setSelectedId("")
-          await syncPhoneContacts(false, null, { deleteContactIds: [entry.after.id], successMessage: "Undone and synced." })
-        } else if (entry.action === "delete" && entry.before) {
-          const { data, error } = await supabase.from("phonebook_contacts").insert(entry.before as Contact).select("*").single()
-          if (error || !data) throw error || new Error("Unable to restore contact.")
-          refreshContactCachesInBackground()
-          setContacts((prev) => [data as Contact, ...prev])
-          await syncPhoneContacts(false, [data.id], { successMessage: "Undone and synced.", failureMessage: "Undone locally, but CardDAV sync failed." })
-        } else if (entry.action === "update" && entry.before && entry.after) {
-          const { error } = await supabase.from("phonebook_contacts").update(entry.before as Contact).eq("id", entry.after.id)
-          if (error) throw error
-          refreshContactCachesInBackground()
-          setContacts((prev) => prev.map((item) => (item.id === entry.after!.id ? (entry.before as Contact) : item)))
-          if (current?.id === entry.after.id) {
-            setCurrent(entry.before as Contact)
-            setDraft(entry.before as Contact)
-          }
-          await syncPhoneContacts(false, [entry.after.id], { successMessage: "Undone and synced.", failureMessage: "Undone locally, but CardDAV sync failed." })
-        }
+      const after = entry.after as Contact | null
+      const before = entry.before as Contact | null
+      let restored: Contact | null = null
+      let deletedId: string | null = null
+      if ((entry.action === "update" || entry.action === "create") && after) {
+        if (!validPhonebookContactVersion(after.updated_at)) throw new Error(PHONEBOOK_CONTACT_OLD_UNDO)
+        if (entry.action === "update" && !before) throw new Error(PHONEBOOK_CONTACT_OLD_UNDO)
+        const query = entry.action === "create"
+          ? supabase.from("phonebook_contacts").delete()
+          : supabase.from("phonebook_contacts").update(phonebookContactUndoPatch(before || {}))
+        const { data, error } = await query.eq("id", after.id).eq("updated_at", after.updated_at).select("*").single()
+        if (!ownsUndo()) return
+        if (error && error.code !== "PGRST116") throw new Error("Undo was not confirmed. Check the directory before trying again.")
+        if (error) { invalidateContactConflict(after.id); throw new Error(PHONEBOOK_CONTACT_UNDO_CONFLICT) }
+        if (!verifiedPhonebookContactRow(data, after.id)) throw new Error("Undo response could not be verified. Check the directory before trying again.")
+        if (entry.action === "create") deletedId = after.id
+        else restored = data as Contact
+      } else if (entry.action === "delete" && before) {
+        const restoredPayload = { ...before }
+        delete restoredPayload.updated_at
+        const { data, error } = await supabase.from("phonebook_contacts").insert(restoredPayload).select("*").single()
+        if (!ownsUndo()) return
+        if (error || !verifiedPhonebookContactRow(data, before.id)) throw new Error("Unable to restore this contact. Check the latest directory before trying again.")
+        restored = data as Contact
       } else {
+        throw new Error(PHONEBOOK_CONTACT_OLD_UNDO)
+      }
+      refreshContactCachesInBackground()
+      if (deletedId) {
+        setContacts((prev) => prev.filter((item) => item.id !== deletedId))
+        if (selectedId === deletedId) {
+          setSelectedId("")
+          setCurrent(null)
+          setDraft(null)
+        }
+      } else if (restored) {
+        const verified = restored
+        setContacts((prev) => entry.action === "delete" ? [verified, ...prev] : prev.map((item) => item.id === verified.id ? verified : item))
+        if (selectedId === verified.id) {
+          setCurrent(verified)
+          setDraft(verified)
+        }
+      }
+      // The reversal is committed. Keep its honest local/remote sync result;
+      // never replace a 207 failure with an unconditional completion banner.
+      setChangeLog((prev) => prev.filter((item) => item.id !== entry.id))
+      release()
+      await syncPhoneContacts(false, restored ? [restored.id] : null, {
+        ...(deletedId ? { deleteContactIds: [deletedId] } : {}),
+        successMessage: "Undone and verified on CardDAV.",
+        failureMessage: "Undone locally, but CardDAV sync failed.",
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : ""
+      const safeMessages = [PHONEBOOK_CONTACT_OLD_UNDO, PHONEBOOK_CONTACT_UNDO_CONFLICT, "Undo response could not be verified. Check the directory before trying again.", "Unable to restore this contact. Check the latest directory before trying again."]
+      if (ownsUndo()) setMessage(safeMessages.includes(message) ? message : "Undo was not confirmed. Check the directory before trying again.")
+    } finally {
+      const stillOwned = contactOwnerMountedRef.current && contactOwnerKeyRef.current === owner
+      release()
+      if (stillOwned) setUndoingLogId("")
+    }
+  }
+
+  async function undoLogEntry(entry: ChangeLogEntry) {
+    if (saving || contactSaveTokenRef.current) return
+    if (entry.entityType === "contact") {
+      await undoContactLogEntry(entry)
+      return
+    }
+    setUndoingLogId(entry.id)
+    setMessage("")
+    try {
         if (entry.action === "create" && entry.after) {
           const { error } = await supabase.from("phonebook_companies").delete().eq("id", entry.after.id)
           if (error) throw error
@@ -1948,8 +2140,6 @@ export default function PhonebookPage() {
             })
           }
         }
-      }
-
       setChangeLog((prev) => prev.filter((item) => item.id !== entry.id))
       setMessage("Undo complete.")
     } catch (error) {
@@ -1960,8 +2150,14 @@ export default function PhonebookPage() {
   }
 
   async function archiveCurrentContact() {
-    if (!draft) return
+    if (!authenticated || !draft || saving || contactSaveTokenRef.current) return
     if (!confirm(`Archive ${draft.full_name || "this contact"} as past contact?`)) return
+    if (!current || current.id !== draft.id || !validPhonebookContactVersion(current.updated_at)) {
+      setMessage("Reopen this contact before archiving; its latest revision could not be verified.")
+      return
+    }
+    const archivedId = current.id
+    const expectedRevision = current.updated_at
 
     const payload = {
       tel_ext: null,
@@ -1975,7 +2171,7 @@ export default function PhonebookPage() {
       name_remark: "PAST CONTACT",
       favorite: false,
       search_text: buildContactSearchText({
-        ...draft,
+        ...current,
         tel_ext: null,
         direct_line: null,
         personal_email: null,
@@ -1988,26 +2184,50 @@ export default function PhonebookPage() {
       }),
     }
 
+    const token = crypto.randomUUID()
+    const owner = contactOwnerKey
+    const ownsArchive = () => contactSaveTokenRef.current === token && contactOwnerKeyRef.current === owner
+    const release = () => {
+      if (contactSaveTokenRef.current !== token) return
+      contactSaveTokenRef.current = null
+      setSaving(false)
+    }
+    contactSaveTokenRef.current = token
+    contactMessageEpochRef.current += 1
     setSaving(true)
     setMessage("")
-    const { error } = await supabase.from("phonebook_contacts").update(payload).eq("id", draft.id)
-    if (error) {
-      setMessage("Unable to archive contact.")
-      setSaving(false)
-      return
+    try {
+      const { data, error } = await supabase.from("phonebook_contacts").update(payload).eq("id", archivedId).eq("updated_at", expectedRevision).select("*").single()
+      if (!ownsArchive()) return
+      if (error && error.code !== "PGRST116") {
+        setMessage("Archive was not confirmed. Check the directory before trying again.")
+        return
+      }
+      if (error) {
+        invalidateContactConflict(archivedId)
+        setMessage(PHONEBOOK_CONTACT_ARCHIVE_CONFLICT)
+        return
+      }
+      if (!verifiedPhonebookContactRow(data, archivedId)) {
+        setMessage("Archive response could not be verified. Check the directory before trying again.")
+        return
+      }
+      const verified = data as Contact
+      refreshContactCachesInBackground()
+      setContacts((prev) => prev.map((item) => item.id === archivedId ? verified : item))
+      setCurrent(verified)
+      setDraft(verified)
+      setEditing(false)
+      release()
+      await syncPhoneContacts(false, [archivedId], {
+        successMessage: "Archived and synced.",
+        failureMessage: "Archived locally, but CardDAV sync failed.",
+      })
+    } catch {
+      if (ownsArchive()) setMessage("Archive was not confirmed. Check the directory before trying again.")
+    } finally {
+      release()
     }
-    refreshContactCachesInBackground()
-
-    const nextDraft = { ...draft, ...payload }
-    setContacts((prev) => prev.map((item) => (item.id === draft.id ? { ...item, ...payload } : item)))
-    setCurrent((prev) => (prev ? { ...prev, ...payload } : prev))
-    setDraft(nextDraft)
-    setEditing(false)
-    await syncPhoneContacts(false, [draft.id], {
-      successMessage: "Archived and synced.",
-      failureMessage: "Archived locally, but CardDAV sync failed.",
-    })
-    setSaving(false)
   }
 
   function updateField<K extends keyof Contact>(field: K, value: Contact[K]) {
@@ -2193,9 +2413,7 @@ export default function PhonebookPage() {
       if (previous) contactRefs.current[previous.id]?.focus()
     } else if (event.key === "Enter") {
       event.preventDefault()
-      contactMessageEpochRef.current += 1
-      setMessage("")
-      setSelectedId(visibleContacts[index].id)
+      selectContact(visibleContacts[index].id)
     } else if (event.key === "Tab" && !event.shiftKey) {
       event.preventDefault()
       editButtonRef.current?.focus()
@@ -2282,7 +2500,7 @@ export default function PhonebookPage() {
                             <button
                               type="button"
                               onClick={() => void undoLogEntry(entry)}
-                              disabled={undoingLogId === entry.id}
+                              disabled={Boolean(undoingLogId) || saving}
                               style={{ ...buttonStyle, padding: "5px 9px", fontSize: "11px", background: "var(--fc-admin-primary-button-bg)", color: "var(--fc-admin-primary-button-text)" }}
                             >
                               {undoingLogId === entry.id ? "Undoing..." : "Undo"}
@@ -2509,10 +2727,7 @@ export default function PhonebookPage() {
                   }}
                   draggable={Boolean(selectedCompany)}
                   onClick={() => {
-                    if (contactSaveTokenRef.current) return
-                    contactMessageEpochRef.current += 1
-                    setMessage("")
-                    setSelectedId(contact.id)
+                    selectContact(contact.id)
                   }}
                   disabled={saving}
                   onKeyDown={(event) => onContactKeyDown(event, contact.id)}
@@ -2628,12 +2843,7 @@ export default function PhonebookPage() {
                       </button>
                       <button
                         ref={editButtonRef}
-                        onClick={() => {
-                          contactMessageEpochRef.current += 1
-                          setMessage("")
-                          setDraft(current ? { ...current } : null)
-                          setEditing(true)
-                        }}
+                        onClick={editCurrentContact}
                         disabled={!current}
                         style={{
                           ...buttonStyle,
@@ -2852,7 +3062,7 @@ export default function PhonebookPage() {
         </div>
 
         {message && !contactModalOpen && !companyModalOpen && (
-          <div style={{ color: message.startsWith("Unable") ? "var(--fc-admin-danger-text)" : "var(--fc-admin-success-text)", fontWeight: 700 }}>
+          <div role="status" style={{ color: "var(--fc-admin-panel-text)", fontWeight: 700 }}>
             {message}
           </div>
         )}

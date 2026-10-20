@@ -319,6 +319,8 @@ jobs:
           ADMIN_VIEW_FILTERS_SCREENSHOTS="$evidence_dir/view-filters" node tests/admin-view-filters.browser.test.cjs 2>&1 | tee "$test_runtime/view-filters.log"
           mkdir -p "$evidence_dir/enquiry-parser"
           ENQUIRY_CORRECTNESS_EVIDENCE="$evidence_dir/enquiry-parser" node tests/enquiry-parser-correctness.browser.test.cjs 2>&1 | tee "$test_runtime/enquiry-parser.log"
+          PHONEBOOK_SCREENSHOT="$evidence_dir/phonebook-sync.png" node tests/phonebook-sync.browser.test.cjs 2>&1 | tee "$test_runtime/phonebook-sync.log"
+          PHONEBOOK_INTEGRITY_EVIDENCE="$evidence_dir/phonebook-integrity" node tests/phonebook-contact-integrity.browser.test.cjs 2>&1 | tee "$test_runtime/phonebook-integrity.log"
 
       - name: Retain synthetic browser verification evidence
         if: always()
@@ -331,6 +333,8 @@ jobs:
             ${{ runner.temp }}/fcuno-report-browser-runtime/statistics.log
             ${{ runner.temp }}/fcuno-report-browser-runtime/view-filters.log
             ${{ runner.temp }}/fcuno-report-browser-runtime/enquiry-parser.log
+            ${{ runner.temp }}/fcuno-report-browser-runtime/phonebook-sync.log
+            ${{ runner.temp }}/fcuno-report-browser-runtime/phonebook-integrity.log
           if-no-files-found: warn
           retention-days: 90
 
