@@ -23,7 +23,12 @@ type ImoCandidate = {
   line: string
   score: number
   valid: boolean
+  explicit: boolean
 }
+
+const IMO_LABEL_PATTERN = /\bIMO(?:\s*NO\.?|\s*NUMBER)?(?=\s|[:#.(\-]|\d|$)/i
+const IMO_ONLY_LABEL_PATTERN = /^\s*IMO(?:\s*(?:NO\.?|NUMBER))?\s*[:#.(\-]*\s*$/i
+const NON_IDENTITY_LABEL_PATTERN = /(?:^|[\s|;,])(?:(?:our|your)\s+)?(?:tel(?:ephone)?|fax|phone|mobile|ref(?:erence)?|contact|e-?mail|address)(?:\s+(?:no\.?|number))?(?:\s*[.:/#-]\s*|\s+(?=\+?\d))/gi
 
 const VESSEL_LABEL_PATTERN =
   /(?:\b(?:performing\s+vessel|vessel\s*\/\s*imo|vessel(?:\s+name)?|vsl(?:\s+name)?|ship(?:\s+name)?)\b|\bname\s*\(\s*imo(?:\s*no\.?)?\s*\)|船名)/i
@@ -88,7 +93,7 @@ function scoreImoCandidate(candidate: string, line: string) {
   const valid = isValidImo(candidate)
   let score = valid ? 100 : -50
 
-  if (/\bIMO(?:\s*NO\.?|\s*NUMBER)?(?=\s|[:#.(\-]|\d|$)/i.test(line)) score += 70
+  if (IMO_LABEL_PATTERN.test(line)) score += 70
   if (VESSEL_LABEL_PATTERN.test(line)) score += 30
   if (new RegExp(`\\(\\s*${candidate}\\s*\\)`).test(line)) score += 20
   if (new RegExp(`\\/\\s*${candidate}\\s*\\/`).test(line)) score += 20
@@ -100,16 +105,25 @@ function scoreImoCandidate(candidate: string, line: string) {
 function findBestImo(lines: string[]) {
   const candidates: ImoCandidate[] = []
 
-  for (const line of lines) {
+  for (const [index, line] of lines.entries()) {
     for (const match of line.matchAll(/(?<!\d)\d{7}(?!\d)/g)) {
+      const prefix = line.slice(0, match.index)
+      const identityLabel = Array.from(prefix.matchAll(new RegExp(IMO_LABEL_PATTERN.source, "gi"))).at(-1)
+      const otherLabel = Array.from(prefix.matchAll(NON_IDENTITY_LABEL_PATTERN)).at(-1)
+      if (otherLabel && (!identityLabel || (otherLabel.index ?? -1) > (identityLabel.index ?? -1))) continue
       const value = match[0]
       const { score, valid } = scoreImoCandidate(value, line)
-      candidates.push({ value, line, score, valid })
+      const explicit = Boolean(identityLabel) || IMO_ONLY_LABEL_PATTERN.test(lines[index - 1] || "")
+      candidates.push({ value, line, score, valid, explicit })
     }
   }
 
-  candidates.sort((a, b) => b.score - a.score)
-  return candidates[0] || null
+  // A clearly supplied invalid IMO must not be silently replaced by an
+  // unrelated checksum-valid seven-digit quantity/reference elsewhere.
+  const explicitCandidates = candidates.filter((candidate) => candidate.explicit)
+  const ranked = explicitCandidates.length ? explicitCandidates : candidates
+  ranked.sort((a, b) => b.score - a.score)
+  return ranked[0] || null
 }
 
 function removeVesselLabel(value: string) {
@@ -149,12 +163,16 @@ function isPlausibleVesselName(value: string) {
   if (!value) return false
   if (value.length < 2 || value.length > 60) return false
   if (!/[A-Z]/.test(value)) return false
+  if (/^(?:TEL(?:EPHONE)?|FAX|PHONE|MOBILE|REF(?:ERENCE)?|CONTACT|E-?MAIL|ADDRESS)$/i.test(value)) return false
+  if (Array.from(value.matchAll(NON_IDENTITY_LABEL_PATTERN)).some((match) => match.index === 0)) return false
   if (/^(?:NAME|PORT|LOCATION|ETA|ETB|ETD|ETS|DATE|DELIVERY|PRODUCT|SPEC|QUANTITY|BUYER|AGENT|ACCOUNT|CLIENT|TERMS|PAYMENT|REMARKS|SUPPLY RESTRICTIONS|BUNKER ONLY|VOYAGE|VOY)\b/i.test(value) || /^(?:\u822a\u6b21\u53f7?|\u8239\u540d)\s*[:：]?/i.test(value)) {
     return false
   }
   if (/\b\d{1,2}\s*(?:[./-]\s*\d{1,2}|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)\b/i.test(value)) return false
-  const compact = value.replace(/\s+/g, "")
-  if (/(?:LSMGO|LEMGO|LSGO|VLSFO|LSFO|MGO|HFO|IFO|RMG|DMA|DMB|MT|MTS)/i.test(compact)) return false
+  // Grade/unit tokens, including compact quantity suffixes, are not names;
+  // the same letters embedded in CALIFORNIA or SAMTONG are ordinary letters.
+  if (/(?:^|[^A-Z])(?:LSMGO|LEMGO|LSGO|VLSFO|LSFO|MGO|HFO|IFO|RMG|DMA|DMB|MTS?)(?=$|[^A-Z])/i.test(value)) return false
+  if (/^(?:LSMGO|LEMGO|LSGO|VLSFO|LSFO|MGO|HFO|IFO|RMG|DMA|DMB|MTS?)(?=\d|$)/i.test(value.replace(/\s+/g, ""))) return false
   return true
 }
 
@@ -548,7 +566,7 @@ export function parseEnquiryWorksheetGuess(
 
   const bestImo = findBestImo(lines)
   const imo = bestImo?.valid ? bestImo.value : ""
-  const imoLine = imo ? getCandidateLine(lines, imo) : ""
+  const imoLine = imo ? bestImo?.line || "" : ""
   const warnings: string[] = []
 
   if (bestImo && !bestImo.valid) {

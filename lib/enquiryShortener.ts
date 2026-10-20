@@ -206,10 +206,69 @@ function monthTokenFollowsDay(value: string, monthIndex: number) {
   )
 }
 
+const MONTH_NAME_PATTERN = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|agu(?:st)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+
+function validSuppliedYearDate(day: string, month: string, year: string | undefined) {
+  if (!year) return true // Preserve the existing yearless/two-digit-year rules.
+  const normalizedMonth = validDateParts(day, month)
+  if (!normalizedMonth) return false
+  const yearNumber = Number(year)
+  const leapYear = yearNumber % 4 === 0 && (yearNumber % 100 !== 0 || yearNumber % 400 === 0)
+  return normalizedMonth !== "feb" || Number(day) !== 29 || leapYear
+}
+
+function withoutImpossibleSuppliedYearDates(value: string) {
+  if (!/\d{4}/.test(value)) return value
+  const blank = (match: string) => match.replace(/[^\r\n]/g, " ")
+  const validNumeric = (first: string, second: string, year: string | undefined) =>
+    validSuppliedYearDate(first, second, year) || validSuppliedYearDate(second, first, year)
+  const day = "(\\d{1,2})(?:st|nd|rd|th)?"
+  const namedDay = `${day}[\\s./-]*(?:of\\s+)?(${MONTH_NAME_PATTERN})\\b`
+  // In "29 FEB 1000 MT VLSFO",1000 is a quantity, not a supplied year.
+  // Keep this disambiguation local to a following unit on the same line.
+  const year = `(\\d{4})\\b(?![ \\t]*${QUANTITY_UNIT_PATTERN}(?=$|[^A-Za-z0-9]))`
+  const optionalYear = `(?:[\\s,./'-]+${year})?`
+  const range = "[ \\t]*(?:-|~|to|/)[ \\t]*"
+  let next = value
+
+  // Mask the entire invalid explicit expression before permissive yearless
+  // patterns run, rather than letting a partial day/month escape validation.
+  // Separate neighbouring ETA/ETD lines are outside these date-only spans.
+  next = next.replace(new RegExp(`(?<!\\d)${namedDay}${optionalYear}${range}${namedDay}${optionalYear}`, "gi"),
+    (match, firstDay: string, firstMonth: string, firstYear: string | undefined, secondDay: string, secondMonth: string, secondYear: string | undefined) =>
+      validSuppliedYearDate(firstDay, firstMonth, firstYear) && validSuppliedYearDate(secondDay, secondMonth, secondYear) ? match : blank(match))
+  next = next.replace(new RegExp(`(?<!\\d)${day}\\s*(?:-|~|to|/)\\s*${day}[\\s,./-]*(?:of\\s+)?(${MONTH_NAME_PATTERN})[\\s,./'-]+${year}`, "gi"),
+    (match, first: string, second: string, month: string, year: string) =>
+      validSuppliedYearDate(first, month, year) && validSuppliedYearDate(second, month, year) ? match : blank(match))
+  next = next.replace(new RegExp(`\\b(${MONTH_NAME_PATTERN})[\\s./-]*${day}\\s*(?:-|~|to|/)\\s*${day}[\\s,./'-]+${year}`, "gi"),
+    (match, month: string, first: string, second: string, year: string) =>
+      validSuppliedYearDate(first, month, year) && validSuppliedYearDate(second, month, year) ? match : blank(match))
+  next = next.replace(/\b(\d{4})[./-](\d{1,2})[./-](\d{1,2})\s*(?:-|~|to)\s*(\d{4})[./-](\d{1,2})[./-](\d{1,2})\b/gi,
+    (match, firstYear: string, firstMonth: string, firstDay: string, secondYear: string, secondMonth: string, secondDay: string) =>
+      validSuppliedYearDate(firstDay, firstMonth, firstYear) && validSuppliedYearDate(secondDay, secondMonth, secondYear) ? match : blank(match))
+  next = next.replace(new RegExp(`(?<![\\d./-])(\\d{1,2})[./-](\\d{1,2})(?:[./-]${year})?\\s*(?:-|~|to)\\s*(\\d{1,2})[./-](\\d{1,2})(?:[./-]${year})?\\b`, "gi"),
+    (match, first: string, second: string, firstYear: string | undefined, third: string, fourth: string, secondYear: string | undefined) =>
+      validNumeric(first, second, firstYear) && validNumeric(third, fourth, secondYear) ? match : blank(match))
+  next = next.replace(/\b(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]?\s*(?:-|~|to|至|到)\s*(?:(\d{4})\s*年\s*)?(?:(\d{1,2})\s*月\s*)?(\d{1,2})\s*[日号]/gi,
+    (match, firstYear: string, firstMonth: string, firstDay: string, secondYear: string | undefined, secondMonth: string | undefined, secondDay: string) =>
+      validSuppliedYearDate(firstDay, firstMonth, firstYear) && validSuppliedYearDate(secondDay, secondMonth || firstMonth, secondYear || firstYear) ? match : blank(match))
+  next = next.replace(new RegExp(`(?<!\\d)${namedDay}[\\s,./'-]+${year}`, "gi"),
+    (match, dayValue: string, month: string, year: string) => validSuppliedYearDate(dayValue, month, year) ? match : blank(match))
+  next = next.replace(new RegExp(`\\b(${MONTH_NAME_PATTERN})[\\s./-]*${day}[\\s,./'-]+${year}`, "gi"),
+    (match, month: string, dayValue: string, year: string) => validSuppliedYearDate(dayValue, month, year) ? match : blank(match))
+  next = next.replace(/\b(\d{4})[./-](\d{1,2})[./-](\d{1,2})\b/g,
+    (match, year: string, month: string, dayValue: string) => validSuppliedYearDate(dayValue, month, year) ? match : blank(match))
+  next = next.replace(new RegExp(`(?<![\\d./-])(\\d{1,2})[./-](\\d{1,2})[./-]${year}`, "gi"),
+    (match, first: string, second: string, year: string) => validNumeric(first, second, year) ? match : blank(match))
+  next = next.replace(/\b(\d{4})\s*[年년]\s*(\d{1,2})\s*[月월]\s*(\d{1,2})\s*[日号일]/g,
+    (match, year: string, month: string, dayValue: string) => validSuppliedYearDate(dayValue, month, year) ? match : blank(match))
+  return next
+}
+
 export function findEnquiryDates(value: string) {
-  const normalized = normalizeInput(value).replace(/\[[^\]]*\d{1,2}:\d{2}[^\]]*\]/g, " ")
+  const normalized = withoutImpossibleSuppliedYearDates(normalizeInput(value).replace(/\[[^\]]*\d{1,2}:\d{2}[^\]]*\]/g, " "))
   const dates: string[] = []
-  const monthNamePattern = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|agu(?:st)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+  const monthNamePattern = MONTH_NAME_PATTERN
 
   for (const match of normalized.matchAll(/(?<!\d)(\d{1,2})[./](\d{1,2})\s*(?:-|~|to)\s*(\d{1,2})[./](\d{1,2})(?![./]\d)/gi)) {
     const range = formatDateRange(match[2], match[1], match[4], match[3])

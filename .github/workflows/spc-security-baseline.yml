@@ -195,6 +195,13 @@ jobs:
           set -o pipefail
           npx --no-install tsx --test tests/phonebook-*.test.ts 2>&1 | tee phonebook-sync-tests.tap
 
+      - name: Verify deterministic enquiry parser and caller regressions
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npx --no-install tsx --test tests/enquiry-parsers.test.ts tests/enquiry-parser-correctness.test.ts 2>&1 | tee enquiry-parser-tests.tap
+
       - name: Verify optional client storage and Exchange trigger acknowledgement
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
@@ -264,6 +271,7 @@ jobs:
             backup-protection-tests.tap
             backup-protection-sql-tests.tap
             phonebook-sync-tests.tap
+            enquiry-parser-tests.tap
             session-trigger-tests.tap
             exchange-worker-tests.txt
             security-audit-production.json
@@ -309,6 +317,8 @@ jobs:
           OPENAI_USAGE_SCREENSHOTS="$evidence_dir/usage" node tests/openai-usage-state.browser.test.cjs 2>&1 | tee "$test_runtime/usage.log"
           SPC_STATISTICS_SCREENSHOTS="$evidence_dir/statistics" node tests/spc-statistics-state.browser.test.cjs 2>&1 | tee "$test_runtime/statistics.log"
           ADMIN_VIEW_FILTERS_SCREENSHOTS="$evidence_dir/view-filters" node tests/admin-view-filters.browser.test.cjs 2>&1 | tee "$test_runtime/view-filters.log"
+          mkdir -p "$evidence_dir/enquiry-parser"
+          ENQUIRY_CORRECTNESS_EVIDENCE="$evidence_dir/enquiry-parser" node tests/enquiry-parser-correctness.browser.test.cjs 2>&1 | tee "$test_runtime/enquiry-parser.log"
 
       - name: Retain synthetic browser verification evidence
         if: always()
@@ -320,6 +330,7 @@ jobs:
             ${{ runner.temp }}/fcuno-report-browser-runtime/usage.log
             ${{ runner.temp }}/fcuno-report-browser-runtime/statistics.log
             ${{ runner.temp }}/fcuno-report-browser-runtime/view-filters.log
+            ${{ runner.temp }}/fcuno-report-browser-runtime/enquiry-parser.log
           if-no-files-found: warn
           retention-days: 90
 

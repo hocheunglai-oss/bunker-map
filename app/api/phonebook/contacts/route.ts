@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
+import { quotePostgrestFilterValue } from "@/lib/queryEscaping"
 
 const SEARCH_LIMIT = 400
 
@@ -91,15 +92,20 @@ async function fetchContactsBySearch(supabase: any, query: string) {
     .limit(SEARCH_LIMIT)
 
   for (const token of tokens) {
-    contactQuery = contactQuery.ilike("search_text", `%${token}%`)
+    // PostgreSQL's literal regex director preserves substring/case behavior
+    // without treating %, _ or PostgREST's * alias as search wildcards.
+    contactQuery = contactQuery.filter("search_text", "imatch", `***=${token}`)
   }
 
-  const companyTokenFilters = tokens.flatMap((token) => [`name.ilike.%${token}%`, `other_name.ilike.%${token}%`])
+  const companyTokenFilters = tokens.map((token) => {
+    const literal = quotePostgrestFilterValue(`***=${token}`)
+    return `or(name.imatch.${literal},other_name.imatch.${literal})`
+  })
   const directMatchesPromise = contactQuery
   const matchingCompaniesPromise = supabase
     .from("phonebook_companies")
     .select("name")
-    .or(companyTokenFilters.join(","))
+    .or(`and(${companyTokenFilters.join(",")})`)
     .limit(120)
 
   const [
