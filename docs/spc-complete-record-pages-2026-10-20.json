@@ -1,0 +1,68 @@
+{
+  "schema": "fcuno.spc-complete-record-pages-release/v1",
+  "date": "2026-10-20",
+  "baseProductionCommit": "c9850330e2b36782f3404389348ec01d30a082fa",
+  "baseTree": "3c07ddf1a1c0effe2219b948e4d0a0fb8cffeb87",
+  "scope": "Ordinary Lost Record and Today Enquiries completeness, truthful read failures and safe browser paging; no account or federation change.",
+  "cause": "Legacy list/history reads had whole-result caps and could hide older matching history; client refresh failures could present incomplete or unverified records.",
+  "readContract": {
+    "pageSizeMaximum": 250,
+    "notAWholeResultCap": true,
+    "coherence": "One STABLE SECURITY INVOKER service-only SQL statement supplies each page, count, content revision, cursor and conservative vessel-history candidates.",
+    "crossPage": "Content-bound main-list revision rejects changed cursors. This is not a persistent whole-history snapshot across requests.",
+    "lostOrder": "cancelled only; created_at DESC, id ASC",
+    "todayOrder": "Current Hong Kong day, exclusive following midnight; created_at ASC, id ASC",
+    "history": "Existing TypeScript metadata, Date.parse, Unicode normalization and known-IMO precedence remain final authority; SQL candidate filtering is conservative.",
+    "budgets": "1MiB row and combined32MiB source/preallocation guards; mapped API4,000,000 UTF8 bytes; explicit unavailable instead of partial/false-empty data.",
+    "clientDeadlineMs": 30000,
+    "hostedCancellation": "Configured database limits and documented PostgREST hoisting are not behavioral proof that an already-dispatched hosted query was cancelled. No hosted slow probe or global role setting change was performed."
+  },
+  "browserContract": [
+    "Page-scoped selection/copy, exact verified count/page status, previous/next and reachable final columns.",
+    "Retain verified same-owner data and drafts on retryable read failures; clear protected rows on401/403 or changed authorization owner.",
+    "Require discard confirmation for dirty record navigation; block browsing/repeated submission during writes.",
+    "Unverified/ambiguous writes cannot be retried until a successful verified refresh; keep drafts through failed refreshes.",
+    "Keep unrelated drafts after a verified review ACK; preserve raw microsecond versions and invalidate stale navigation.",
+    "Reason drafts and uncertain reason writes have an independent verified-read boundary.",
+    "Preserve PR74 Hong Kong DATE formatting and PR73 login behavior."
+  ],
+  "localVerification": {
+    "typescriptFiles": 179,
+    "typescriptTests": 1314,
+    "typescriptFailuresOrSkips": 0,
+    "actualRouteSdkTests": 35,
+    "nativePostgres17_6TestsAndPlans": 15,
+    "newRecordBrowserContexts": 12,
+    "legacyStateBrowserContexts": 12,
+    "dateBrowserContexts": 24,
+    "engines": ["Chromium", "WebKit"],
+    "widths": [320, 390, 1440],
+    "colourPreferences": ["light", "dark"],
+    "accessStates": ["signed-out", "none", "View", "Edit"],
+    "typecheckLintBuildContractFontDelivery": "pass; full lint retains113 existing warnings and zero errors",
+    "productionDependencyVulnerabilities": 0,
+    "knownDevelopmentWarning": "Only unchanged GHSA-vfj7-8cjw-p6xm across5 propagated development package nodes. Raw full-audit exit1 retained under standing authorization.",
+    "countPolicy": "Focused TypeScript46 tests are included in1314; do not add them. Named API/native/browser suites overlap behaviors and are not one aggregate unique-test count.",
+    "sourceFreeze": "/private/tmp/fcuno-record-pages-integrated-20261020-GUtg7I/integration-freeze.json",
+    "sourceFreezeSha256": "a6b2634a2193da556f5c3aeaa7eb1db573741a711e1b002a337b8c9f802bd07c",
+    "nativePerformance": "100,000 synthetic rows: indexed shallow/deep page selections0.146/0.157ms; Today deep0.068ms; complete Lost content revision1037.008ms remains O(N). Not hosted timing certification.",
+    "rootScreenshotReviews": 3,
+    "allOwnedResourcesClosed": true
+  },
+  "migration": {
+    "file": "20261016125653_complete_spc_record_pages.sql",
+    "sha256": "743bc7c7ea7ceae2758e3cab7a9ea56363e6d07fbe3ad0088e998a95fcb62998",
+    "design": "Append-only functions and8 indexes; service-only invoker RPCs, explicit revokes, empty search_path,5s lock timeout/15s migration statement timeout. No business-row, table, writer, global or role setting change.",
+    "beforeRelease": "Require current pinned project/migration/catalog checks, reviewed exact SQL, all other hosted gates, and read-only post-apply verification before activating API consumers.",
+    "rollback": "Rollback application to PR74 deployment; additive unused functions/indexes may remain. Do not destroy data or drop schema objects merely to roll back the UI."
+  },
+  "unchanged": ["package-lock.json and runtime dependencies", "Authentication/session/cookie implementations", "Immutable FCUNO-FCOS contract", "Lost review PATCH policy", "Generic proxy RPC deny boundary", "FCOS and held account batches"],
+  "limits": [
+    "Actual pages/styles use synthetic auth/API in local browser tests; signed-in production editing and physical phones/iOS Safari are not certified.",
+    "Both OS colour preferences retain existing fixed-light SPC surfaces; no independent dark application palette is claimed.",
+    "CreatedAt fallback date coverage calls the actual source expression in-memory because missing updatedAt is invalid canonical wire data; rendered page tests retain exact UTC/date-only DATE and unchanged ETA assertions.",
+    "Native PostgreSQL tests were run locally, not silently substituted by the existing Ubuntu PGlite CI job.",
+    "Fresh hosted gates, exact preview identity and final live verification must be recorded separately before calling deployment complete."
+  ],
+  "sitewideGoalComplete": false
+}

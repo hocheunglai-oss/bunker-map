@@ -22,6 +22,14 @@ const lostRecordPage = readFileSync(
   new URL("../app/spc/lost-record/page.tsx", import.meta.url),
   "utf8",
 )
+const lostRecordRoute = readFileSync(
+  new URL("../app/api/spc/lost-record/route.ts", import.meta.url),
+  "utf8",
+)
+const recordPageResponse = readFileSync(
+  new URL("../lib/spcRecordPageResponse.ts", import.meta.url),
+  "utf8",
+)
 const speedBoard = readFileSync(
   new URL("../tools/whatsapp-spc-speed-board/background.js", import.meta.url),
   "utf8",
@@ -78,7 +86,11 @@ test("SPC enquiry clear action sits inside the parser box", () => {
 })
 
 test("SPC Lost Record retains a separately authorized shared record scope", () => {
-  assert.match(lostRecordPage, /scope=records/)
+  assert.match(lostRecordPage, /useSpcRecordPageRead\("lost", owner\)/)
+  assert.match(recordPageResponse, /kind === "lost" \? "lost-record" : "today-enquiries"/)
+  assert.match(lostRecordRoute, /requireSpcPagePermission\("spc-lost-record", "view"\)/)
+  assert.doesNotMatch(lostRecordPage, /scope=records/)
+  // The additive paginated route does not loosen the legacy shared-scope boundary.
   assert.match(route, /requireSpcPagePermission\(\s*recordsScope \? "spc-lost-record" : "spc-buyer-enquiries",\s*"view"/)
   assert.match(route, /status !== "cancelled"/)
   assert.match(route, /new Set\(\["scope", "status", "limit"\]\)/)

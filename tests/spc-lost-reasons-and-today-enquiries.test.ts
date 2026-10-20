@@ -115,7 +115,9 @@ test("Daily Briefing is restricted to supplier traders and admins", () => {
 })
 
 test("Daily Briefing is chronological, matches IMO before vessel, and supports bulk copy", () => {
-  assert.match(todayLibrary, /\.gte\("created_at", start\)[\s\S]*?\.order\("created_at", \{ ascending: true \}\)/)
+  const recordMigration = source("../supabase/migrations/20261016125653_complete_spc_record_pages.sql")
+  assert.match(recordMigration, /e\.created_at>=p_start and e\.created_at<p_end[\s\S]*?order by e\.created_at,e\.id limit p_size/)
+  assert.match(todayRoute, /readSpcRecordPage\(session, request, "today"\)/)
   assert.match(vesselIdentityLibrary, /return \[cleanImo \? `imo:\$\{cleanImo\}` : "", vessel \? `vessel:\$\{vessel\}` : ""\]/)
   assert.match(todayLibrary, /previousFixture: firstPreviousSpcIdentityMatch\(fixtureByIdentity, keys, row\.created_at\)/)
   assert.match(todayLibrary, /previousLost: firstPreviousSpcIdentityMatch\(lostByIdentity, keys, row\.created_at\)/)

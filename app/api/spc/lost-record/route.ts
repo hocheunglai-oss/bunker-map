@@ -1,6 +1,18 @@
 import { NextResponse } from "next/server"
 import { requireSpcPagePermission } from "@/lib/spcAuth"
 import { updateSpcLostRecordReview } from "@/lib/spcLostReasons"
+import { readSpcRecordPage, spcRecordPageFailure } from "@/lib/spcRecordPageStore"
+
+export async function GET(request: Request) {
+  try {
+    const session = await requireSpcPagePermission("spc-lost-record", "view")
+    const page = await readSpcRecordPage(session, request, "lost")
+    return NextResponse.json(page, { headers: { "Cache-Control": "private, no-store, max-age=0" } })
+  } catch (error) {
+    const { message, status, code } = spcRecordPageFailure(error)
+    return NextResponse.json({ message, code }, { status, headers: { "Cache-Control": "private, no-store, max-age=0" } })
+  }
+}
 
 export async function PATCH(request: Request) {
   try {

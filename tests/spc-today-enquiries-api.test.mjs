@@ -69,14 +69,14 @@ test("Daily Briefing keeps supplier/admin View access and denies none, buyers an
   for (const options of [{ role: "SUPPLIER TRADER", permission: "view", expected: 200 }, { role: "ADMIN", permission: "view", expected: 200 }, { permission: "none", expected: 403 }, { role: "BUYER TRADER", permission: "view", expected: 403 }, { authenticated: false, expected: 401 }]) {
     const h = createTodayRoute(options), r = await h.get()
     assert.equal(r.status, options.expected)
-    assert.equal(h.queries.length, options.expected === 200 ? 3 : 0)
+    assert.equal(h.queries.length, options.expected === 200 ? 1 : 0)
   }
 })
 
 test("read transport failure is unavailable, never successful empty history", async () => {
   const h = createTodayRoute({ enquiries: [todayEnquiry(1)], queryError: { table: "spc_fixtures", message: "Synthetic read unavailable" } })
   const r = await h.get()
-  assert.equal(r.status, 500)
+  assert.equal(r.status, 503)
   assert.equal(r.body.enquiries, undefined)
-  assert.match(r.body.message, /Synthetic read unavailable/)
+  assert.equal(r.body.code, "COMPLETE_READ_UNAVAILABLE")
 })

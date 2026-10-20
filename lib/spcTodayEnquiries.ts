@@ -1,5 +1,3 @@
-import type { SpcSession } from "@/lib/spcAuth"
-import { createSpcAuditContext, createSpcAuditedSupabaseClient } from "@/lib/spcAudit"
 import { formatSpcEnquiry, readSpcEnquiryMeta, type SpcEnquiryMeta } from "@/lib/spcEnquiryText"
 import {
   addSpcHistoricalMatch,
@@ -11,7 +9,7 @@ import {
 
 export { firstPreviousSpcIdentityMatch } from "@/lib/spcVesselIdentity"
 
-type EnquiryRow = {
+export type SpcRecordEnquiryRow = {
   id: string
   enquiry_number: string
   title: string
@@ -29,7 +27,7 @@ type EnquiryRow = {
   updated_at: string
 }
 
-type FixtureRow = {
+export type SpcRecordFixtureRow = {
   id: string
   fixture_date: string | null
   supplier_trader_display_name: string
@@ -76,22 +74,7 @@ export type SpcTodayEnquiry = {
   previousLost: SpcTodayPreviousLost | null
 }
 
-function hongKongDateKey(date = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Hong_Kong",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date)
-  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || ""
-  return `${value("year")}-${value("month")}-${value("day")}`
-}
-
-function dayStartIso(date = new Date()) {
-  return new Date(`${hongKongDateKey(date)}T00:00:00+08:00`).toISOString()
-}
-
-function fixtureResult(row: FixtureRow): SpcTodayPreviousFixture {
+function fixtureResult(row: SpcRecordFixtureRow): SpcTodayPreviousFixture {
   return {
     date: row.fixture_date || row.completed_at,
     supplier: row.supplier_name || "",
@@ -101,7 +84,7 @@ function fixtureResult(row: FixtureRow): SpcTodayPreviousFixture {
   }
 }
 
-function lostResult(row: EnquiryRow): SpcTodayPreviousLost {
+function lostResult(row: Pick<SpcRecordEnquiryRow, "notes" | "updated_at" | "created_at">): SpcTodayPreviousLost {
   const meta = readSpcEnquiryMeta(row.notes)
   return {
     date: meta.outcomeAt || row.updated_at || row.created_at,
@@ -112,55 +95,13 @@ function lostResult(row: EnquiryRow): SpcTodayPreviousLost {
   }
 }
 
-export async function listSpcTodayEnquiries(session: SpcSession, request: Request) {
-  const start = dayStartIso()
-  const context = createSpcAuditContext(session, request, "spc-today-enquiries", {
-    action: "list-today-enquiries",
-    targetType: "spc-enquiry",
-    targetId: hongKongDateKey(),
-  })
-  const supabase = createSpcAuditedSupabaseClient(context)
-  const [todayResult, fixtureResultSet, lostResultSet] = await Promise.all([
-    supabase
-      .from("spc_enquiries")
-      .select("*")
-      .gte("created_at", start)
-      .order("created_at", { ascending: true })
-      .order("id", { ascending: true })
-      .limit(250),
-    supabase
-      .from("spc_fixtures")
-      .select(`
-        id,
-        fixture_date,
-        supplier_trader_display_name,
-        buyer_trader_display_name,
-        vessel_name,
-        vessel_imo,
-        supplier_name,
-        price,
-        barging,
-        completed_at,
-        created_at,
-        enquiry:spc_enquiries!spc_fixtures_enquiry_id_fkey(vessel_name, notes)
-      `)
-      .eq("fixture_status", "completed")
-      .order("completed_at", { ascending: false, nullsFirst: false })
-      .limit(1000),
-    supabase
-      .from("spc_enquiries")
-      .select("*")
-      .eq("status", "cancelled")
-      .order("updated_at", { ascending: false })
-      .limit(1000),
-  ])
+export type SpcRecordLostHistoryRow = Pick<SpcRecordEnquiryRow, "id" | "vessel_name" | "notes" | "created_at" | "updated_at">
 
-  if (todayResult.error) throw todayResult.error
-  if (fixtureResultSet.error) throw fixtureResultSet.error
-  if (lostResultSet.error) throw lostResultSet.error
-
+// Inputs are the complete conservative candidates from one STABLE statement.
+// Keep final Date.parse, metadata and Unicode identity semantics in TypeScript.
+export function mapSpcTodayEnquiries(rows: SpcRecordEnquiryRow[], fixtures: SpcRecordFixtureRow[], lost: SpcRecordLostHistoryRow[]) {
   const fixtureByIdentity = new Map<string, SpcHistoricalMatch<SpcTodayPreviousFixture>[]>()
-  ;((fixtureResultSet.data || []) as unknown as FixtureRow[]).forEach((row) => {
+  fixtures.forEach((row) => {
     const keys = spcVesselIdentityKeysFromValues(
       row.vessel_name || row.enquiry?.vessel_name,
       row.vessel_imo,
@@ -170,20 +111,20 @@ export async function listSpcTodayEnquiries(session: SpcSession, request: Reques
   })
 
   const lostByIdentity = new Map<string, SpcHistoricalMatch<SpcTodayPreviousLost>[]>()
-  ;((lostResultSet.data || []) as EnquiryRow[]).forEach((row) => {
+  lost.forEach((row) => {
     const keys = spcVesselIdentityKeys(row.vessel_name, row.notes)
     const at = Date.parse(readSpcEnquiryMeta(row.notes).outcomeAt || row.updated_at || row.created_at)
     if (Number.isFinite(at)) addSpcHistoricalMatch(lostByIdentity, keys, { at, value: lostResult(row) })
   })
 
-  return ((todayResult.data || []) as EnquiryRow[]).map<SpcTodayEnquiry>((row) => {
+  return rows.map<SpcTodayEnquiry>((row) => {
     const keys = spcVesselIdentityKeys(row.vessel_name, row.notes)
     return {
       id: row.id,
       enquiryNumber: row.enquiry_number,
       vesselName: row.vessel_name || row.title,
       status: row.status,
-      formattedText: formatSpcEnquiry(row),
+      formattedText: formatSpcEnquiry({ ...row, vesselName: row.vessel_name, deliveryDate: row.delivery_date }),
       createdByDisplayName: row.created_by_display_name || row.created_by_username,
       createdAt: row.created_at,
       meta: readSpcEnquiryMeta(row.notes),
