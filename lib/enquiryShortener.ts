@@ -208,6 +208,15 @@ function monthTokenFollowsDay(value: string, monthIndex: number) {
 
 const MONTH_NAME_PATTERN = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|agu(?:st)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
 
+function normalizeDateInput(value: string) {
+  // Date-only callers select schedule lines. Copy only a wrapped quantity's
+  // unit into its line; preserve the original continuation and product input.
+  return normalizeInput(value).replace(
+    new RegExp(String.raw`(\b\d{4})([ \t]*\n\s*)(?=(${QUANTITY_UNIT_PATTERN})(?=$|[^A-Za-z0-9]))`, "gi"),
+    (_match, quantity: string, whitespace: string, unit: string) => `${quantity} ${unit.replace(/\s+/g, " ")}${whitespace}`,
+  )
+}
+
 function validSuppliedYearDate(day: string, month: string, year: string | undefined) {
   if (!year) return true // Preserve the existing yearless/two-digit-year rules.
   const normalizedMonth = validDateParts(day, month)
@@ -225,8 +234,8 @@ function withoutImpossibleSuppliedYearDates(value: string) {
   const day = "(\\d{1,2})(?:st|nd|rd|th)?"
   const namedDay = `${day}[\\s./-]*(?:of\\s+)?(${MONTH_NAME_PATTERN})\\b`
   // In "29 FEB 1000 MT VLSFO",1000 is a quantity, not a supplied year.
-  // Keep this disambiguation local to a following unit on the same line.
-  const year = `(\\d{4})\\b(?![ \\t]*${QUANTITY_UNIT_PATTERN}(?=$|[^A-Za-z0-9]))`
+  // Quantity/unit whitespace may wrap lines, as in the existing quantity grammar.
+  const year = `(\\d{4})\\b(?!\\s*${QUANTITY_UNIT_PATTERN}(?=$|[^A-Za-z0-9]))`
   const optionalYear = `(?:[\\s,./'-]+${year})?`
   const range = "[ \\t]*(?:-|~|to|/)[ \\t]*"
   let next = value
@@ -266,7 +275,7 @@ function withoutImpossibleSuppliedYearDates(value: string) {
 }
 
 export function findEnquiryDates(value: string) {
-  const normalized = withoutImpossibleSuppliedYearDates(normalizeInput(value).replace(/\[[^\]]*\d{1,2}:\d{2}[^\]]*\]/g, " "))
+  const normalized = withoutImpossibleSuppliedYearDates(normalizeDateInput(value).replace(/\[[^\]]*\d{1,2}:\d{2}[^\]]*\]/g, " "))
   const dates: string[] = []
   const monthNamePattern = MONTH_NAME_PATTERN
 
@@ -412,7 +421,7 @@ export function findEnquiryDates(value: string) {
 }
 
 function extractDeliveryDate(text: string) {
-  const lines = normalizeInput(text)
+  const lines = normalizeDateInput(text)
     .split("\n")
     .map(cleanSpaces)
     .filter(Boolean)
@@ -514,7 +523,7 @@ function extractDeliverySchedule(
   text: string,
   options: Pick<BuildShortenedEnquiryOptions, "includePort" | "port" | "portNames"> = {},
 ) {
-  const lines = normalizeInput(text)
+  const lines = normalizeDateInput(text)
     .split("\n")
     .map(cleanSpaces)
     .filter(Boolean)

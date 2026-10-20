@@ -108,6 +108,52 @@ test("a four-digit fuel quantity following a yearless date is not a supplied yea
   assert.deepEqual(findEnquiryDates("29 FEB 2026, 1000 MT VLSFO"), [])
 })
 
+test("line-wrapped quantity units do not turn a yearless date into an invalid supplied year", () => {
+  for (const newline of ["\n", "\r\n"]) {
+    for (const suffix of [`1000${newline}MT VLSFO`, `1000${newline}MT${newline}VLSFO`]) {
+      assert.deepEqual(findEnquiryDates(`29 FEB ${suffix}`), ["29 feb"], suffix)
+      assert.deepEqual(findEnquiryDates(`FEB 29 ${suffix}`), ["29 feb"], suffix)
+      assert.ok(findEnquiryDates(`28-29 FEB ${suffix}`).includes("28 - 29 feb"), suffix)
+      const raw = `VESSEL: ALPHA${newline}IMO: 9450674${newline}PORT: SINGAPORE${newline}ETA: 29 FEB ${suffix}`
+      // Preserve existing date output without adding unsupported split-line fuel formatting.
+      assert.equal(worksheetOutput(raw), "alpha / 9450674 / singapore 29 feb", suffix)
+    }
+    for (const suffix of [`2026${newline}VLSFO 100MT`, `2026${newline}QUANTITY: 1000 MT VLSFO`]) {
+      assert.deepEqual(findEnquiryDates(`29 FEB ${suffix}`), [], suffix)
+      const raw = `VESSEL: ALPHA${newline}IMO: 9450674${newline}PORT: SINGAPORE${newline}ETA: 29 FEB ${suffix}`
+      assert.equal(worksheetOutput(raw), `alpha / 9450674 / singapore / vlsfo ${suffix.includes("QUANTITY:") ? "1,000" : "100"}mts`, suffix)
+    }
+    assert.deepEqual(findEnquiryDates(`2026-02-29${newline}MT VLSFO`), [])
+    assert.equal(worksheetOutput(`VESSEL: ALPHA${newline}IMO: 9450674${newline}PORT: SINGAPORE${newline}ETA: 2026-02-29${newline}MT VLSFO`), "alpha / 9450674 / singapore")
+    assert.deepEqual(findEnquiryDates(`1000-02-29${newline}MT VLSFO`), [])
+    assert.deepEqual(findEnquiryDates(`29 FEB 1000${newline}VLSFO`), [])
+    assert.ok(!worksheetOutput(`VESSEL: ALPHA${newline}IMO: 9450674${newline}PORT: SINGAPORE${newline}ETA: 29 FEB 1000${newline}VLSFO`).includes("29 feb"))
+    assert.deepEqual(findEnquiryDates(`29 FEB 2028${newline}VLSFO 100MT`), ["29 feb"])
+    assert.equal(worksheetOutput(`VESSEL: ALPHA${newline}IMO: 9450674${newline}PORT: SINGAPORE${newline}ETA: 29 FEB 2028${newline}VLSFO 100MT`), "alpha / 9450674 / singapore 29 feb / vlsfo 100mts")
+    assert.equal(worksheetOutput(`VESSEL: ALPHA${newline}IMO: 9450674${newline}PORT: SINGAPORE${newline}ETA: 29 FEB 1000${newline}MT VLSFO${newline}ETD: 1 MAR 2026`), "alpha / 9450674 / singapore eta 29 feb, etd 1 mar")
+    // These direct-helper controls do not broaden preexisting worksheet line selection.
+    assert.deepEqual(findEnquiryDates(`29 FEB${newline}2026${newline}VLSFO 100MT`), [])
+    assert.deepEqual(findEnquiryDates(`29 FEB${newline}2028${newline}VLSFO 100MT`), ["29 feb"])
+  }
+})
+
+test("quantity-unit date context preserves continuation line ports, dates and schedule labels", () => {
+  const portNames = ["SINGAPORE", "ROTTERDAM"]
+  for (const newline of ["\n", "\r\n"]) {
+    for (const [schedule, expected] of [
+      [`ETA: 12 JUL 1000${newline}MT ROTTERDAM 13 JUL`, "alpha / 9450674 / rotterdam 13 jul"],
+      [`ETA: 1000${newline}MT 12 JUL`, "alpha / 9450674 / singapore"],
+      [`DELIVERY: 1000${newline}MT 12 JUL`, "alpha / 9450674 / singapore"],
+    ]) {
+      const raw = `VESSEL: ALPHA${newline}IMO: 9450674${newline}PORT: SINGAPORE${newline}${schedule}`
+      const guess = parseEnquiryWorksheetGuess(raw, { portNames })
+      assert.equal(buildShortenedEnquiry(raw, guess.vesselName, guess.imo, [], {
+        autoDetectVlsfoRemarks: false, includePort: true, port: guess.port, portNames,
+      }), expected, schedule)
+    }
+  }
+})
+
 test("supplied-year range validation preserves valid ranges but not invalid endpoint fallback", () => {
   for (const date of ["28-29 FEB 2026", "28th-29th of FEB 2026", "FEB 28-29, 2026", "28 FEB 2026 - 29 FEB 2026", "28/02/2026 - 29/02/2026", "2026-02-28 - 2026-02-29", "2026年2月28日-2月29日"]) {
     assert.deepEqual(findEnquiryDates(date), [], date)

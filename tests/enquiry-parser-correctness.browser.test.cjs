@@ -22,6 +22,12 @@ const cases = [
   { id: "actual-fuel-not-vessel", raw: `VESSEL: IFO380\nIMO: 9450674\n${fields}`, vessel: "", imo: "9450674", output: "9450674 / singapore 12 jul / HSFO 380mts / vlsfo 100mts" },
   { id: "spaced-fuel-attached-quantity-not-vessel", raw: "IMO: 9450674\nV L S F O380\nPORT: SINGAPORE\nETA: 12 JUL", vessel: "", imo: "9450674", output: "9450674 / singapore 12 jul / vlsfo 380mts" },
   { id: "quantity-not-explicit-year", raw: "VESSEL: ALPHA\nIMO: 9450674\nPORT: SINGAPORE\nETA: 29 FEB 1000 MT VLSFO", vessel: "ALPHA", imo: "9450674", output: "alpha / 9450674 / singapore 29 feb / vlsfo 1,000mts" },
+  { id: "lf-quantity-unit-not-explicit-year", raw: "VESSEL: ALPHA\nIMO: 9450674\nPORT: SINGAPORE\nETA: 29 FEB 1000\nMT VLSFO", vessel: "ALPHA", imo: "9450674", output: "alpha / 9450674 / singapore 29 feb" },
+  { id: "crlf-quantity-unit-not-explicit-year", raw: "VESSEL: ALPHA\r\nIMO: 9450674\r\nPORT: SINGAPORE\r\nETA: 29 FEB 1000\r\nMT VLSFO", vessel: "ALPHA", imo: "9450674", output: "alpha / 9450674 / singapore 29 feb" },
+  { id: "separate-quantity-unit-grade-not-explicit-year", raw: "VESSEL: ALPHA\nIMO: 9450674\nPORT: SINGAPORE\nETA: 29 FEB 1000\nMT\nVLSFO", vessel: "ALPHA", imo: "9450674", output: "alpha / 9450674 / singapore 29 feb" },
+  { id: "eta-continuation-date-stays-separate", raw: "VESSEL: ALPHA\nIMO: 9450674\nPORT: SINGAPORE\nETA: 1000\nMT 12 JUL", vessel: "ALPHA", imo: "9450674", output: "alpha / 9450674 / singapore" },
+  { id: "delivery-continuation-date-stays-separate", raw: "VESSEL: ALPHA\nIMO: 9450674\nPORT: SINGAPORE\nDELIVERY: 1000\nMT 12 JUL", vessel: "ALPHA", imo: "9450674", output: "alpha / 9450674 / singapore" },
+  { id: "continuation-port-keeps-own-date", raw: "VESSEL: ALPHA\nIMO: 9450674\nPORT: SINGAPORE\nETA: 12 JUL 1000\nMT ROTTERDAM 13 JUL", vessel: "ALPHA", imo: "9450674", output: "alpha / 9450674 / rotterdam 13 jul" },
 ]
 
 async function main() {
@@ -30,7 +36,7 @@ async function main() {
     stdin: { contents: `import React from 'react';import{createRoot}from'react-dom/client';import Worksheet from './app/admin/enquiryworksheet/page';
       window.__requests=[];window.__messages=[];
       window.addEventListener('message',event=>window.__messages.push(event.data?.type));
-      window.fetch=async(url,init={})=>{window.__requests.push({url:String(url),method:init.method||'GET'});if(url==='/api/admin/enquiryworksheet/ports'&&(!init.method||init.method==='GET'))return Response.json({ports:[]});throw Error('Forbidden fixture request '+url)};
+      window.fetch=async(url,init={})=>{window.__requests.push({url:String(url),method:init.method||'GET'});if(url==='/api/admin/enquiryworksheet/ports'&&(!init.method||init.method==='GET'))return Response.json({ports:['SINGAPORE','ROTTERDAM']});throw Error('Forbidden fixture request '+url)};
       createRoot(document.getElementById('root')).render(<Worksheet/>);`, resolveDir: root, loader: "tsx" },
     outfile: "fixture.js", bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic",
     define: { "process.env.NODE_ENV": '"development"' },
@@ -73,6 +79,7 @@ async function main() {
           try { assert.deepEqual(actual, expected) } catch (error) { passed = false; failures.push({ engine, width, colorScheme, id: item.id, actual, expected, message: error.message }) }
           results.push({ engine, browserVersion: browser.version(), width, colorScheme, id: item.id, passed, actual, expected })
           if (item.id === "telephone-not-imo") { await raw.scrollIntoViewIfNeeded(); await page.screenshot({ path: path.join(evidence, `${engine}-${width}-${colorScheme}-phone-imo.png`), fullPage: true }) }
+          if (item.id === "lf-quantity-unit-not-explicit-year") { await raw.scrollIntoViewIfNeeded(); await page.screenshot({ path: path.join(evidence, `${engine}-${width}-${colorScheme}-newline-quantity.png`), fullPage: true }) }
         }
         assert.deepEqual(blocked, []); assert.deepEqual(errors, [])
         assert.deepEqual(await page.evaluate(() => window.__messages), [])
