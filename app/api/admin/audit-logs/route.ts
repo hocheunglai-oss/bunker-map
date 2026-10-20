@@ -1,65 +1,21 @@
 import { NextResponse } from "next/server"
-import { requireAdminPagePermission } from "@/lib/adminAuth"
+import { hasAdminPagePermission, requireAdminIdentitySession, requireAdminPagePermission } from "@/lib/adminAuth"
+import { browseAuditLogs } from "@/lib/auditBrowsing"
+import { AuditBrowsingError } from "@/lib/auditBrowsingCursor"
+import { loadAuditBrowsingUserNames } from "@/lib/auditBrowsingSource"
+import { readLegacyAdminAuditFullList } from "@/lib/legacyAdminAuditFullList"
 import {
   approvedCountryLabelNormalizationUndoMessage,
   canUndoAuditLogRecord,
   getAuditLogRecord,
   isUserAuditRecord,
-  listAuditLogs,
-  matchesAuditActor,
   matchesAuditScope,
   presentAuditLogs,
   undoAuditLog,
 } from "@/lib/auditLog"
 import { getDiscoveredAdminPages } from "@/lib/adminPageDiscovery"
-import {
-  listManagedAdminRoleDefaults,
-  listManagedAdminUsers,
-} from "@/lib/adminUsers"
 import { timedJson } from "@/lib/serverTiming"
 
-const PAGE_TABLES: Record<string, string[]> = {
-  ccinfo: [
-    "cc_countries",
-    "cc_companies",
-    "cc_ports",
-    "cc_documents",
-    "cc_company_files",
-    "cc_entry_files",
-    "cc_entry_folders",
-  ],
-  phonebook: ["phonebook_contacts", "phonebook_companies"],
-  "outlook-addressbook": [
-    "shared_addressbook_contacts",
-    "shared_addressbook_groups",
-    "shared_addressbook_group_members",
-  ],
-  "email-templates": [
-    "email_templates",
-    "outlook_template_insertion_attempts",
-  ],
-  "user-management": ["admin_users", "admin_role_defaults"],
-  "event-calendar": ["office_calendar_store"],
-  "task-calendar": ["office_calendar_store"],
-  "enquiry-worksheet": ["office_calendar_store"],
-  pricesetter: ["ports", "price_history", "remarks"],
-  "hongkong-price-history": ["ports", "price_history", "remarks"],
-  "taiwan-price-history": ["ports", "price_history", "remarks"],
-  "taiwan-remarks": ["remarks"],
-  "openai-usage": ["openai_usage_events"],
-  "attendance-record": [
-    "attendance_people",
-    "attendance_team_assignments",
-    "attendance_leave_entries",
-    "attendance_manual_overrides",
-    "attendance_work_mode_policies",
-    "attendance_work_mode_overrides",
-    "attendance_entitlements",
-    "attendance_monthly_adjustments",
-    "attendance_monthly_confirmations",
-    "attendance_reminder_dispatches",
-  ],
-}
 
 const PAGE_ALIASES: Record<string, string> = {
   outlookaddressbook: "outlook-addressbook",
@@ -67,53 +23,7 @@ const PAGE_ALIASES: Record<string, string> = {
   emailtemplates: "email-templates",
 }
 
-let managedUsersCache:
-  | {
-      expiresAt: number
-      users: Array<{ username: string; displayName: string }>
-    }
-  | undefined
-let managedUsersPromise:
-  | Promise<Array<{ username: string; displayName: string }>>
-  | undefined
 
-async function loadManagedUsersForFilters(
-  pages: Awaited<ReturnType<typeof getDiscoveredAdminPages>>,
-) {
-  if (managedUsersCache && managedUsersCache.expiresAt > Date.now()) {
-    return managedUsersCache.users
-  }
-  if (managedUsersPromise) return managedUsersPromise
-
-  managedUsersPromise = (async () => {
-    try {
-      const roleDefaults = await listManagedAdminRoleDefaults(pages)
-      const users = await listManagedAdminUsers(roleDefaults, pages)
-      const mapped = users.map((user) => ({
-        username: user.username,
-        displayName: user.displayName,
-      }))
-      managedUsersCache = {
-        expiresAt: Date.now() + 30_000,
-        users: mapped,
-      }
-      return mapped
-    } catch {
-      return []
-    } finally {
-      managedUsersPromise = undefined
-    }
-  })()
-
-  return managedUsersPromise
-}
-
-function rawOperationsForDisplay(operation: string | undefined) {
-  if (!operation || operation === "ALL") return undefined
-  if (operation === "UPDATE") return ["UPDATE", "INSERT"] as const
-  if (operation === "INSERT" || operation === "DELETE") return [operation] as const
-  return undefined
-}
 
 function serializeAuditIndex(
   record: Awaited<ReturnType<typeof presentAuditLogs>>[number],
@@ -141,7 +51,7 @@ function serializeAuditIndex(
 export async function GET(request: Request) {
   const startedAt = Date.now()
   try {
-    const session = await requireAdminPagePermission("audit-log", "view")
+    const entrySession = await requireAdminPagePermission("audit-log", "view")
 
     const url = new URL(request.url)
     const pages = await getDiscoveredAdminPages()
@@ -158,49 +68,28 @@ export async function GET(request: Request) {
       }, undefined, { mode: "detail" })
     }
 
-    const requestedLimit = Math.min(
-      Math.max(Number(url.searchParams.get("limit") || 100), 1),
-      150
-    )
-    const requestedPageId =
-      url.searchParams.get("page") || url.searchParams.get("table")
-    const pageId = requestedPageId
-      ? PAGE_ALIASES[requestedPageId] || requestedPageId
-      : null
-    const operation = url.searchParams.get("operation")?.toUpperCase()
-    const actor = url.searchParams.get("actor")
     const includeRows = url.searchParams.get("details") === "1"
-    const tableNames =
-      pageId && pageId !== "all" ? PAGE_TABLES[pageId] : undefined
-    const operations = rawOperationsForDisplay(operation)
-    const candidateLimit = Math.min(
-      Math.max(requestedLimit * (tableNames ? 2 : 3), requestedLimit),
-      500,
-    )
-    const records = await listAuditLogs({
-      limit: candidateLimit,
-      tableNames,
-      operations: operations ? [...operations] : undefined,
-      actorId: actor && actor !== "all" ? actor : undefined,
-      scope: "www",
-      includeRows,
+    if (includeRows && url.searchParams.get("browse") !== "1") {
+      if (url.searchParams.has("cursor")) throw new AuditBrowsingError(400)
+      const legacy = await readLegacyAdminAuditFullList(url, pages, entrySession)
+      return timedJson("/api/admin/audit-logs", startedAt, legacy.payload, undefined, legacy.timing)
+    }
+
+    const session = await requireAdminIdentitySession()
+    if (!hasAdminPagePermission(session, "audit-log", "view")) throw new Error("Forbidden")
+    const result = await browseAuditLogs({
+      request, scope: "www", viewerId: session.adminUserId,
+      permissionState: { role: session.role, permission: session.permissions["audit-log"] },
+      pages, aliases: PAGE_ALIASES, includeDetails: includeRows,
+      loadContext: client => loadAuditBrowsingUserNames(client, "admin_users"),
+      contextFingerprint: users => users,
     })
-    const presented = await presentAuditLogs(records, pages)
-    const filteredLogs = presented
-      .filter((record) => !pageId || pageId === "all" || record.pageId === pageId)
-      .filter(
-        (record) =>
-          !operation ||
-          operation === "ALL" ||
-          record.displayOperation === operation
-      )
-      .filter((record) => matchesAuditActor(record, actor))
-      .slice(0, requestedLimit)
+    const filteredLogs = result.records
     const logs = includeRows
       ? filteredLogs
       : filteredLogs.map((record) => serializeAuditIndex(record, false))
 
-    const managedUsers = await loadManagedUsersForFilters(pages)
+    const managedUsers = result.context
 
     const userMap = new Map<string, { value: string; label: string }>()
     const addUser = (value: string | null | undefined, label?: string | null) => {
@@ -214,12 +103,15 @@ export async function GET(request: Request) {
 
     addUser(session.username, session.displayName)
     managedUsers.forEach((user) => addUser(user.username, user.displayName))
-    presented.forEach((record) =>
+    filteredLogs.forEach((record) =>
       addUser(record.actorId || record.actorName, record.actorName || record.actorId)
     )
 
     return timedJson("/api/admin/audit-logs", startedAt, {
       logs,
+      pageInfo: result.pageInfo,
+      totalMatches: result.totalMatches,
+      usersComplete: false,
       pages: pages.map(({ id, label }) => ({ id, label })),
       users: Array.from(userMap.values()).sort((a, b) =>
         a.label.localeCompare(b.label)
@@ -227,9 +119,12 @@ export async function GET(request: Request) {
     }, undefined, {
       mode: includeRows ? "full" : "index",
       returned: logs.length,
-      candidateLimit,
+      state: result.pageInfo.state,
     })
   } catch (error) {
+    if (error instanceof AuditBrowsingError) {
+      return timedJson("/api/admin/audit-logs", startedAt, { message: error.message }, { status: error.status })
+    }
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
       return NextResponse.json(
         { message: error.message },

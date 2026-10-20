@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js"
+import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import {
   createSpcAuditedSupabaseClient,
   type SpcAuditContext,
@@ -83,7 +83,7 @@ type AuditLogRow = {
   undone_by_log_id: string | null
 }
 
-const AUDIT_SELECT = [
+export const AUDIT_SELECT = [
   "id",
   "occurred_at",
   "actor_user_id",
@@ -102,6 +102,13 @@ const AUDIT_SELECT = [
   "undone_at",
   "undone_by_log_id",
 ].join(",")
+
+// Computed JSON fields preserve the complete original shape except unused
+// template HTML/text in ordinary list mode; raw detail/full/Undo stay separate.
+export const AUDIT_BROWSING_INDEX_SELECT = AUDIT_SELECT.split(",").map(field =>
+  field === "before_row" ? "before_row:audit_browsing_before_row"
+    : field === "after_row" ? "after_row:audit_browsing_after_row" : field,
+).join(",")
 
 const AUDIT_PREVIEW_FIELDS = [
   "id",
@@ -512,7 +519,7 @@ function getSupabaseAuditClient() {
   )
 }
 
-function mapAuditLog(row: AuditLogRow): AuditLogRecord {
+export function mapAuditLog(row: AuditLogRow): AuditLogRecord {
   return {
     id: row.id,
     occurredAt: row.occurred_at,
@@ -1024,17 +1031,42 @@ export function getOutlookInsertionAuditRecordLabel(
 
 async function loadOutlookInsertionRelatedEvents(
   records: AuditLogRecord[],
+  client?: SupabaseClient,
 ) {
   const operationIds = Array.from(
     new Set(records.map(getOutlookInsertionOperationId).filter(Boolean)),
   )
   if (operationIds.length === 0) return [] as AuditLogRecord[]
 
-  const supabase = getSupabaseAuditClient()
+  const supabase = client || getSupabaseAuditClient()
   const batches = Array.from(
     { length: Math.ceil(operationIds.length / 100) },
     (_, index) => operationIds.slice(index * 100, (index + 1) * 100),
   )
+  if (client) {
+    // The new bounded reader must not silently truncate required correlation
+    // enrichment under a provider cap. Existing detail callers are unchanged.
+    const enriched = await Promise.all(batches.map(async batch => {
+      const rows: AuditLogRow[] = []
+      let after: string | null = null
+      for (;;) {
+        let query = client.from("audit_logs").select(AUDIT_SELECT, { count: "exact" })
+          .eq("table_schema", "app").eq("table_name", "outlook_template_insertion_attempts").eq("operation", "INSERT")
+          .in("record_pk->>operationId", batch).order("id", { ascending: true }).limit(250)
+        if (after !== null) query = query.gt("id", after)
+        const { data, count, error } = await query
+        if (error || !Array.isArray(data) || !Number.isSafeInteger(count) || count! < data.length
+          || data.length > 250 || !data.length && count !== 0) throw new Error("Audit enrichment unavailable")
+        for (const row of data as unknown as AuditLogRow[]) {
+          if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(row.id) || after !== null && row.id <= after) throw new Error("Audit enrichment unavailable")
+          rows.push(row)
+          after = row.id
+        }
+        if (data.length === count) return rows.map(mapAuditLog)
+      }
+    }))
+    return enriched.flat()
+  }
   const results = await Promise.all(
     batches.map((batch) =>
       supabase
@@ -1746,11 +1778,12 @@ async function getPortNames(records: AuditLogRecord[]) {
 
 export async function presentAuditLogs(
   records: AuditLogRecord[],
-  pages: AuditPageDefinition[]
+  pages: AuditPageDefinition[],
+  options: { portNames?: Map<string, string>; client?: SupabaseClient; includeDetails?: boolean } = {},
 ) {
   const [portNames, insertionEvents] = await Promise.all([
-    getPortNames(records),
-    loadOutlookInsertionRelatedEvents(records),
+    options.portNames || getPortNames(records),
+    loadOutlookInsertionRelatedEvents(records, options.client),
   ])
   const insertionCorrelations = buildOutlookInsertionCorrelations([
     ...records,
@@ -1782,7 +1815,7 @@ export async function presentAuditLogs(
         recordLabel,
         insertionCorrelation,
       ),
-      details: buildDetails(
+      details: options.includeDetails === false ? [] : buildDetails(
         record,
         displayOperation,
         recordLabel,
@@ -1877,6 +1910,13 @@ export async function listAuditLogs(options: {
   return records
     .filter(isUserAuditRecord)
     .filter((record) => matchesAuditScope(record, scope))
+}
+
+/** Separate read-only client: no change to existing detail/Undo/auth clients. */
+export function createAuditBrowsingClient(fetcher: typeof fetch) {
+  return createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), requireEnv("SUPABASE_SERVICE_ROLE_KEY"), {
+    auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: fetcher },
+  })
 }
 
 export async function undoAuditLog(

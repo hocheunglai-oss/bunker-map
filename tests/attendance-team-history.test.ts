@@ -176,6 +176,6 @@ test("group history is RLS-restricted, audited, backed up, health-checked, and d
   assert.match(systemHealth, /attendanceTeamAssignments/)
   assert.match(systemHealth, /active attendance people and current group history do not match/)
   assert.match(auditLog, /attendance_team_assignments: "attendance-record"/)
-  assert.match(auditRoute, /"attendance_team_assignments"/)
+  assert.match(auditRoute, /browseAuditLogs\(/)
   assert.match(techStack, /attendance_team_assignments/)
 })

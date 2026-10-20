@@ -343,7 +343,6 @@ test("new work-mode data participates in backup, health, audit, and Tech Stack",
     source("../scripts/validate-backup.mjs"),
     source("../lib/systemHealth.ts"),
     source("../lib/auditLog.ts"),
-    source("../app/api/admin/audit-logs/route.ts"),
     source("../app/admin/techstack/page.tsx"),
   ]
   for (const table of [
@@ -352,4 +351,5 @@ test("new work-mode data participates in backup, health, audit, and Tech Stack",
   ]) {
     for (const registry of sources) assert.match(registry, new RegExp(table))
   }
+  assert.match(source("../app/api/admin/audit-logs/route.ts"), /browseAuditLogs\(/)
 })

@@ -1,46 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
-
-type AuditOperation = "INSERT" | "UPDATE" | "DELETE"
-
-type AuditLogRecord = {
-  id: string
-  occurredAt: string
-  actorId: string | null
-  actorName: string | null
-  operation: AuditOperation
-  displayOperation: AuditOperation
-  pageId: string
-  pageLabel: string
-  recordLabel: string
-  summary: string
-  details: string[]
-  detailsLoaded?: boolean
-  undoable?: boolean
-  undoOfLogId: string | null
-  undoneAt: string | null
-}
-
-type AuditPageOption = {
-  id: string
-  label: string
-}
-
-type AuditUserOption = {
-  value: string
-  label: string
-}
-
-type AuditResponse = {
-  logs: AuditLogRecord[]
-  log?: AuditLogRecord
-  pages: AuditPageOption[]
-  users: AuditUserOption[]
-  message?: string
-}
+import { useAuditBrowsing, type AuditLogRecord, type AuditOperation } from "@/lib/useAuditBrowsing"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -159,100 +122,25 @@ function operationStyle(operation: AuditOperation): React.CSSProperties {
 }
 
 export default function AuditLogPage() {
-  const { loading: authLoading, authenticated, permissions, role } = useSimpleAdminAuth()
-  const [logs, setLogs] = useState<AuditLogRecord[]>([])
-  const [pages, setPages] = useState<AuditPageOption[]>([])
-  const [users, setUsers] = useState<AuditUserOption[]>([])
+  const { loading: authLoading, authenticated, permissions, role, actorKey, username } = useSimpleAdminAuth()
   const [pageId, setPageId] = useState("all")
   const [operation, setOperation] = useState("all")
   const [actor, setActor] = useState("all")
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null)
-  const [undoingId, setUndoingId] = useState<string | null>(null)
-  const [message, setMessage] = useState("")
-
-  const selectedLog = useMemo(
-    () => logs.find((log) => log.id === selectedId) || logs[0] || null,
-    [logs, selectedId]
-  )
+  const [actorLabel, setActorLabel] = useState("")
+  const [undoing, setUndoing] = useState<{ key: string; id: string } | null>(null)
+  const [notice, setNotice] = useState<{ key: string; message: string } | null>(null)
+  const canView = isAdminRole(role) || canAccessAdminPage(permissions, "audit-log", "view")
   const canEdit = isAdminRole(role) || canAccessAdminPage(permissions, "audit-log", "edit")
-
-  const loadLogs = useCallback(async () => {
-    if (!authenticated) return
-
-    setLoading(true)
-    setMessage("")
-
-    const params = new URLSearchParams({ limit: "150" })
-    if (pageId !== "all") params.set("page", pageId)
-    if (operation !== "all") params.set("operation", operation)
-    if (actor !== "all") params.set("actor", actor)
-
-    try {
-      const response = await fetch(`/api/admin/audit-logs?${params.toString()}`, {
-        cache: "no-store",
-      })
-      const data = (await response.json()) as AuditResponse
-
-      if (!response.ok) {
-        setMessage(data.message || "Failed to load audit logs.")
-        return
-      }
-
-      setLogs(data.logs || [])
-      setPages(data.pages || [])
-      setUsers(data.users || [])
-      setSelectedId((current) =>
-        current && data.logs.some((log) => log.id === current)
-          ? current
-          : data.logs[0]?.id || null
-      )
-    } catch {
-      setMessage("Failed to load audit logs.")
-    } finally {
-      setLoading(false)
-    }
-  }, [actor, authenticated, operation, pageId])
+  const owner = JSON.stringify([actorKey, username, role, canView, canEdit])
+  const noticeKey = JSON.stringify([owner, pageId, operation, actor])
+  const undoingId = undoing?.key === noticeKey ? undoing.id : null
+  const browsing = useAuditBrowsing({ endpoint: "/api/admin/audit-logs", owner, enabled: !authLoading && authenticated && canView, page: pageId, actor, operation })
+  const { logs, pages, users, selectedLog, loading, detailLoadingId, pageInfo } = browsing
+  const message = browsing.message || (notice?.key === noticeKey ? notice.message : "")
 
   useEffect(() => {
     document.title = "AUDIT LOG - FC Uno"
   }, [])
-
-  useEffect(() => {
-    loadLogs()
-  }, [loadLogs])
-
-  useEffect(() => {
-    if (!authenticated || !selectedLog || selectedLog.detailsLoaded) return
-
-    let cancelled = false
-    const controller = new AbortController()
-    const loadDetails = async () => {
-      setDetailLoadingId(selectedLog.id)
-      try {
-        const response = await fetch(
-          `/api/admin/audit-logs?id=${encodeURIComponent(selectedLog.id)}`,
-          { cache: "no-store", signal: controller.signal },
-        )
-        const data = (await response.json()) as AuditResponse
-        if (!response.ok || !data.log || cancelled) return
-        setLogs((current) =>
-          current.map((log) => (log.id === data.log?.id ? data.log : log)),
-        )
-      } catch {
-        if (!cancelled && !controller.signal.aborted) setMessage("Failed to load audit details.")
-      } finally {
-        if (!cancelled) setDetailLoadingId(null)
-      }
-    }
-
-    void loadDetails()
-    return () => {
-      cancelled = true
-      controller.abort()
-    }
-  }, [authenticated, selectedLog])
 
   async function handleUndo(log: AuditLogRecord) {
     if (log.undoneAt || log.undoOfLogId || log.undoable === false || !canEdit) return
@@ -260,8 +148,9 @@ export default function AuditLogPage() {
     const confirmed = window.confirm(`Undo this change?\n\n${log.summary}`)
     if (!confirmed) return
 
-    setUndoingId(log.id)
-    setMessage("")
+    const token = browsing.token()
+    setUndoing({ key: noticeKey, id: log.id })
+    setNotice(null)
 
     try {
       const response = await fetch("/api/admin/audit-logs", {
@@ -272,28 +161,29 @@ export default function AuditLogPage() {
         body: JSON.stringify({ action: "undo", id: log.id }),
       })
       const data = await response.json()
+      if (!browsing.isCurrent(token)) return
 
       if (!response.ok) {
-        setMessage(data.message || "Undo failed.")
+        setNotice({ key: noticeKey, message: data.message || "Undo failed." })
         return
       }
 
-      setMessage("Undo applied.")
-      await loadLogs()
+      setNotice({ key: noticeKey, message: "Undo applied." })
+      await browsing.refresh()
     } catch {
-      setMessage("Undo failed.")
+      if (browsing.isCurrent(token)) setNotice({ key: noticeKey, message: "Undo failed." })
     } finally {
-      setUndoingId(null)
+      setUndoing((current) => current?.key === noticeKey && current.id === log.id ? null : current)
     }
   }
 
   if (authLoading) return <p style={{ padding: "40px" }}>Loading...</p>
 
-  if (!authenticated) {
+  if (!authenticated || !canView) {
     return (
       <div style={pageStyle}>
         <p style={{ margin: 0, color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
-          Please log in from the admin homepage first.
+          {authenticated ? "You do not have permission to view audit records." : "Please log in from the admin homepage first."}
         </p>
       </div>
     )
@@ -304,6 +194,7 @@ export default function AuditLogPage() {
       <div style={{ display: "grid", gap: "14px" }}>
         <div style={panelStyle}>
           <div
+            data-admin-view-safe="true"
             style={{
               padding: "12px",
               display: "grid",
@@ -315,11 +206,13 @@ export default function AuditLogPage() {
             <label style={labelStyle}>
               Page
               <select
+                aria-label="Page"
                 value={pageId}
                 onChange={(event) => setPageId(event.target.value)}
                 style={inputStyle}
               >
                 <option value="all">All pages</option>
+                {pageId !== "all" && !pages.some((page) => page.id === pageId) ? <option value={pageId}>{pageId}</option> : null}
                 {pages.map((page) => (
                   <option key={page.id} value={page.id}>
                     {page.label}
@@ -331,6 +224,7 @@ export default function AuditLogPage() {
             <label style={labelStyle}>
               Operation
               <select
+                aria-label="Operation"
                 value={operation}
                 onChange={(event) => setOperation(event.target.value)}
                 style={inputStyle}
@@ -345,11 +239,13 @@ export default function AuditLogPage() {
             <label style={labelStyle}>
               User
               <select
+                aria-label="User"
                 value={actor}
-                onChange={(event) => setActor(event.target.value)}
+                onChange={(event) => { setActor(event.target.value); setActorLabel(event.target.selectedOptions[0]?.text || event.target.value) }}
                 style={inputStyle}
               >
                 <option value="all">All users</option>
+                {actor !== "all" && !users.some((user) => user.value === actor) ? <option value={actor}>{actorLabel || actor}</option> : null}
                 {users.map((user) => (
                   <option key={user.value} value={user.value}>
                     {user.label}
@@ -361,12 +257,12 @@ export default function AuditLogPage() {
         </div>
 
         {message ? (
-          <div
+          <div role="status"
             style={{
               border: "1px solid var(--fc-admin-border)",
               borderRadius: "6px",
               background: "var(--fc-admin-panel-bg)",
-              color: message.toLowerCase().includes("failed")
+              color: browsing.message || notice?.message !== "Undo applied."
                 ? "var(--fc-error)"
                 : "var(--fc-success)",
               padding: "10px 12px",
@@ -375,6 +271,7 @@ export default function AuditLogPage() {
             }}
           >
             {message}
+            {browsing.message ? <button type="button" data-admin-view-safe="true" style={{ ...buttonStyle, marginLeft: "10px" }} disabled={loading} onClick={browsing.retry}>Retry</button> : null}
           </div>
         ) : null}
 
@@ -393,7 +290,7 @@ export default function AuditLogPage() {
                 Changes
               </strong>
               <span style={{ color: "var(--fc-admin-muted)", fontSize: "12px", fontWeight: 800 }}>
-                {loading ? "Loading..." : `${logs.length} shown`}
+                {loading ? "Loading..." : `${logs.length} on this page`}
               </span>
             </div>
 
@@ -418,11 +315,11 @@ export default function AuditLogPage() {
                       <tr
                         key={log.id}
                         tabIndex={0}
-                        onClick={() => setSelectedId(log.id)}
+                        onClick={() => browsing.select(log.id)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault()
-                            setSelectedId(log.id)
+                            browsing.select(log.id)
                           }
                         }}
                         style={{
@@ -468,7 +365,7 @@ export default function AuditLogPage() {
                               event.stopPropagation()
                               handleUndo(log)
                             }}
-                            disabled={!canUndo || undoingId === log.id}
+                            disabled={!canUndo || loading || undoingId === log.id}
                             style={{
                               ...dangerButtonStyle,
                               cursor: canUndo ? "pointer" : "not-allowed",
@@ -485,11 +382,22 @@ export default function AuditLogPage() {
               </table>
             </div>
 
-            {!loading && logs.length === 0 ? (
+            {!loading && logs.length === 0 && pageInfo?.state === "exhausted" ? (
               <div style={{ padding: "18px", color: "var(--fc-admin-muted)", fontSize: "13px" }}>
                 No changes match these filters.
               </div>
             ) : null}
+            <div aria-live="polite" style={{ padding: "12px", display: "grid", gap: "10px", color: "var(--fc-admin-muted)", fontSize: "12px" }}>
+              {pageInfo?.state === "scan-pending" ? <span>More history needs to be checked. Continue searching for matching changes.</span> : null}
+              {pageInfo?.state === "exhausted" && logs.length > 0 ? <span>End of matching history.</span> : null}
+              <span>Live history; new changes may appear after Refresh. User options are from the current results, not a complete staff directory.</span>
+              {browsing.historyTruncated ? <span>Only the last 20 pages are kept for Previous. Refresh to restart from the newest changes.</span> : null}
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                <button type="button" style={buttonStyle} disabled={loading || browsing.index < 1} onClick={browsing.previous}>Previous</button>
+                <button type="button" style={buttonStyle} disabled={loading || !pageInfo?.nextCursor} onClick={browsing.older}>{pageInfo?.state === "scan-pending" ? "Continue searching" : "Load older"}</button>
+                <button type="button" style={buttonStyle} disabled={loading} onClick={() => { setNotice(null); void browsing.refresh() }}>Refresh</button>
+              </div>
+            </div>
           </div>
 
           <div style={{ ...panelStyle, position: "sticky", top: "18px" }}>

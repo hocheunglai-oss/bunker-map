@@ -115,6 +115,10 @@ function loadRoute(target: AuditLogRecord, permissionError?: "Unauthorized" | "F
     "@/lib/adminPageDiscovery": {},
     "@/lib/adminUsers": {},
     "@/lib/serverTiming": {},
+    "@/lib/auditBrowsing": { browseAuditLogs: () => assert.fail("Undo must not invoke list browsing") },
+    "@/lib/auditBrowsingCursor": {},
+    "@/lib/auditBrowsingSource": {},
+    "@/lib/legacyAdminAuditFullList": { readLegacyAdminAuditFullList: () => assert.fail("Undo must not invoke legacy list browsing") },
   }
   vm.runInNewContext(routeOutput, {
     exports, Error, URL,

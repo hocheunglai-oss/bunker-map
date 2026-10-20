@@ -85,7 +85,7 @@ test("human attendance changes are visible through the page-scoped Audit Log", (
   for (const table of auditedAttendanceTables) {
     assert.match(migration, new RegExp(`audit_enable_table\\('public\\.${table}'`))
     assert.match(auditPresentation, new RegExp(`${table}: "attendance-record"`))
-    assert.match(auditRoute, new RegExp(`"${table}"`))
+    assert.match(auditRoute, /browseAuditLogs\(/)
   }
 })
 
