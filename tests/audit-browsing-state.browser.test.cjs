@@ -49,10 +49,11 @@ const guardedEntry = entry.replace('import Admin from "./app/admin/auditlog/page
       builder.onLoad({ filter: /.*/, namespace: "synthetic" }, args => ({ contents: mocks[args.path], loader: "jsx", resolveDir: root }))
       // Next consumes this compiler-only prop. Keep the actual page CSS in
       // the isolated DOM without leaking an invalid boolean JSX attribute.
-      builder.onLoad({ filter: /app\/admin\/auditlog\/page\.tsx$/ }, args => ({
-        contents: fs.readFileSync(args.path, "utf8").replace("<style jsx>", "<style>")
-          .replace(removeViewMarkers ? /data-admin-view-safe="true"/g : /$^/, ""), loader: "tsx", resolveDir: path.dirname(args.path),
-      }))
+      builder.onLoad({ filter: /app\/admin\/auditlog\/page\.tsx$/ }, args => {
+        let contents = fs.readFileSync(args.path, "utf8").replace("<style jsx>", "<style>")
+        if (removeViewMarkers) contents = contents.replace(/data-admin-view-safe="true"/g, "")
+        return { contents, loader: "tsx", resolveDir: path.dirname(args.path) }
+      })
     } }],
   })
   const [bundle, guardedBundle, guardedBeforeBundle] = await Promise.all([makeBundle(), makeBundle(true), makeBundle(true, true)])
@@ -366,12 +367,26 @@ const guardedEntry = entry.replace('import Admin from "./app/admin/auditlog/page
               assert.equal(await undoButton.evaluate(button => button.closest('[data-admin-view-safe="true"]') !== null), false)
               const deniedWrite = await page.evaluate(async () => {
                 const h = window.__auditHarness, before = h.requests.length
+                // A verified session read can legitimately run while the
+                // async guard rejects a write. Count only writes, not all I/O.
+                const unrelatedRead = Promise.resolve().then(() => fetch("/api/admin/session"))
                 const response = await fetch("/api/admin/audit-logs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "undo", id: "first" }) })
-                return { status: response.status, message: (await response.json()).message, forwarded: h.requests.length - before, undone: [...h.undoneIds] }
+                const readResponse = await unrelatedRead, message = (await response.json()).message
+                const requestsDuringProbe = h.requests.slice(before)
+                const countAuditPosts = requests => requests.filter(item => item.method === "POST" && item.path === "/api/admin/audit-logs").length
+                return { status: response.status, message, readStatus: readResponse.status, requestsDuringProbe,
+                  forwardedAuditPosts: countAuditPosts(requestsDuringProbe),
+                  // Detector control only: never sent or added to the trace.
+                  matchingPostPositiveControl: countAuditPosts([...requestsDuringProbe, { method: "POST", path: "/api/admin/audit-logs", body: { unexpected: "wrong-body-must-still-count" } }]),
+                  undone: [...h.undoneIds] }
               })
+              console.log("View guard probe " + JSON.stringify(deniedWrite))
               assert.equal(deniedWrite.status, 403)
               assert.match(deniedWrite.message, /view-only/)
-              assert.equal(deniedWrite.forwarded, 0)
+              assert.equal(deniedWrite.readStatus, 200)
+              assert.ok(deniedWrite.requestsDuringProbe.some(item => item.method === "GET" && item.path === "/api/admin/session"))
+              assert.equal(deniedWrite.forwardedAuditPosts, 0)
+              assert.equal(deniedWrite.matchingPostPositiveControl, 1)
               assert.deepEqual(deniedWrite.undone, [])
               await screenshot("actual-guard-view")
               for (const mode of ["none", "signed-out"]) {
@@ -380,7 +395,7 @@ const guardedEntry = entry.replace('import Admin from "./app/admin/auditlog/page
                 assert.equal(await page.evaluate(() => window.__auditHarness.requests.filter(item => item.path === "/api/admin/audit-logs").length), 0)
                 await screenshot("actual-guard-" + mode)
               }
-              shellResults.push({ engine, width, scheme, area, status: "passed", actualProviderAndGuard: true, noMarkerNegativeReproduced: true, viewFiltersAndRetryEnabled: true, unsafeControlsDisabled: true, undoPostBlockedBeforeTransport: true })
+              shellResults.push({ engine, width, scheme, area, status: "passed", actualProviderAndGuard: true, noMarkerNegativeReproduced: true, viewFiltersAndRetryEnabled: true, unsafeControlsDisabled: true, undoPostBlockedBeforeTransport: true, unrelatedSessionReadObserved: true, matchingPostPositiveControl: true })
             }
             for (const mode of ["none", "signed-out"]) {
               await page.goto(route + "?mode=" + mode)
