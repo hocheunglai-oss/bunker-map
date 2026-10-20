@@ -319,8 +319,6 @@ jobs:
           ADMIN_VIEW_FILTERS_SCREENSHOTS="$evidence_dir/view-filters" node tests/admin-view-filters.browser.test.cjs 2>&1 | tee "$test_runtime/view-filters.log"
           mkdir -p "$evidence_dir/enquiry-parser"
           ENQUIRY_CORRECTNESS_EVIDENCE="$evidence_dir/enquiry-parser" node tests/enquiry-parser-correctness.browser.test.cjs 2>&1 | tee "$test_runtime/enquiry-parser.log"
-          PHONEBOOK_SCREENSHOT="$evidence_dir/phonebook-sync.png" node tests/phonebook-sync.browser.test.cjs 2>&1 | tee "$test_runtime/phonebook-sync.log"
-          PHONEBOOK_INTEGRITY_EVIDENCE="$evidence_dir/phonebook-integrity" node tests/phonebook-contact-integrity.browser.test.cjs 2>&1 | tee "$test_runtime/phonebook-integrity.log"
 
       - name: Retain synthetic browser verification evidence
         if: always()
@@ -333,8 +331,56 @@ jobs:
             ${{ runner.temp }}/fcuno-report-browser-runtime/statistics.log
             ${{ runner.temp }}/fcuno-report-browser-runtime/view-filters.log
             ${{ runner.temp }}/fcuno-report-browser-runtime/enquiry-parser.log
-            ${{ runner.temp }}/fcuno-report-browser-runtime/phonebook-sync.log
-            ${{ runner.temp }}/fcuno-report-browser-runtime/phonebook-integrity.log
+          if-no-files-found: warn
+          retention-days: 90
+
+  phonebook-browser-regressions:
+    name: Phonebook ownership desktop and mobile
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Verify Phonebook writes and ownership in isolated Chromium and WebKit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_runtime="${RUNNER_TEMP}/fcuno-phonebook-browser-runtime"
+          evidence_dir="${RUNNER_TEMP}/fcuno-phonebook-browser-evidence"
+          npm install --prefix "$test_runtime" --ignore-scripts --no-fund playwright@1.62.1
+          npm audit --prefix "$test_runtime" --audit-level=high
+          npm audit signatures --prefix "$test_runtime"
+          export NODE_PATH="$test_runtime/node_modules"
+          export PLAYWRIGHT_BROWSERS_PATH="${RUNNER_TEMP}/fcuno-phonebook-browser-cache"
+          "$test_runtime/node_modules/.bin/playwright" install --with-deps chromium webkit
+          mkdir -p "$evidence_dir"
+          PHONEBOOK_SCREENSHOT="$evidence_dir/phonebook-sync.png" node tests/phonebook-sync.browser.test.cjs 2>&1 | tee "$test_runtime/phonebook-sync.log"
+          PHONEBOOK_INTEGRITY_EVIDENCE="$evidence_dir/phonebook-integrity" node tests/phonebook-contact-integrity.browser.test.cjs 2>&1 | tee "$test_runtime/phonebook-integrity.log"
+          PHONEBOOK_DELETE_UNDO_EVIDENCE="$evidence_dir/phonebook-delete-undo" node tests/phonebook-delete-undo.browser.test.cjs 2>&1 | tee "$test_runtime/phonebook-delete-undo.log"
+
+      - name: Retain synthetic Phonebook browser verification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: phonebook-browser-evidence-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/fcuno-phonebook-browser-evidence
+            ${{ runner.temp }}/fcuno-phonebook-browser-runtime/phonebook-sync.log
+            ${{ runner.temp }}/fcuno-phonebook-browser-runtime/phonebook-integrity.log
+            ${{ runner.temp }}/fcuno-phonebook-browser-runtime/phonebook-delete-undo.log
           if-no-files-found: warn
           retention-days: 90
 

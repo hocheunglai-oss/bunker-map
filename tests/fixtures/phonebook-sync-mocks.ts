@@ -39,6 +39,10 @@ export type PhonebookSyncHarness = {
   releaseContactRead?: () => void
   deferCacheFetch?: boolean
   releaseCacheFetch?: () => void
+  deferContactDelete?: boolean
+  releaseContactDelete?: () => void
+  deferCompanyContacts?: boolean
+  releaseCompanyContacts?: () => void
 }
 declare global { interface Window { __phonebookSyncHarness: PhonebookSyncHarness } }
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
@@ -82,6 +86,11 @@ export function installPhonebookSyncHarness() {
     if (url.pathname === "/api/phonebook/carddav-sync" && method === "GET") return json({ savedContactCount: harness.contacts.length, carddavContactCount: harness.contacts.length, carddavTotalCount: harness.contacts.length + 5, carddavOtherCount: 5, carddavMatchedCount: harness.contacts.length, carddavMissingCount: 0, carddavOrphanCount: 0, ...harness.countOverrides, checkedAt: new Date().toISOString() })
     if (url.pathname === "/api/phonebook/contacts" && method === "GET") {
       if (harness.malformedContacts) return json({})
+      if (url.searchParams.has("company") && harness.deferCompanyContacts) {
+        await new Promise<void>(resolve => { harness.releaseCompanyContacts = resolve })
+        harness.deferCompanyContacts = false
+        harness.releaseCompanyContacts = undefined
+      }
       if (url.searchParams.get("all") === "1" && harness.deferCacheFetch) {
         const snapshot = clone(harness.contacts)
         await new Promise<void>(resolve => { harness.releaseCacheFetch = resolve })
@@ -162,6 +171,11 @@ class Query implements PromiseLike<QueryResult> {
       return { data: this.singular ? result[0] || null : result, error: null }
     }
     harness.operations.push(operation)
+    if (operation.table === "phonebook_contacts" && operation.method === "DELETE" && harness.deferContactDelete) {
+      await new Promise<void>(resolve => { harness.releaseContactDelete = resolve })
+      harness.deferContactDelete = false
+      harness.releaseContactDelete = undefined
+    }
     if (operation.table === "phonebook_contacts" && ["POST", "PATCH"].includes(operation.method) && harness.deferContactWrite) {
       await new Promise<void>((resolve) => { harness.releaseContactWrite = resolve })
       harness.releaseContactWrite = null
