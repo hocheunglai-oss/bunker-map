@@ -70,6 +70,19 @@ function isSearchControl(element: HTMLInputElement | HTMLTextAreaElement) {
   return /\b(search|filter|find|query)\b/i.test(label)
 }
 
+function disableViewOnlyControl(
+  element: HTMLButtonElement | HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
+) {
+  if (element.dataset.adminViewOnlyDisabled !== "true") {
+    element.dataset.adminOriginallyDisabled = String(element.disabled)
+    element.dataset.adminViewOnlyDisabled = "true"
+  }
+  if (!element.disabled) element.disabled = true
+  if (element.getAttribute("aria-disabled") !== "true") {
+    element.setAttribute("aria-disabled", "true")
+  }
+}
+
 function setViewOnlyControls(root: ParentNode, viewOnly: boolean) {
   root.querySelectorAll<HTMLElement>("button, input, textarea, select, [contenteditable]")
     .forEach((element) => {
@@ -109,13 +122,8 @@ function setViewOnlyControls(root: ParentNode, viewOnly: boolean) {
         ) {
           return
         }
-        if (element.dataset.adminViewOnlyDisabled === "true") return
-
-        element.dataset.adminOriginallyDisabled = String(element.disabled)
-        element.dataset.adminViewOnlyDisabled = "true"
-        element.disabled = true
-        element.setAttribute("aria-disabled", "true")
-        element.title = "View-only access"
+        disableViewOnlyControl(element)
+        if (element.title !== "View-only access") element.title = "View-only access"
         return
       }
 
@@ -123,26 +131,19 @@ function setViewOnlyControls(root: ParentNode, viewOnly: boolean) {
         if (isSearchControl(element)) return
 
         if (["checkbox", "radio", "file", "range", "color"].includes(element.type)) {
-          if (element.dataset.adminViewOnlyDisabled === "true") return
-          element.dataset.adminOriginallyDisabled = String(element.disabled)
-          element.dataset.adminViewOnlyDisabled = "true"
-          element.disabled = true
-          element.setAttribute("aria-disabled", "true")
+          disableViewOnlyControl(element)
         } else {
-          if (element.dataset.adminViewOnlyReadonly === "true") return
-          element.dataset.adminOriginallyReadonly = String(element.readOnly)
-          element.dataset.adminViewOnlyReadonly = "true"
-          element.readOnly = true
+          if (element.dataset.adminViewOnlyReadonly !== "true") {
+            element.dataset.adminOriginallyReadonly = String(element.readOnly)
+            element.dataset.adminViewOnlyReadonly = "true"
+          }
+          if (!element.readOnly) element.readOnly = true
         }
         return
       }
 
       if (element instanceof HTMLSelectElement) {
-        if (element.dataset.adminViewOnlyDisabled === "true") return
-        element.dataset.adminOriginallyDisabled = String(element.disabled)
-        element.dataset.adminViewOnlyDisabled = "true"
-        element.disabled = true
-        element.setAttribute("aria-disabled", "true")
+        disableViewOnlyControl(element)
         return
       }
 
@@ -252,18 +253,48 @@ export function AdminRouteGuard({ children }: { children: React.ReactNode }) {
     const root = document.querySelector(".fc-admin-scope")
     if (!root) return
 
-    const apply = () => setViewOnlyControls(root, viewOnly)
-    apply()
-
-    let frame = 0
-    const observer = new MutationObserver(() => {
-      if (frame) return
-      frame = window.requestAnimationFrame(() => {
-        frame = 0
-        apply()
-      })
+    // React can rewrite a guarded native property without removing our marker.
+    // Remember those application writes so leaving View restores the latest
+    // state, not the busy/read-only state seen when the guard first mounted.
+    const rememberControlState = (records: MutationRecord[]) => {
+      for (const { target, attributeName } of records) {
+        if (!(target instanceof HTMLElement)) continue
+        if (
+          attributeName === "disabled" &&
+          target.dataset.adminViewOnlyDisabled === "true" &&
+          (target instanceof HTMLButtonElement ||
+            target instanceof HTMLInputElement ||
+            target instanceof HTMLSelectElement ||
+            target instanceof HTMLTextAreaElement)
+        ) {
+          target.dataset.adminOriginallyDisabled = String(target.disabled)
+        }
+        if (
+          attributeName === "readonly" &&
+          target.dataset.adminViewOnlyReadonly === "true" &&
+          (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)
+        ) {
+          target.dataset.adminOriginallyReadonly = String(target.readOnly)
+        }
+      }
+    }
+    const observe = () => observer.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["disabled", "readonly"],
     })
-    observer.observe(root, { childList: true, subtree: true })
+    const apply = () => {
+      // Do not observe our own enforcement writes or treat them as app intent.
+      observer.disconnect()
+      setViewOnlyControls(root, true)
+      observe()
+    }
+    const observer = new MutationObserver((records) => {
+      rememberControlState(records)
+      apply()
+    })
+    apply()
 
     const blockSubmit = (event: Event) => {
       if (!viewOnly) return
@@ -273,8 +304,8 @@ export function AdminRouteGuard({ children }: { children: React.ReactNode }) {
     root.addEventListener("submit", blockSubmit, true)
 
     return () => {
+      rememberControlState(observer.takeRecords())
       observer.disconnect()
-      if (frame) window.cancelAnimationFrame(frame)
       root.removeEventListener("submit", blockSubmit, true)
       setViewOnlyControls(root, false)
     }

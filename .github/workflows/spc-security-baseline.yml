@@ -317,6 +317,7 @@ jobs:
           OPENAI_USAGE_SCREENSHOTS="$evidence_dir/usage" node tests/openai-usage-state.browser.test.cjs 2>&1 | tee "$test_runtime/usage.log"
           SPC_STATISTICS_SCREENSHOTS="$evidence_dir/statistics" node tests/spc-statistics-state.browser.test.cjs 2>&1 | tee "$test_runtime/statistics.log"
           ADMIN_VIEW_FILTERS_SCREENSHOTS="$evidence_dir/view-filters" node tests/admin-view-filters.browser.test.cjs 2>&1 | tee "$test_runtime/view-filters.log"
+          ADMIN_VIEW_CONTROL_EVIDENCE="$evidence_dir/view-control-state" node tests/admin-view-control-state.browser.test.cjs 2>&1 | tee "$test_runtime/view-control-state.log"
           mkdir -p "$evidence_dir/enquiry-parser"
           ENQUIRY_CORRECTNESS_EVIDENCE="$evidence_dir/enquiry-parser" node tests/enquiry-parser-correctness.browser.test.cjs 2>&1 | tee "$test_runtime/enquiry-parser.log"
 
@@ -330,6 +331,7 @@ jobs:
             ${{ runner.temp }}/fcuno-report-browser-runtime/usage.log
             ${{ runner.temp }}/fcuno-report-browser-runtime/statistics.log
             ${{ runner.temp }}/fcuno-report-browser-runtime/view-filters.log
+            ${{ runner.temp }}/fcuno-report-browser-runtime/view-control-state.log
             ${{ runner.temp }}/fcuno-report-browser-runtime/enquiry-parser.log
           if-no-files-found: warn
           retention-days: 90
