@@ -153,8 +153,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx --no-install tsx --test tests/spc-operational-response.test.ts 2>&1 | tee spc-operational-response-tests.tap
-          node --test tests/spc-operational-api.test.mjs tests/spc-today-enquiries-api.test.mjs tests/spc-enquiry-list-permissions.test.mjs 2>&1 | tee spc-operational-api-tests.tap
+          npx --no-install tsx --test tests/spc-operational-response.test.ts tests/spc-record-page-response.test.ts tests/spc-enquiry-ownership.test.ts 2>&1 | tee spc-operational-response-tests.tap
+          node --test tests/spc-operational-api.test.mjs tests/spc-today-enquiries-api.test.mjs tests/spc-enquiry-list-permissions.test.mjs tests/spc-record-pages-api.test.mjs 2>&1 | tee spc-operational-api-tests.tap
 
       - name: Verify directory query boundaries and feedback revision ownership
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -406,6 +406,8 @@ jobs:
           CLIENT_SESSION_OWNERSHIP_SCREENSHOTS="$evidence_dir/ownership" node tests/client-session-ownership.browser.test.cjs 2>&1 | tee "$test_runtime/ownership.log"
           node tests/client-session-storage.browser.test.cjs 2>&1 | tee "$test_runtime/storage.log"
           SPC_OPERATIONAL_SCREENSHOTS="$evidence_dir/spc-operational" node tests/spc-operational-state.browser.test.cjs 2>&1 | tee "$test_runtime/spc-operational.log"
+          SPC_RECORD_STATE_SCREENSHOTS="$evidence_dir/spc-record-state" node tests/spc-record-state.browser.test.cjs 2>&1 | tee "$test_runtime/spc-record-state.log"
+          SPC_RECORD_PAGES_SCREENSHOTS="$evidence_dir/spc-record-pages" node tests/spc-record-pages-state.browser.test.cjs 2>&1 | tee "$test_runtime/spc-record-pages.log"
           SPC_LOST_DATE_SCREENSHOTS="$evidence_dir/lost-date" node tests/spc-lost-record-date.browser.test.cjs 2>&1 | tee "$test_runtime/lost-date.log"
 
       - name: Retain synthetic calendar and session verification evidence
@@ -419,6 +421,8 @@ jobs:
             ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/ownership.log
             ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/storage.log
             ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/spc-operational.log
+            ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/spc-record-state.log
+            ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/spc-record-pages.log
             ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/lost-date.log
           if-no-files-found: warn
           retention-days: 90

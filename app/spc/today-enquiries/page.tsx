@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { canAccessSpcPage, normaliseSpcRole } from "@/lib/spcPages"
@@ -10,11 +10,11 @@ import type {
   SpcTodayPreviousLost,
 } from "@/lib/spcTodayEnquiries"
 import { useSpcAuth } from "@/lib/useSpcAuth"
+import { useSpcRecordPageRead } from "@/lib/useSpcRecordPageRead"
+import styles from "../record-pages.module.css"
 
-type TodayResponse = {
-  enquiries?: SpcTodayEnquiry[]
-  message?: string
-}
+const EMPTY_ENQUIRIES: SpcTodayEnquiry[] = []
+const EMPTY_SELECTION = new Set<string>()
 
 const todayColumnWidths = [
   48, // select
@@ -85,11 +85,14 @@ async function copyText(value: string) {
 }
 
 export default function SpcTodayEnquiriesPage() {
+  const auth = useSpcAuth()
+  return <TodayEnquiriesContents key={JSON.stringify([auth.loading, auth.authenticated, auth.actorKey, auth.username, auth.role, auth.office, auth.permissions["spc-today-enquiries"]])} />
+}
+
+function TodayEnquiriesContents() {
   const router = useRouter()
-  const { loading: authLoading, authenticated, permissions, role } = useSpcAuth()
-  const [enquiries, setEnquiries] = useState<SpcTodayEnquiry[]>([])
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [loading, setLoading] = useState(false)
+  const { loading: authLoading, authenticated, permissions, role, actorKey, username, office } = useSpcAuth()
+  const [selection, setSelection] = useState<{ pageKey: string; ids: Set<string> }>({ pageKey: "", ids: new Set() })
   const [message, setMessage] = useState("")
   const [notice, setNotice] = useState("")
 
@@ -98,24 +101,18 @@ export default function SpcTodayEnquiriesPage() {
     canAccessSpcPage(permissions, "spc-today-enquiries", "view") &&
     (normalizedRole === "SUPPLIER TRADER" || normalizedRole === "ADMIN")
   const hasPermissionSnapshot = Object.prototype.hasOwnProperty.call(permissions, "spc-today-enquiries")
-
-  const loadData = useCallback(async (quiet = false) => {
-    if (!canView) return
-    if (!quiet) setLoading(true)
-    setMessage("")
-    try {
-      const response = await fetch("/api/spc/today-enquiries", { cache: "no-store" })
-      const data = (await response.json()) as TodayResponse
-      if (!response.ok) throw new Error(data.message || "Failed to load today's enquiries.")
-      const nextEnquiries = data.enquiries || []
-      setEnquiries(nextEnquiries)
-      setSelectedIds((current) => new Set([...current].filter((id) => nextEnquiries.some((item) => item.id === id))))
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to load today's enquiries.")
-    } finally {
-      if (!quiet) setLoading(false)
-    }
-  }, [canView])
+  const owner = !authLoading && canView && hasPermissionSnapshot
+    ? JSON.stringify([actorKey, username, role, office, permissions["spc-today-enquiries"]]) : null
+  const records = useSpcRecordPageRead("today", owner)
+  const ownerRef = useRef(owner)
+  const enquiries = records.page?.enquiries || EMPTY_ENQUIRIES
+  const pageKey = records.page ? `${records.page.day}:${records.page.mainRevision}:${records.page.pageIndex}` : ""
+  const selectedIds = selection.pageKey === pageKey ? selection.ids : EMPTY_SELECTION
+  function setSelectedIds(update: Set<string> | ((current: Set<string>) => Set<string>)) {
+    setSelection(current => ({ pageKey, ids: typeof update === "function" ? update(current.pageKey === pageKey ? current.ids : EMPTY_SELECTION) : update }))
+  }
+  const loading = records.loading
+  const reloadCurrent = records.reloadCurrent
 
   useEffect(() => {
     document.title = "SPC DAILY BRIEFING"
@@ -127,12 +124,12 @@ export default function SpcTodayEnquiriesPage() {
   }, [authLoading, authenticated, canView, hasPermissionSnapshot, router])
 
   useEffect(() => {
-    void loadData()
     const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void loadData(true)
+      if (document.visibilityState === "visible") reloadCurrent()
     }, 15_000)
     return () => window.clearInterval(timer)
-  }, [loadData])
+  }, [reloadCurrent])
+  useEffect(() => { ownerRef.current = owner; return () => { ownerRef.current = null } }, [owner])
 
   const selectedEnquiries = useMemo(
     () => enquiries.filter((enquiry) => selectedIds.has(enquiry.id)),
@@ -149,13 +146,16 @@ export default function SpcTodayEnquiriesPage() {
   }
 
   async function copySelected() {
-    if (selectedEnquiries.length === 0) return
+    if (selectedEnquiries.length === 0 || !owner || records.denied || records.loading) return
+    const capturedOwner = owner
     setMessage("")
     setNotice("")
     try {
       await copyText(selectedEnquiries.map((enquiry) => enquiry.formattedText).join("\n\n"))
+      if (ownerRef.current !== capturedOwner) return
       setNotice(`${selectedEnquiries.length} ${selectedEnquiries.length === 1 ? "enquiry" : "enquiries"} copied.`)
     } catch {
+      if (ownerRef.current !== capturedOwner) return
       setMessage("Unable to copy selected enquiries.")
     }
   }
@@ -163,18 +163,25 @@ export default function SpcTodayEnquiriesPage() {
   if (authLoading || !authenticated || !hasPermissionSnapshot || !canView) {
     return <div className="spc-loading">LOADING...</div>
   }
+  if (records.denied) return <div className="spc-alert is-error" role="alert">{records.error}</div>
 
   return (
     <SpcShell title="SPC DAILY BRIEFING">
       <section className="spc-panel spc-fixture-ledger-panel spc-today-enquiries-panel">
         <div className="spc-fixture-ledger-toolbar spc-today-enquiries-toolbar">
-          {message ? <span className="spc-ledger-message is-error">{message}</span> : null}
-          {!message && notice ? <span className="spc-ledger-notice">{notice}</span> : null}
-          <span className="spc-today-selection-count">{selectedIds.size} SELECTED</span>
-          <button type="button" className="spc-fixture-refresh-button" onClick={() => setSelectedIds(new Set(enquiries.map((enquiry) => enquiry.id)))} disabled={enquiries.length === 0}>SELECT ALL</button>
+          {!message && !records.error && notice ? <span className="spc-ledger-notice">{notice}</span> : null}
+          <span className="spc-today-selection-count">{selectedEnquiries.length} SELECTED ON THIS PAGE</span>
+          <button type="button" className="spc-fixture-refresh-button" onClick={() => setSelectedIds(new Set(enquiries.map((enquiry) => enquiry.id)))} disabled={enquiries.length === 0 || loading}>SELECT THIS PAGE</button>
           <button type="button" className="spc-fixture-refresh-button" onClick={() => setSelectedIds(new Set())} disabled={selectedIds.size === 0}>CLEAR</button>
-          <button type="button" className="spc-today-copy-button" onClick={() => void copySelected()} disabled={selectedIds.size === 0}>COPY SELECTED</button>
-          <button type="button" className="spc-fixture-refresh-button" onClick={() => void loadData()} disabled={loading}>{loading ? "REFRESHING..." : "REFRESH"}</button>
+          <button type="button" className="spc-today-copy-button" onClick={() => void copySelected()} disabled={selectedEnquiries.length === 0 || loading}>COPY SELECTED ON THIS PAGE</button>
+          <button type="button" className="spc-fixture-refresh-button" onClick={() => void records.refresh()} disabled={loading}>{loading ? "REFRESHING..." : "REFRESH"}</button>
+        </div>
+        {message || records.error ? <div className="spc-alert is-error" role="alert">{message || records.error}</div> : null}
+        <div className={styles.controls} aria-label="Record pages">
+          <span className={styles.summary}>{records.page ? `${records.page.totalCount} enquiries · Page ${records.page.pageIndex} of ${records.page.pageCount} · ${enquiries.length} on this page` : loading ? "Loading the complete record page..." : "Records are unavailable. Refresh to try again."}</span>
+          <button type="button" onClick={records.previous} disabled={loading || !records.page || records.page.pageIndex <= 1}>PREVIOUS PAGE</button>
+          <button type="button" onClick={records.next} disabled={loading || !records.page?.nextCursor}>NEXT PAGE</button>
+          {records.page ? <span>Last verified {new Date(records.page.checkedAt).toLocaleString("en-GB", { timeZone: "Asia/Hong_Kong" })} HKT</span> : null}
         </div>
         <div className="spc-table-wrap">
           <table className="spc-table spc-fixture-table spc-today-enquiries-table" style={{ width: todayTableWidth, minWidth: todayTableWidth }}>
@@ -192,7 +199,7 @@ export default function SpcTodayEnquiriesPage() {
               </tr>
             </thead>
             <tbody>
-              <tr className="spc-fixture-section-row"><td colSpan={6}>TODAY · HONG KONG TIME</td></tr>
+              <tr className="spc-fixture-section-row"><td colSpan={6}>{records.page ? records.page.day : "TODAY"} · HONG KONG TIME</td></tr>
               {enquiries.map((enquiry) => {
                 const selected = selectedIds.has(enquiry.id)
                 return (
@@ -206,7 +213,7 @@ export default function SpcTodayEnquiriesPage() {
                   </tr>
                 )
               })}
-              {!loading && enquiries.length === 0 ? <tr className="spc-fixture-empty-row"><td colSpan={6}>No enquiries received today.</td></tr> : null}
+              {!loading && records.page && !records.error && enquiries.length === 0 ? <tr className="spc-fixture-empty-row"><td colSpan={6}>No enquiries received on {records.page.day}.</td></tr> : null}
             </tbody>
           </table>
         </div>
