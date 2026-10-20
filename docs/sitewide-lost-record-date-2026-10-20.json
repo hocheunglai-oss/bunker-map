@@ -4,7 +4,8 @@
   "baseCommit": "5b483027ff1e02d1bb1f3dcd7d691c94f81f75d3",
   "scope": [
     "One-line display formatter timezone correction in SPC Lost Record.",
-    "Persistent actual-page timezone/access/layout browser regression registered in existing isolated CI job."
+    "Persistent actual-page timezone/access/layout browser regression registered in existing isolated CI job.",
+    "Test-only synchronization of the existing session ownership observer; no sign-in implementation change."
   ],
   "cause": "Intl.DateTimeFormat used the browser timezone. UTC timestamps and date-only outcome dates could appear on the prior day in a browser west of UTC.",
   "fix": "Render DATE explicitly in Asia/Hong_Kong; do not rewrite stored values, ETA or business dates.",
@@ -49,6 +50,19 @@
     ],
     "personalBrowserUsed": false,
     "allOwnedBrowserResourcesClosed": true
+  },
+  "hostedFollowUp": {
+    "initialRun": 39363880727,
+    "initialCalendarJob": 118436098792,
+    "initialFailure": "Existing ownership test read its passive-effect journal before it updated; actual session and authenticated DOM remained correct in the controlled reproduction.",
+    "fix": "Wait for the exact verified observer state using the existing bounded timeout; retain original username and empty-draft assertions. No sleep, retry, fixture or application change.",
+    "proof": "Controlled observer-only 150ms delay reproduces the same null assertion; the exact-state barrier passes with the same delay.",
+    "pinnedPlaywright": "1.62.1",
+    "fullLocalContexts": 72,
+    "fullLocalExitCode": 0,
+    "testSha256": "922dff00c3d57807a5b0e32742c6a9809892e313262732e2d0743dd6264c8f3f",
+    "receipt": "/private/tmp/fcuno-pr74-ci-ownership-20261020-kQkowN/investigation-receipt.json",
+    "freshLinuxCiRequired": true
   },
   "evidence": {
     "localRoot": "/private/tmp/fcuno-ordinary-release-20261020-mWv0tu",
