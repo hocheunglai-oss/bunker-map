@@ -308,6 +308,7 @@ jobs:
           "$test_runtime/node_modules/.bin/playwright" install --with-deps chromium webkit
           OPENAI_USAGE_SCREENSHOTS="$evidence_dir/usage" node tests/openai-usage-state.browser.test.cjs 2>&1 | tee "$test_runtime/usage.log"
           SPC_STATISTICS_SCREENSHOTS="$evidence_dir/statistics" node tests/spc-statistics-state.browser.test.cjs 2>&1 | tee "$test_runtime/statistics.log"
+          ADMIN_VIEW_FILTERS_SCREENSHOTS="$evidence_dir/view-filters" node tests/admin-view-filters.browser.test.cjs 2>&1 | tee "$test_runtime/view-filters.log"
 
       - name: Retain synthetic browser verification evidence
         if: always()
@@ -318,6 +319,7 @@ jobs:
             ${{ runner.temp }}/fcuno-report-browser-evidence
             ${{ runner.temp }}/fcuno-report-browser-runtime/usage.log
             ${{ runner.temp }}/fcuno-report-browser-runtime/statistics.log
+            ${{ runner.temp }}/fcuno-report-browser-runtime/view-filters.log
           if-no-files-found: warn
           retention-days: 90
 

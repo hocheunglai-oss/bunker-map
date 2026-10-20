@@ -107,7 +107,7 @@ function UsagePeriodPanel({ days, onPeriodChange }: {
               <p>PAGE ATTRIBUTION BY TOKENS AND REQUESTS</p>
             </div>
             <div className={styles.actions}>
-              <select value={days} onChange={(event) => {
+              <select data-admin-view-safe="true" value={days} onChange={(event) => {
                 const selected = OPENAI_USAGE_DAYS.find(value => value === Number(event.target.value))
                 if (selected) onPeriodChange(selected)
               }} aria-label="Usage period">

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
+import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
 import { useIsMobile } from "@/lib/useIsMobile"
 import type { AuditLogRecord } from "@/lib/auditLog"
 import { isCreatedOutlookContact, normalizeOutlookContactFields, validateOutlookContactFields, type OutlookContactFields } from "@/lib/outlookContactValidation"
@@ -483,7 +484,8 @@ Write-Host "Done."
 
 export default function OutlookAddressBookPage() {
   const isMobile = useIsMobile()
-  const { loading: authLoading, authenticated } = useSimpleAdminAuth()
+  const { loading: authLoading, authenticated, role, permissions } = useSimpleAdminAuth()
+  const canEdit = isAdminRole(role) || canAccessAdminPage(permissions, "outlook-addressbook", "edit")
   const [initialBootstrap] = useState(() =>
     readAdminClientCache<OutlookAddressBookBootstrap>(OUTLOOK_ADDRESS_BOOK_CACHE_KEY),
   )
@@ -1546,6 +1548,8 @@ export default function OutlookAddressBookPage() {
               style={inputStyle}
             />
             <select
+              aria-label="Directory source book"
+              data-admin-view-safe="true"
               value={selectedSourceBook}
               onChange={(event) => {
                 setSelectedSourceBook(event.target.value)
@@ -1634,16 +1638,16 @@ export default function OutlookAddressBookPage() {
               <div style={titleStyle}>Contact Details</div>
               {editedContact ? (
                 <>
-                  <label><div style={fieldLabelStyle}>Display Name</div><input value={editedContact.display_name || ""} disabled={contactBusy} onChange={(event) => editContact({ display_name: event.target.value })} style={inputStyle} /></label>
-                  <label><div style={fieldLabelStyle}>Email</div><input value={editedContact.primary_email || ""} disabled={contactBusy} type="email" autoCapitalize="none" spellCheck={false} onChange={(event) => editContact({ primary_email: event.target.value })} style={inputStyle} /></label>
-                  <label><div style={fieldLabelStyle}>Nickname</div><input value={editedContact.nickname || ""} disabled={contactBusy} onChange={(event) => editContact({ nickname: event.target.value })} style={inputStyle} /></label>
+                  <label><div style={fieldLabelStyle}>Display Name</div><input value={editedContact.display_name || ""} disabled={contactBusy} readOnly={!canEdit} onChange={(event) => editContact({ display_name: event.target.value })} style={inputStyle} /></label>
+                  <label><div style={fieldLabelStyle}>Email</div><input value={editedContact.primary_email || ""} disabled={contactBusy} readOnly={!canEdit} type="email" autoCapitalize="none" spellCheck={false} onChange={(event) => editContact({ primary_email: event.target.value })} style={inputStyle} /></label>
+                  <label><div style={fieldLabelStyle}>Nickname</div><input value={editedContact.nickname || ""} disabled={contactBusy} readOnly={!canEdit} onChange={(event) => editContact({ nickname: event.target.value })} style={inputStyle} /></label>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-                    <label><div style={fieldLabelStyle}>First Name</div><input value={editedContact.first_name || ""} disabled={contactBusy} onChange={(event) => editContact({ first_name: event.target.value })} style={inputStyle} /></label>
-                    <label><div style={fieldLabelStyle}>Last Name</div><input value={editedContact.last_name || ""} disabled={contactBusy} onChange={(event) => editContact({ last_name: event.target.value })} style={inputStyle} /></label>
+                    <label><div style={fieldLabelStyle}>First Name</div><input value={editedContact.first_name || ""} disabled={contactBusy} readOnly={!canEdit} onChange={(event) => editContact({ first_name: event.target.value })} style={inputStyle} /></label>
+                    <label><div style={fieldLabelStyle}>Last Name</div><input value={editedContact.last_name || ""} disabled={contactBusy} readOnly={!canEdit} onChange={(event) => editContact({ last_name: event.target.value })} style={inputStyle} /></label>
                   </div>
                   <label>
                     <div style={fieldLabelStyle}>Source Book</div>
-                    <select value={contactSourceBookValue()} disabled={contactBusy} onChange={(event) => void applyContactSourceBook(event.target.value)} style={inputStyle}>
+                    <select value={contactSourceBookValue()} disabled={!canEdit || contactBusy} onChange={(event) => void applyContactSourceBook(event.target.value)} style={inputStyle}>
                       {editedContact.source_book && !sourceBookOptions.includes(editedContact.source_book) ? <option value={editedContact.source_book}>{editedContact.source_book}</option> : null}
                       {sourceBookOptions.map((sourceBook) => (
                         <option key={sourceBook} value={sourceBook}>{sourceBook}</option>
@@ -1655,7 +1659,7 @@ export default function OutlookAddressBookPage() {
                     <div>
                       <label>
                         <div style={fieldLabelStyle}>New Source Book</div>
-                        <input value={contactSourceDraft} disabled={contactBusy} onChange={(event) => { setContactSourceDraft(event.target.value.toUpperCase()); setMessage("") }} style={inputStyle} />
+                        <input value={contactSourceDraft} disabled={contactBusy} readOnly={!canEdit} onChange={(event) => { setContactSourceDraft(event.target.value.toUpperCase()); setMessage("") }} style={inputStyle} />
                       </label>
                     </div>
                   ) : null}
@@ -1674,12 +1678,12 @@ export default function OutlookAddressBookPage() {
               <div style={titleStyle}>Group Details</div>
               {editedGroup ? (
                 <>
-                  <label><div style={fieldLabelStyle}>Group Name</div><input value={editedGroup.name || ""} disabled={editorBusy} readOnly={!groupVersionReady} onChange={(event) => editGroup({ name: event.target.value })} style={inputStyle} /></label>
-                  <label><div style={fieldLabelStyle}>Nickname / Alias Seed</div><input value={editedGroup.nickname || ""} disabled={editorBusy} readOnly={!groupVersionReady} onChange={(event) => editGroup({ nickname: event.target.value })} style={inputStyle} /></label>
-                  <label><div style={fieldLabelStyle}>Description</div><input value={editedGroup.description || ""} disabled={editorBusy} readOnly={!groupVersionReady} onChange={(event) => editGroup({ description: event.target.value })} style={inputStyle} /></label>
+                  <label><div style={fieldLabelStyle}>Group Name</div><input value={editedGroup.name || ""} disabled={editorBusy} readOnly={!canEdit || !groupVersionReady} onChange={(event) => editGroup({ name: event.target.value })} style={inputStyle} /></label>
+                  <label><div style={fieldLabelStyle}>Nickname / Alias Seed</div><input value={editedGroup.nickname || ""} disabled={editorBusy} readOnly={!canEdit || !groupVersionReady} onChange={(event) => editGroup({ nickname: event.target.value })} style={inputStyle} /></label>
+                  <label><div style={fieldLabelStyle}>Description</div><input value={editedGroup.description || ""} disabled={editorBusy} readOnly={!canEdit || !groupVersionReady} onChange={(event) => editGroup({ description: event.target.value })} style={inputStyle} /></label>
                   <label>
                     <div style={fieldLabelStyle}>Source Book</div>
-                    <select aria-label="Source Book" value={groupSourceBookValue()} disabled={editorBusy || !groupVersionReady} onChange={(event) => void applyGroupSourceBook(event.target.value)} style={inputStyle}>
+                    <select aria-label="Source Book" value={groupSourceBookValue()} disabled={!canEdit || editorBusy || !groupVersionReady} onChange={(event) => void applyGroupSourceBook(event.target.value)} style={inputStyle}>
                       {editedGroup.source_book && !sourceBookOptions.includes(editedGroup.source_book) ? <option value={editedGroup.source_book}>{editedGroup.source_book}</option> : null}
                       {sourceBookOptions.map((sourceBook) => (
                         <option key={sourceBook} value={sourceBook}>{sourceBook}</option>
@@ -1691,7 +1695,7 @@ export default function OutlookAddressBookPage() {
                     <div>
                       <label>
                         <div style={fieldLabelStyle}>New Source Book</div>
-                        <input value={groupSourceDraft} disabled={editorBusy} readOnly={!groupVersionReady} onChange={(event) => { groupEditRevisionRef.current += 1; setGroupSourceDraft(event.target.value.toUpperCase()); setMessage("") }} style={inputStyle} />
+                        <input value={groupSourceDraft} disabled={editorBusy} readOnly={!canEdit || !groupVersionReady} onChange={(event) => { groupEditRevisionRef.current += 1; setGroupSourceDraft(event.target.value.toUpperCase()); setMessage("") }} style={inputStyle} />
                       </label>
                     </div>
                   ) : null}

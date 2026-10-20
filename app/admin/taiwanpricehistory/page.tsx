@@ -307,6 +307,7 @@ export default function TaiwanPriceHistoryPage() {
               <label style={{ display: "flex", flex: "1 1 160px", minWidth: 0, flexDirection: "column", gap: "6px" }}>
                 <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--fc-admin-panel-text)" }}>Year</span>
                 <select
+                  data-admin-view-safe="true"
                   value={selectedYear}
                   onChange={(event) => setSelectedYear(event.target.value)}
                   style={{ ...controlStyle, width: "100%" }}
@@ -323,6 +324,7 @@ export default function TaiwanPriceHistoryPage() {
               <label style={{ display: "flex", flex: "1 1 160px", minWidth: 0, flexDirection: "column", gap: "6px" }}>
                 <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--fc-admin-panel-text)" }}>Month</span>
                 <select
+                  data-admin-view-safe="true"
                   value={selectedMonth}
                   onChange={(event) => setSelectedMonth(event.target.value)}
                   style={{ ...controlStyle, width: "100%" }}

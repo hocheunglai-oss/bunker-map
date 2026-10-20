@@ -135,4 +135,8 @@ class Query implements PromiseLike<QueryResult> {
 }
 
 export const supabase = { from: (table: string) => new Query(table) }
-export function useSimpleAdminAuth() { return { loading: false, authenticated: !new URLSearchParams(location.search).has("signedout") } }
+export function useSimpleAdminAuth() {
+  const authenticated = !new URLSearchParams(location.search).has("signedout")
+  return { loading: false, authenticated, role: authenticated ? "USER" : null,
+    permissions: authenticated ? { "outlook-addressbook": "edit" as const } : {} }
+}
