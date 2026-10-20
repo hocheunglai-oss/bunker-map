@@ -83,3 +83,84 @@ Shared-address-book audit rows are part of the authoritative FCUNO-to-Exchange e
 ## Undo
 
 Admins can use `/admin/auditlog` to inspect changes and undo a single row change. Undo never erases history: it writes a new authoritative source change, creates the corresponding Exchange queue and truth-ledger evidence, and marks the original audit record through its dedicated undo metadata.
+
+## Browsing older changes
+
+Audit list reads are authorized on every request. Page, displayed operation and
+user filters are evaluated using the existing shared presentation rules, not an
+exact database actor-id or an incomplete table-to-page approximation.
+
+Each request scans a bounded number of raw rows in descending database timestamp
+and UUID order. `Load older` continues when another matching change is proven.
+`Continue searching` means the current scan reached its request budget before
+proving another match or the end; an empty scan page is not an empty history.
+`No matching changes` is shown only after verified exhaustion. Exact raw source
+counts are used privately to account for provider row caps; they are never
+presented as an exact filtered-history count. The displayed total is unknown.
+
+This is **live keyset browsing**, not a persistent snapshot. Newly newer changes
+appear after Refresh. Backdated inserts, deleted rows, Undo and changes in actor,
+page or port mapping can affect later reads. Observed classification-map changes
+invalidate the cursor and require Refresh. A changed deployment commit also
+invalidates the browse generation. List classification maps are read
+through the same bounded, provider-cap-aware transport; legacy detail presentation
+retains its existing independent behavior. Filter/account/permission changes and successful Undo reset
+the browse generation. Only the visible page and at most 20 previous cursor
+positions are kept in the browser; Refresh returns to the newest records.
+
+List browsing requires the dedicated **server-only Secret**
+`AUDIT_BROWSING_CURSOR_KEYS_JSON`. It is never a `NEXT_PUBLIC_` variable and must
+not reuse a service key, session token, signing key, webhook or cron secret.
+Its shape is an `activeKid` string and a `keys` array containing one or two
+objects with `kid` and `keyBase64url`; each key is an independently provisioned,
+canonical unpadded base64url encoding of exactly 32 random bytes. Do not commit a
+real value. Missing or malformed configuration returns a private 503 unavailable
+response; there is no insecure or silently truncated fallback. Existing detail
+and Undo endpoints do not depend on this cursor key.
+Use environment-scoped Secret values: Production and non-Production must not
+share a key. Instances within the same environment need the same keyring for
+reliable continuation; provisioning is a separate verified release step.
+
+AES-256-GCM cursors hide raw scan positions and are bound to the current verified
+viewer, permissions, scope, filters and page size. They expire 15 minutes after
+the initial generation; continuation does not extend that lifetime. Invalid,
+tampered, expired or mismatched cursors return one restart-required 400 message.
+Rotation first deploys readers accepting both keys, then switches `activeKid`,
+and retains the previous key for the cursor lifetime plus 30 seconds clock skew
+and deployment overlap. Removing an old key requires Refresh, not a new login.
+
+Each isolated audit-read transport limits decompressed response bytes before SDK
+JSON parsing and applies one request deadline. Overflow, timeout, inconsistent
+counts or missing required enrichment return retryable unavailable without
+advancing the cursor. Only existing authorized index fields are returned.
+Ordinary index reads use two service-only, immutable, security-invoker computed
+JSON fields. They preserve SQL NULL, JSON null, empty objects, scalar/array types
+and every original key, except `body_html` and `body_text` are omitted from JSON
+objects belonging to `public.email_templates`. Those fields are not used for
+index classification or summary; list presentation does not compute detail
+text. Original stored audit rows, lazy `?id=` details and Undo are unchanged.
+
+Admin `details=1&browse=1` explicitly opts into **bounded paged full mode**:
+each request examines at most one raw audit row, retaining original
+large fields and the full presenter. It may return zero or one authorized row
+with `scan-pending`; only the exact remaining source count proves exhaustion.
+Continue with its cursor, or use ordinary index mode for browsing. Full/index
+cursors cannot be interchanged. Keep `browse=1` on continuation requests. An oversized single full row returns unavailable
+without a cursor advance or skip. Both modes retain the same 4 MiB per-response,
+8 MiB combined transport budget and eight-second audit-data deadline.
+
+Bare legacy `details=1` remains the production-compatible capped recent-list
+contract used by CCINFO and Outlook Address Book activity cards. It retains its
+existing permission gate, table candidate filters, limit, full raw presenter and
+user options; it is not complete history pagination and does not claim the new
+transport/time budgets. It has no dedicated cursor-key dependency. Passing a
+cursor without `browse=1` returns a restart-required 400 before audit reads,
+rather than silently accepting or ignoring a new-protocol cursor. Those two
+existing activity-feed pages are unchanged.
+
+The additive computed-field migration must be applied and its PostgREST schema
+cache refreshed before index code is promoted. Browser roles have no computed-
+field execution grant, and no RLS policy or stored audit history is changed.
+Exact source counts and other retained large values can still cost more than
+index-only reads; deployment requires measured transport/database verification
+rather than a claim of constant-time whole-history filtering.

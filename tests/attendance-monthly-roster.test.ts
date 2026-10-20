@@ -98,7 +98,7 @@ test("reminders use individual validated User Management emails and an audited d
   assert.match(backupValidator, /attendanceReminderDispatches/)
   assert.match(systemHealth, /attendanceReminderDispatches/)
   assert.match(auditLog, /attendance_reminder_dispatches: "attendance-record"/)
-  assert.match(auditRoute, /"attendance_reminder_dispatches"/)
+  assert.match(auditRoute, /browseAuditLogs\(/)
   assert.match(route, /reminder\.failed > 0/)
   assert.match(route, /\{ status: 502 \}/)
 })

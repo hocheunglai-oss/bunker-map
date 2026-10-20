@@ -1,37 +1,16 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { SpcShell } from "@/components/SpcShell"
 import { useSpcAuth } from "@/lib/useSpcAuth"
 import { canAccessSpcPage } from "@/lib/spcPages"
+import { useAuditBrowsing } from "@/lib/useAuditBrowsing"
 
-type AuditOperation = "INSERT" | "UPDATE" | "DELETE"
-
-type AuditLogRecord = {
-  id: string
-  occurredAt: string
-  actorUserId: string | null
-  actorId: string | null
-  actorName: string | null
-  displayOperation: AuditOperation
-  pageId: string
-  pageLabel: string
-  recordLabel: string
-  summary: string
-  details: string[]
-  detailsLoaded?: boolean
-  undoOfLogId: string | null
-  undoneAt: string | null
-  undoable: boolean
-}
-
-type AuditResponse = {
-  logs: AuditLogRecord[]
-  log?: AuditLogRecord
-  pages: Array<{ id: string; label: string }>
-  users: Array<{ value: string; label: string }>
-  message?: string
+const browsingButtonStyle: React.CSSProperties = {
+  minHeight: "36px", padding: "8px 12px", borderRadius: "999px",
+  border: "1px solid var(--fc-admin-button-border)", background: "var(--fc-admin-button-bg)",
+  color: "var(--fc-admin-button-text)", fontSize: "12px", fontWeight: 800,
 }
 
 function formatDate(value: string) {
@@ -43,59 +22,29 @@ function formatDate(value: string) {
 
 export default function SpcAuditLogPage() {
   const router = useRouter()
-  const { loading: authLoading, authenticated, permissions } = useSpcAuth()
-  const [logs, setLogs] = useState<AuditLogRecord[]>([])
-  const [pages, setPages] = useState<Array<{ id: string; label: string }>>([])
-  const [users, setUsers] = useState<Array<{ value: string; label: string }>>([])
+  const { loading: authLoading, authenticated, permissions, actorKey, username, role } = useSpcAuth()
   const [pageId, setPageId] = useState("all")
   const [actor, setActor] = useState("all")
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null)
-  const [undoingId, setUndoingId] = useState<string | null>(null)
-  const [message, setMessage] = useState("")
+  const [actorLabel, setActorLabel] = useState("")
+  const [undoing, setUndoing] = useState<{ key: string; id: string } | null>(null)
+  const [notice, setNotice] = useState<{ key: string; message: string } | null>(null)
 
   const canView = canAccessSpcPage(permissions, "spc-audit-log", "view")
   const canEdit = canAccessSpcPage(permissions, "spc-audit-log", "edit")
-  const selectedLog = useMemo(
-    () => logs.find((log) => log.id === selectedId) || logs[0] || null,
-    [logs, selectedId],
-  )
-
-  const loadLogs = useCallback(async () => {
-    if (!authenticated || !canView) return
-    setLoading(true)
-    setMessage("")
-
-    const params = new URLSearchParams({ limit: "150" })
-    if (pageId !== "all") params.set("page", pageId)
-    if (actor !== "all") params.set("actor", actor)
-
-    try {
-      const response = await fetch(`/api/spc/audit-logs?${params.toString()}`, { cache: "no-store" })
-      const data = (await response.json()) as AuditResponse
-      if (!response.ok) {
-        setMessage(data.message || "Failed to load SPC audit logs.")
-        return
-      }
-      setLogs(data.logs || [])
-      setPages(data.pages || [])
-      setUsers(data.users || [])
-      setSelectedId((current) =>
-        current && data.logs.some((log) => log.id === current) ? current : data.logs[0]?.id || null,
-      )
-    } catch {
-      setMessage("Failed to load SPC audit logs.")
-    } finally {
-      setLoading(false)
-    }
-  }, [actor, authenticated, canView, pageId])
+  const owner = JSON.stringify([actorKey, username, role, canView, canEdit])
+  const noticeKey = JSON.stringify([owner, pageId, actor])
+  const undoingId = undoing?.key === noticeKey ? undoing.id : null
+  const browsing = useAuditBrowsing({ endpoint: "/api/spc/audit-logs", owner, enabled: !authLoading && authenticated && canView, page: pageId, actor })
+  const { logs, pages, users, selectedLog, loading, detailLoadingId, pageInfo } = browsing
+  const message = browsing.message || (notice?.key === noticeKey ? notice.message : "")
 
   async function undoSelected() {
     if (!selectedLog || !canEdit || !selectedLog.undoable) return
     if (!window.confirm(`Undo this change?\n\n${selectedLog.summary}`)) return
-    setUndoingId(selectedLog.id)
-    setMessage("")
+    const logId = selectedLog.id
+    const token = browsing.token()
+    setUndoing({ key: noticeKey, id: logId })
+    setNotice(null)
     try {
       const response = await fetch("/api/spc/audit-logs", {
         method: "POST",
@@ -103,15 +52,17 @@ export default function SpcAuditLogPage() {
         body: JSON.stringify({ action: "undo", id: selectedLog.id }),
       })
       const data = (await response.json().catch(() => ({}))) as { message?: string }
+      if (!browsing.isCurrent(token)) return
       if (!response.ok) {
-        setMessage(data.message || "Failed to undo SPC audit log.")
+        setNotice({ key: noticeKey, message: data.message || "Failed to undo SPC audit log." })
         return
       }
-      await loadLogs()
+      setNotice({ key: noticeKey, message: "Undo applied." })
+      await browsing.refresh()
     } catch {
-      setMessage("Failed to undo SPC audit log.")
+      if (browsing.isCurrent(token)) setNotice({ key: noticeKey, message: "Failed to undo SPC audit log." })
     } finally {
-      setUndoingId(null)
+      setUndoing((current) => current?.key === noticeKey && current.id === logId ? null : current)
     }
   }
 
@@ -123,63 +74,27 @@ export default function SpcAuditLogPage() {
     if (!authLoading && (!authenticated || !canView)) router.replace("/spc")
   }, [authLoading, authenticated, canView, router])
 
-  useEffect(() => {
-    void loadLogs()
-  }, [loadLogs])
-
-  useEffect(() => {
-    if (!authenticated || !selectedLog || selectedLog.detailsLoaded) return
-
-    let cancelled = false
-    const controller = new AbortController()
-    const loadDetails = async () => {
-      setDetailLoadingId(selectedLog.id)
-      try {
-        const response = await fetch(
-          `/api/spc/audit-logs?id=${encodeURIComponent(selectedLog.id)}`,
-          { cache: "no-store", signal: controller.signal },
-        )
-        const data = (await response.json()) as AuditResponse
-        if (!response.ok || !data.log || cancelled) return
-        setLogs((current) =>
-          current.map((log) => (log.id === data.log?.id ? data.log : log)),
-        )
-      } catch {
-        if (!cancelled && !controller.signal.aborted) {
-          setMessage("Failed to load SPC audit details.")
-        }
-      } finally {
-        if (!cancelled) setDetailLoadingId(null)
-      }
-    }
-
-    void loadDetails()
-    return () => {
-      cancelled = true
-      controller.abort()
-    }
-  }, [authenticated, selectedLog])
-
   if (authLoading || !authenticated || !canView) {
     return <div className="spc-loading">Loading...</div>
   }
 
   return (
     <SpcShell title="SPC Audit Log">
-      {message ? <div className="spc-alert is-error">{message}</div> : null}
+      {message ? <div className={`spc-alert${browsing.message || notice?.message !== "Undo applied." ? " is-error" : ""}`} role="status">{message} {browsing.message ? <button type="button" style={browsingButtonStyle} disabled={loading} onClick={browsing.retry}>Retry</button> : null}</div> : null}
 
       <section className="spc-panel">
         <div className="spc-panel-header spc-filter-header">
           <h2>Filters</h2>
-          <button type="button" onClick={() => void loadLogs()} disabled={loading}>
+          <button type="button" onClick={() => { setNotice(null); void browsing.refresh() }} disabled={loading}>
             {loading ? "Refreshing..." : "Refresh"}
           </button>
         </div>
         <div className="spc-filter-grid">
           <label>
             <span>Page</span>
-            <select value={pageId} onChange={(event) => setPageId(event.target.value)}>
+            <select aria-label="Page" value={pageId} onChange={(event) => setPageId(event.target.value)}>
               <option value="all">All Pages</option>
+              {pageId !== "all" && !pages.some((page) => page.id === pageId) ? <option value={pageId}>{pageId}</option> : null}
               {pages.map((page) => (
                 <option key={page.id} value={page.id}>{page.label}</option>
               ))}
@@ -187,8 +102,9 @@ export default function SpcAuditLogPage() {
           </label>
           <label>
             <span>User</span>
-            <select value={actor} onChange={(event) => setActor(event.target.value)}>
+            <select aria-label="User" value={actor} onChange={(event) => { setActor(event.target.value); setActorLabel(event.target.selectedOptions[0]?.text || event.target.value) }}>
               <option value="all">All Users</option>
+              {actor !== "all" && !users.some((user) => user.value === actor) ? <option value={actor}>{actorLabel || actor}</option> : null}
               {users.map((user) => (
                 <option key={user.value} value={user.value}>{user.label}</option>
               ))}
@@ -204,7 +120,7 @@ export default function SpcAuditLogPage() {
               <button
                 key={log.id}
                 type="button"
-                onClick={() => setSelectedId(log.id)}
+                onClick={() => browsing.select(log.id)}
                 className={selectedLog?.id === log.id ? "is-active" : ""}
               >
                 <strong>{log.summary}</strong>
@@ -213,7 +129,18 @@ export default function SpcAuditLogPage() {
               </button>
             ))}
             {loading && logs.length === 0 ? <p className="spc-empty">Loading SPC audit records...</p> : null}
-            {!loading && logs.length === 0 ? <p className="spc-empty">No SPC audit records found.</p> : null}
+            {!loading && logs.length === 0 && pageInfo?.state === "exhausted" ? <p className="spc-empty">No SPC audit records match these filters.</p> : null}
+          </div>
+          <div aria-live="polite" style={{ display: "grid", gap: "10px", padding: "12px", overflowWrap: "anywhere" }}>
+            <small>{logs.length} on this page. Live history; Refresh checks for new changes.</small>
+            {pageInfo?.state === "scan-pending" ? <p style={{ margin: 0 }}>More history needs to be checked. Continue searching for matching changes.</p> : null}
+            {pageInfo?.state === "exhausted" && logs.length > 0 ? <small>End of matching history.</small> : null}
+            <small>User options are from the current results, not a complete staff directory.</small>
+            {browsing.historyTruncated ? <small>Only the last 20 pages are kept for Previous. Refresh to restart from the newest changes.</small> : null}
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <button type="button" style={browsingButtonStyle} disabled={loading || browsing.index < 1} onClick={browsing.previous}>Previous</button>
+              <button type="button" style={browsingButtonStyle} disabled={loading || !pageInfo?.nextCursor} onClick={browsing.older}>{pageInfo?.state === "scan-pending" ? "Continue searching" : "Load older"}</button>
+            </div>
           </div>
         </section>
 
@@ -225,6 +152,7 @@ export default function SpcAuditLogPage() {
               onClick={() => void undoSelected()}
               disabled={
                 !selectedLog ||
+                loading ||
                 !canEdit ||
                 !selectedLog.undoable ||
                 Boolean(selectedLog.undoOfLogId) ||

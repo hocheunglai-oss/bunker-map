@@ -139,7 +139,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/spc-record-state-api.test.ts tests/spc-lost-reasons-and-today-enquiries.test.ts tests/spc-presentation-layout.test.ts tests/taiwan-remarks-save.test.ts tests/audit-log-supplier-visibility.test.ts tests/tech-stack-register.test.ts 2>&1 | tee state-integrity-tests.tap
+          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/spc-record-state-api.test.ts tests/spc-lost-reasons-and-today-enquiries.test.ts tests/spc-presentation-layout.test.ts tests/taiwan-remarks-save.test.ts tests/audit-log-supplier-visibility.test.ts tests/audit-browsing.test.ts tests/tech-stack-register.test.ts 2>&1 | tee state-integrity-tests.tap
 
       - name: Verify complete analytics snapshots and failure ownership
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -409,6 +409,7 @@ jobs:
           SPC_RECORD_STATE_SCREENSHOTS="$evidence_dir/spc-record-state" node tests/spc-record-state.browser.test.cjs 2>&1 | tee "$test_runtime/spc-record-state.log"
           SPC_RECORD_PAGES_SCREENSHOTS="$evidence_dir/spc-record-pages" node tests/spc-record-pages-state.browser.test.cjs 2>&1 | tee "$test_runtime/spc-record-pages.log"
           SPC_LOST_DATE_SCREENSHOTS="$evidence_dir/lost-date" node tests/spc-lost-record-date.browser.test.cjs 2>&1 | tee "$test_runtime/lost-date.log"
+          AUDIT_BROWSING_SCREENSHOTS="$evidence_dir/audit" node tests/audit-browsing-state.browser.test.cjs 2>&1 | tee "$test_runtime/audit.log"
 
       - name: Retain synthetic calendar and session verification evidence
         if: always()
@@ -424,6 +425,7 @@ jobs:
             ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/spc-record-state.log
             ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/spc-record-pages.log
             ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/lost-date.log
+            ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/audit.log
           if-no-files-found: warn
           retention-days: 90
 

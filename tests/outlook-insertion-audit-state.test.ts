@@ -474,8 +474,8 @@ test("Audit Log makes incomplete and terminal insertion status explicit", () => 
 test("Outlook insertion events remain visible under the Outlook Templates Audit Log filter", async () => {
   const auditRoute = await readFile(adminAuditRouteFile, "utf8")
 
-  assert.match(
-    auditRoute,
-    /"email-templates": \[[\s\S]*"email_templates",[\s\S]*"outlook_template_insertion_attempts"/,
-  )
+  assert.match(auditRoute, /browseAuditLogs\(/)
+  const model = await readFile(new URL("../lib/auditLog.ts", import.meta.url), "utf8")
+  assert.match(model, /email_templates: "email-templates"/)
+  assert.match(model, /outlook_template_insertion_attempts: "email-templates"/)
 })

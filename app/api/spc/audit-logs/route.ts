@@ -4,13 +4,14 @@ import {
   requireSpcPagePermission,
   requireSpcSession,
 } from "@/lib/spcAuth"
+import { browseAuditLogs } from "@/lib/auditBrowsing"
+import { AuditBrowsingError } from "@/lib/auditBrowsingCursor"
+import { loadAuditBrowsingUserNames } from "@/lib/auditBrowsingSource"
 import {
   canUndoAuditLogRecord,
   getAuditLogRecord,
   isUserAuditRecord,
   isSpcUserManagementAuditRecord,
-  listAuditLogs,
-  matchesAuditActor,
   matchesAuditScope,
   presentAuditLogs,
   redactSpcUserManagementInvestigation,
@@ -29,24 +30,6 @@ import { SPC_PAGE_DEFINITIONS } from "@/lib/spcPages"
 import { timedJson } from "@/lib/serverTiming"
 import { spcPrivateJson } from "@/lib/spcResponse"
 
-const PAGE_TABLES: Record<string, string[]> = {
-  "spc-user-management": [
-    "spc_users",
-    "spc_role_defaults",
-    "spc_user_management_events",
-    "spc_delivery_routes",
-    "office_calendar_store",
-  ],
-  "spc-mfa-test": ["spc_mfa_test_events"],
-  "spc-buyer-enquiries": ["spc_enquiries", "spc_enquiry_revisions", "office_calendar_store"],
-  "spc-today-enquiries": ["spc_enquiries", "spc_fixtures"],
-  "spc-chrome-extension": ["spc_group_delivery_jobs", "spc_group_dispatchers"],
-  "spc-fixtures": ["spc_enquiries", "spc_fixtures"],
-  "spc-lost-record": ["spc_enquiries", "spc_lost_reason_options"],
-  "spc-statistics": ["spc_enquiries", "spc_fixtures"],
-  "spc-suppliers": ["spc_suppliers", "office_calendar_store"],
-  "spc-readme": ["spc_presentation_chunks"],
-}
 
 const RETIRED_ADMIN_AUDIT_PAGES = [
   { id: "spc-mfa-test", label: "SPC MFA TEST (RETIRED)" },
@@ -56,12 +39,6 @@ const AUDIT_USER_CACHE_MS = 30_000
 let auditUserMapCache: { value: Map<string, string>; expiresAt: number } | null = null
 let auditUserMapPromise: Promise<Map<string, string>> | null = null
 
-function rawOperationsForDisplay(operation: string | undefined) {
-  if (!operation || operation === "ALL") return undefined
-  if (operation === "UPDATE") return ["UPDATE", "INSERT"] as const
-  if (operation === "INSERT" || operation === "DELETE") return [operation] as const
-  return undefined
-}
 
 function actorUsername(actorId: string | null | undefined) {
   const clean = actorId?.trim().toLowerCase() || ""
@@ -223,38 +200,18 @@ export async function GET(request: Request) {
       )
     }
 
-    const requestedLimit = Math.min(Math.max(Number(url.searchParams.get("limit") || 100), 1), 150)
-    const pageId = url.searchParams.get("page")
-    const operation = url.searchParams.get("operation")?.toUpperCase()
-    const actor = url.searchParams.get("actor")
-    const tableNames = pageId && pageId !== "all" ? PAGE_TABLES[pageId] : undefined
-    const operations = rawOperationsForDisplay(operation)
-    const candidateLimit = Math.min(requestedLimit * (tableNames ? 2 : 3), 500)
-    const [records, usersByUsername] = await Promise.all([
-      listAuditLogs({
-        limit: candidateLimit,
-        tableNames,
-        operations: operations ? [...operations] : undefined,
-        actorId: actor && actor !== "all" ? actor : undefined,
-        scope: "spc",
-        includeRows: false,
-      }),
-      loadAuditUserMap(),
-    ])
-    const presented = normalizeSpcAuditActors(
-      await presentAuditLogs(records, SPC_PAGE_DEFINITIONS),
-      usersByUsername,
-    )
-    const visiblePresented = presented.filter(
-      (record) => viewerIsAdmin || record.pageId !== "spc-mfa-test",
-    )
-    const logs = visiblePresented
-      .filter((record) => record.pageId.startsWith("spc-"))
-      .filter((record) => !pageId || pageId === "all" || record.pageId === pageId)
-      .filter((record) => !operation || operation === "ALL" || record.displayOperation === operation)
-      .filter((record) => matchesAuditActor(record, actor))
-      .slice(0, requestedLimit)
-      .map((record) =>
+    if (!session.userId) throw new Error("Unauthorized")
+    const result = await browseAuditLogs({
+      request, scope: "spc", viewerId: session.userId,
+      permissionState: { role: session.role, permission: session.permissions["spc-audit-log"], viewerIsAdmin },
+      pages: SPC_PAGE_DEFINITIONS, includeDetails: false,
+      loadContext: async client => new Map((await loadAuditBrowsingUserNames(client, "spc_users"))
+        .map(user => [user.username.trim().toLowerCase(), user.displayName])),
+      contextFingerprint: users => [...users].sort(([a], [b]) => a.localeCompare(b)),
+      normalize: normalizeSpcAuditActors,
+      visible: record => record.pageId.startsWith("spc-") && (viewerIsAdmin || record.pageId !== "spc-mfa-test"),
+    })
+    const logs = result.records.map((record) =>
         presentAuditLogForClient(record, false, viewerIsAdmin),
       )
 
@@ -263,16 +220,20 @@ export async function GET(request: Request) {
       startedAt,
       {
         logs,
+        pageInfo: result.pageInfo,
+        totalMatches: result.totalMatches,
+        usersComplete: false,
         pages: [
           ...SPC_PAGE_DEFINITIONS.map(({ id, label }) => ({ id, label })),
           ...(viewerIsAdmin ? RETIRED_ADMIN_AUDIT_PAGES : []),
         ],
-        users: buildAuditUserFilters(session, usersByUsername, visiblePresented),
+        users: buildAuditUserFilters(session, result.context, result.records),
       },
       undefined,
-      { mode: "index", returned: logs.length, candidateLimit },
+      { mode: "index", returned: logs.length, state: result.pageInfo.state },
     )
   } catch (error) {
+    if (error instanceof AuditBrowsingError) return spcPrivateJson({ message: error.message }, { status: error.status })
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
       return spcPrivateJson(
         { message: error.message },
