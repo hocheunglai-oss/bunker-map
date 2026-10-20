@@ -406,6 +406,7 @@ jobs:
           CLIENT_SESSION_OWNERSHIP_SCREENSHOTS="$evidence_dir/ownership" node tests/client-session-ownership.browser.test.cjs 2>&1 | tee "$test_runtime/ownership.log"
           node tests/client-session-storage.browser.test.cjs 2>&1 | tee "$test_runtime/storage.log"
           SPC_OPERATIONAL_SCREENSHOTS="$evidence_dir/spc-operational" node tests/spc-operational-state.browser.test.cjs 2>&1 | tee "$test_runtime/spc-operational.log"
+          SPC_LOST_DATE_SCREENSHOTS="$evidence_dir/lost-date" node tests/spc-lost-record-date.browser.test.cjs 2>&1 | tee "$test_runtime/lost-date.log"
 
       - name: Retain synthetic calendar and session verification evidence
         if: always()
@@ -418,6 +419,7 @@ jobs:
             ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/ownership.log
             ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/storage.log
             ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/spc-operational.log
+            ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/lost-date.log
           if-no-files-found: warn
           retention-days: 90
 

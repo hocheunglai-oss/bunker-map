@@ -1,0 +1,73 @@
+{
+  "schema": "fcuno.lost-record-date-repair/v1",
+  "date": "2026-10-20",
+  "baseCommit": "5b483027ff1e02d1bb1f3dcd7d691c94f81f75d3",
+  "scope": [
+    "One-line display formatter timezone correction in SPC Lost Record.",
+    "Persistent actual-page timezone/access/layout browser regression registered in existing isolated CI job."
+  ],
+  "cause": "Intl.DateTimeFormat used the browser timezone. UTC timestamps and date-only outcome dates could appear on the prior day in a browser west of UTC.",
+  "fix": "Render DATE explicitly in Asia/Hong_Kong; do not rewrite stored values, ETA or business dates.",
+  "localVerification": {
+    "typescriptTests": 1305,
+    "failures": 0,
+    "typecheck": 0,
+    "lint": 0,
+    "build": 0,
+    "productionFontDelivery": 0,
+    "productionDependencyVulnerabilities": 0,
+    "knownDevelopmentWarning": "GHSA-vfj7-8cjw-p6xm; raw full-audit failure retained under standing approval",
+    "actualPageCases": 24,
+    "engines": [
+      "Chromium",
+      "WebKit"
+    ],
+    "timezones": [
+      "America/Los_Angeles",
+      "Asia/Hong_Kong"
+    ],
+    "widths": [
+      320,
+      390,
+      1440
+    ],
+    "colourPreferences": [
+      "light",
+      "dark"
+    ],
+    "accessStates": [
+      "View",
+      "Edit",
+      "none",
+      "signed-out"
+    ],
+    "dateControls": [
+      "updatedAt UTC timestamp",
+      "createdAt UTC fallback",
+      "outcomeAt YYYY-MM-DD",
+      "ETA YYYY-MM-DD remains unchanged"
+    ],
+    "personalBrowserUsed": false,
+    "allOwnedBrowserResourcesClosed": true
+  },
+  "evidence": {
+    "localRoot": "/private/tmp/fcuno-ordinary-release-20261020-mWv0tu",
+    "baselineRed": "/private/tmp/fcuno-record-pages-ui-20261016-GaicxX/ordinary-main-date-red/results.json",
+    "finalBrowser": "/private/tmp/fcuno-ordinary-release-20261020-mWv0tu/date-browser-final/results.json",
+    "localGates": "/private/tmp/fcuno-ordinary-release-20261020-mWv0tu/gates/local-receipt.json",
+    "runtimeSha256": "9187d5d903a191bced52a964eae8cb2c7c57b0f8c538077413fca90a6729c707",
+    "rootScreenshotReviews": 4
+  },
+  "unchanged": [
+    "No database migration, dependency, stored data or user/account/permission change.",
+    "No federation/OIDC/login implementation change; preserve PR73 exactly.",
+    "No FCOS coordination or deployment.",
+    "Larger pagination and held account batches are excluded."
+  ],
+  "limits": [
+    "Browser tests use actual page/navigation/global CSS with synthetic identities and a legacy GET-only transport.",
+    "Emulated mobile Chromium/WebKit are not physical-phone or real iOS Safari certification.",
+    "Final live deployment identity/guard checks and hosted release gates must be recorded separately before calling deployment complete."
+  ],
+  "sitewideGoalComplete": false
+}
