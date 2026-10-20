@@ -1527,79 +1527,108 @@ export default function PhonebookPage() {
   }
 
   async function deleteCurrent() {
-    if (!current || saving || contactSaveTokenRef.current) return
+    if (!authenticated || !current || saving || contactSaveTokenRef.current) return
     if (!confirm(`Delete ${current.full_name}?`)) return
-    const companyName = current.company || ""
-    const companyContacts = companyName ? await loadCompanyContactsFromSupabase(companyName) : []
-    const isLastCompanyContact = Boolean(companyName) && companyContacts.length === 1
-    const matchingCompany = companies.find(
-      (item) => normalizeCompanyKey(item.name) === normalizeCompanyKey(companyName),
-    )
-    const deleteCompanyToo =
-      isLastCompanyContact && matchingCompany
-        ? confirm(`This is the last contact under ${companyName}. Delete the company too?`)
-        : false
-
-    const deletingId = current.id
-    const { error } = await supabase.from("phonebook_contacts").delete().eq("id", current.id)
-    if (error) {
-      setMessage("Unable to delete contact.")
-      return
+    const deletingContact = { ...current }
+    const token = crypto.randomUUID()
+    const owner = contactOwnerKey
+    const ownsDelete = () => contactOwnerMountedRef.current && contactSaveTokenRef.current === token && contactOwnerKeyRef.current === owner
+    const release = () => {
+      if (contactSaveTokenRef.current !== token) return
+      contactSaveTokenRef.current = null
+      setSaving(false)
     }
-    // The contact has already been removed from the source. Persist the exact
-    // remote deletion before any optional company change can fail or return.
-    let deleteRetries: PendingPhonebookSync[]
+    contactSaveTokenRef.current = token
+    contactMessageEpochRef.current += 1
+    setSaving(true)
+    setMessage("")
     try {
-      deleteRetries = stagePhonebookSync(localStorage, [{ id: deletingId, operation: "delete" }])
-    } catch (error) {
-      refreshContactCachesInBackground()
-      setMessage(`Contact deleted locally, but ${error instanceof Error ? error.message : "CardDAV retry information could not be saved."}`)
-      return
-    }
-    refreshContactCachesInBackground()
-    recordChange({
-      entityType: "contact",
-      action: "delete",
-      label: current.full_name || "CONTACT",
-      before: current,
-      after: null,
-    })
-    setContacts((prev) => prev.filter((item) => item.id !== current.id))
-    setSelectedId("")
-    if (deleteCompanyToo && matchingCompany) {
-      const { error: companyDeleteError } = await supabase
-        .from("phonebook_companies")
-        .delete()
-        .eq("id", matchingCompany.id)
-      if (companyDeleteError) {
-        await syncPhoneContacts(false, null, {
-          retryEntries: deleteRetries,
-          successMessage: "Contact deleted and CardDAV deletion verified, but company could not be deleted.",
-          failureMessage: "Contact deleted, but company could not be deleted and CardDAV deletion remains unverified.",
-        })
+      const companyName = deletingContact.company || ""
+      const companyContacts = companyName ? await loadCompanyContactsFromSupabase(companyName) : []
+      if (!ownsDelete()) return
+      const isLastCompanyContact = Boolean(companyName) && companyContacts.length === 1
+      const matchingCompany = companies.find(
+        (item) => normalizeCompanyKey(item.name) === normalizeCompanyKey(companyName),
+      )
+      const deleteCompanyToo =
+        isLastCompanyContact && matchingCompany
+          ? confirm(`This is the last contact under ${companyName}. Delete the company too?`)
+          : false
+
+      const deletingId = deletingContact.id
+      // Deliberate Delete remains ID-only and idempotent if already absent. The
+      // token protects the editor, not a new conditional-delete business rule.
+      const { error } = await supabase.from("phonebook_contacts").delete().eq("id", deletingId)
+      if (!ownsDelete()) return
+      if (error) {
+        setMessage("Unable to delete contact.")
         return
       }
-
+      // The contact has already been removed from the source. Persist the exact
+      // remote deletion before any optional company change can fail or return.
+      let deleteRetries: PendingPhonebookSync[]
+      try {
+        deleteRetries = stagePhonebookSync(localStorage, [{ id: deletingId, operation: "delete" }])
+      } catch (error) {
+        refreshContactCachesInBackground()
+        setMessage(`Contact deleted locally, but ${error instanceof Error ? error.message : "CardDAV retry information could not be saved."}`)
+        return
+      }
+      refreshContactCachesInBackground()
       recordChange({
-        entityType: "company",
+        entityType: "contact",
         action: "delete",
-        label: matchingCompany.name || "COMPANY",
-        before: matchingCompany,
+        label: deletingContact.full_name || "CONTACT",
+        before: deletingContact,
         after: null,
       })
-      setCompanies((prev) => prev.filter((item) => item.id !== matchingCompany.id))
-      if (selectedCompany === matchingCompany.name) {
-        setSelectedCompany("")
+      setContacts((prev) => prev.filter((item) => item.id !== deletingId))
+      setSelectedId("")
+      setCurrent(null)
+      setDraft(null)
+      setEditing(false)
+      if (deleteCompanyToo && matchingCompany) {
+        const { error: companyDeleteError } = await supabase
+          .from("phonebook_companies")
+          .delete()
+          .eq("id", matchingCompany.id)
+        if (!ownsDelete()) return
+        if (companyDeleteError) {
+          release()
+          await syncPhoneContacts(false, null, {
+            retryEntries: deleteRetries,
+            successMessage: "Contact deleted and CardDAV deletion verified, but company could not be deleted.",
+            failureMessage: "Contact deleted, but company could not be deleted and CardDAV deletion remains unverified.",
+          })
+          return
+        }
+
+        recordChange({
+          entityType: "company",
+          action: "delete",
+          label: matchingCompany.name || "COMPANY",
+          before: matchingCompany,
+          after: null,
+        })
+        setCompanies((prev) => prev.filter((item) => item.id !== matchingCompany.id))
+        if (selectedCompany === matchingCompany.name) {
+          setSelectedCompany("")
+        }
+        if (companyDraft?.id === matchingCompany.id) {
+          setCompanyDraft(null)
+          setCompanyModalOpen(false)
+        }
       }
-      if (companyDraft?.id === matchingCompany.id) {
-        setCompanyDraft(null)
-        setCompanyModalOpen(false)
-      }
+      release()
+      await syncPhoneContacts(false, null, {
+        retryEntries: deleteRetries,
+        successMessage: deleteCompanyToo ? "Deleted contact and company, then synced." : "Deleted and synced.",
+      })
+    } catch {
+      if (ownsDelete()) setMessage("Delete was not confirmed. Check the directory before trying again.")
+    } finally {
+      release()
     }
-    await syncPhoneContacts(false, null, {
-      retryEntries: deleteRetries,
-      successMessage: deleteCompanyToo ? "Deleted contact and company, then synced." : "Deleted and synced.",
-    })
   }
 
   function addCompany() {
@@ -2087,65 +2116,94 @@ export default function PhonebookPage() {
   }
 
   async function undoLogEntry(entry: ChangeLogEntry) {
-    if (saving || contactSaveTokenRef.current) return
+    if (!authenticated || saving || contactSaveTokenRef.current || undoingLogId) return
     if (entry.entityType === "contact") {
       await undoContactLogEntry(entry)
       return
     }
+    if (editing || creatingContact) {
+      setMessage("Finish or cancel your current contact edits before using Undo.")
+      return
+    }
+    const token = crypto.randomUUID()
+    const owner = contactOwnerKey
+    const ownsUndo = () => contactOwnerMountedRef.current && contactSaveTokenRef.current === token && contactOwnerKeyRef.current === owner
+    const release = () => {
+      if (contactSaveTokenRef.current !== token) return
+      contactSaveTokenRef.current = null
+      setSaving(false)
+    }
+    contactSaveTokenRef.current = token
+    contactMessageEpochRef.current += 1
+    setSaving(true)
     setUndoingLogId(entry.id)
     setMessage("")
     try {
-        if (entry.action === "create" && entry.after) {
-          const { error } = await supabase.from("phonebook_companies").delete().eq("id", entry.after.id)
-          if (error) throw error
-          refreshContactCachesInBackground()
-          setCompanies((prev) => prev.filter((item) => item.id !== entry.after!.id))
-          if (selectedCompany === (entry.after as Company).name) setSelectedCompany("")
-        } else if (entry.action === "delete" && entry.before) {
-          const { data, error } = await supabase.from("phonebook_companies").insert(entry.before as Company).select("*").single()
-          if (error || !data) throw error || new Error("Unable to restore company.")
-          refreshContactCachesInBackground()
-          setCompanies((prev) => [...prev, data as Company].sort((a, b) => a.name.localeCompare(b.name)))
-        } else if (entry.action === "update" && entry.before && entry.after) {
-          const beforeCompany = entry.before as Company
-          const afterCompany = entry.after as Company
-          if (!afterCompany.updated_at) throw new Error("Reopen this company to reverse an older change safely.")
-          const response = await fetch("/api/phonebook/company", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: afterCompany.id, expectedUpdatedAt: afterCompany.updated_at, patch: phonebookCompanyPatch(beforeCompany) }),
+      let contactIdsToSync: string[] | null = null
+      if (entry.action === "create" && entry.after) {
+        const { error } = await supabase.from("phonebook_companies").delete().eq("id", entry.after.id)
+        if (!ownsUndo()) return
+        if (error) throw error
+        refreshContactCachesInBackground()
+        setCompanies((prev) => prev.filter((item) => item.id !== entry.after!.id))
+        if (selectedCompany === (entry.after as Company).name) setSelectedCompany("")
+      } else if (entry.action === "delete" && entry.before) {
+        const { data, error } = await supabase.from("phonebook_companies").insert(entry.before as Company).select("*").single()
+        if (!ownsUndo()) return
+        if (error || !data) throw error || new Error("Unable to restore company.")
+        refreshContactCachesInBackground()
+        setCompanies((prev) => [...prev, data as Company].sort((a, b) => a.name.localeCompare(b.name)))
+      } else if (entry.action === "update" && entry.before && entry.after) {
+        const beforeCompany = entry.before as Company
+        const afterCompany = entry.after as Company
+        if (!afterCompany.updated_at) throw new Error("Reopen this company to reverse an older change safely.")
+        const response = await fetch("/api/phonebook/company", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: afterCompany.id, expectedUpdatedAt: afterCompany.updated_at, patch: phonebookCompanyPatch(beforeCompany) }),
+        })
+        const result = await response.json()
+        if (!ownsUndo()) return
+        if (!response.ok || !result.company || !Array.isArray(result.contactIds)) throw new Error(result.message || "The undo could not be verified. Reopen the company.")
+        const restoredCompany = result.company as Company
+        refreshContactCachesInBackground()
+        setCompanies((prev) =>
+          prev.map((item) => (item.id === afterCompany.id ? restoredCompany : item)).sort((a, b) => a.name.localeCompare(b.name)),
+        )
+        if (beforeCompany.name !== afterCompany.name) {
+          const affectedIds = new Set<string>(result.contactIds)
+          setContacts((prev) => {
+            if (selectedCompany && normalizeCompanyKey(selectedCompany) !== normalizeCompanyKey(afterCompany.name)) {
+              return prev
+            }
+            return prev.map((contact) =>
+              affectedIds.has(contact.id)
+                ? { ...contact, company: beforeCompany.name, search_text: buildContactSearchText({ ...contact, company: beforeCompany.name }) }
+                : contact,
+            )
           })
-          const result = await response.json()
-          if (!response.ok || !result.company || !Array.isArray(result.contactIds)) throw new Error(result.message || "The undo could not be verified. Reopen the company.")
-          const restoredCompany = result.company as Company
-          refreshContactCachesInBackground()
-          setCompanies((prev) =>
-            prev.map((item) => (item.id === afterCompany.id ? restoredCompany : item)).sort((a, b) => a.name.localeCompare(b.name)),
-          )
-          if (beforeCompany.name !== afterCompany.name) {
-            const affectedIds = new Set<string>(result.contactIds)
-            setContacts((prev) => {
-              if (selectedCompany && normalizeCompanyKey(selectedCompany) !== normalizeCompanyKey(afterCompany.name)) {
-                return prev
-              }
-              return prev.map((contact) =>
-                affectedIds.has(contact.id)
-                  ? { ...contact, company: beforeCompany.name, search_text: buildContactSearchText({ ...contact, company: beforeCompany.name }) }
-                  : contact,
-              )
-            })
-            if (selectedCompany === afterCompany.name) setSelectedCompany(restoredCompany.name)
-            await syncPhoneContacts(false, result.contactIds, {
-              successMessage: "Undone and synced.",
-              failureMessage: "Undone locally, but CardDAV sync failed.",
-            })
-          }
+          if (selectedCompany === afterCompany.name) setSelectedCompany(restoredCompany.name)
+          contactIdsToSync = result.contactIds
         }
+      }
+      // The atomic reversal is committed. Consume its log once, then let the
+      // sync coordinator retain its honest verified/queued result. A later
+      // editor may open while sync runs without receiving this old completion.
       setChangeLog((prev) => prev.filter((item) => item.id !== entry.id))
-      setMessage("Undo complete.")
+      release()
+      if (contactIdsToSync?.length) {
+        await syncPhoneContacts(false, contactIdsToSync, {
+          successMessage: "Undone and synced.",
+          failureMessage: "Undone locally, but CardDAV sync failed.",
+        })
+      } else {
+        setMessage("Undo complete.")
+      }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to undo change.")
+      if (ownsUndo()) setMessage(error instanceof Error ? error.message : "Unable to undo change.")
     } finally {
-      setUndoingLogId("")
+      const stillOwned = contactOwnerMountedRef.current && contactOwnerKeyRef.current === owner
+      release()
+      if (stillOwned) setUndoingLogId("")
     }
   }
 
