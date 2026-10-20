@@ -220,7 +220,7 @@ async function main() {
       rows.splice(rows.findIndex((row) => row.id === "synthetic-contact-a"), 1)
     })
     await button(page, "Save").click()
-    await page.getByText("This contact no longer exists. Your changes have not been saved; refresh the directory before trying again.", { exact: true }).waitFor()
+    await page.getByText("This contact changed or no longer exists. Your changes have not been saved; refresh the directory before trying again.", { exact: true }).waitFor()
     assert.equal(await field(page, "Mobile 1").inputValue(), "+85295556666", "unsaved edits remain available")
     assert.deepEqual(await requests(page), [], "a zero-row save must not claim a saved contact or start a remote upsert")
     assert.deepEqual(await retries(page), [], "an uncommitted edit must not create a browser retry operation")

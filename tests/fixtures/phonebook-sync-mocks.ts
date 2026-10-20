@@ -1,6 +1,9 @@
 // Only the authenticated browser boundary is replaced. The real Phonebook
 // page and sync coordinator execute, but no request can leave this fixture.
+import { ADMIN_PAGE_DEFINITIONS } from "../../lib/adminPages"
+
 type Row = Record<string, unknown> & { id: string }
+type FixtureAuth = { loading: boolean; authenticated: boolean; actorKey: string; resetRequired: boolean; username: string; displayName: string; role: string; permissions: Record<string, "view" | "edit" | "none">; pages: typeof ADMIN_PAGE_DEFINITIONS }
 type SyncPlan = { failedIds?: string[]; status?: number; malformed?: boolean; reject?: boolean; defer?: boolean }
 type RecordedRequest = { url: string; method: string; body: Record<string, unknown> | null }
 type Operation = { table: string; method: string; payload: Record<string, unknown> | null; filters: { field: string; value: unknown; operator?: "in" }[] }
@@ -10,6 +13,7 @@ export type PhonebookSyncHarness = {
   companies: Row[]
   requests: RecordedRequest[]
   operations: Operation[]
+  contactReads: Operation[]
   syncPlan: SyncPlan[]
   malformedContacts: boolean
   releaseSync: (() => void) | null
@@ -18,7 +22,8 @@ export type PhonebookSyncHarness = {
   failCompanyDeletes: boolean
   companyDeleteRetrySnapshots: Array<Array<{ id: string; operation: string }>>
   countOverrides: Record<string, number>
-  contactWriteFailure: "reject" | "commit-reject" | null
+  contactWriteFailure: "reject" | "commit-reject" | "error" | null
+  malformedContactReply?: boolean | "false" | "zero" | "empty-string" | "null"
   deferContactWrite: boolean
   releaseContactWrite: (() => void) | null
   companySaveStatus?: number
@@ -26,6 +31,14 @@ export type PhonebookSyncHarness = {
   releaseCompanySave?: () => void
   companyReadPlan?: boolean[]
   releaseCompanyReads?: Array<() => void>
+  contactWriteSequence?: number
+  auth: FixtureAuth
+  rerender?: () => void
+  unmount?: () => void
+  contactReadFailure?: "reject" | "error" | "malformed" | "hold" | "false" | "zero" | "null" | "empty-string"
+  releaseContactRead?: () => void
+  deferCacheFetch?: boolean
+  releaseCacheFetch?: () => void
 }
 declare global { interface Window { __phonebookSyncHarness: PhonebookSyncHarness } }
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
@@ -41,7 +54,10 @@ export function installPhonebookSyncHarness() {
     { id: "synthetic-contact-c", full_name: "CAROL TEST", company: "ALPHA SHIPPING", company_source_id: "company-a", favorite: false, mobile_1: "+85293334444", personal_email: "carol@example.test" },
     { id: "synthetic-contact-d", full_name: "DAVE TEST", company: "BETA SHIPPING", company_source_id: "company-b", favorite: false, mobile_1: "+6591112222", personal_email: "dave@example.test" },
   ]
-  window.__phonebookSyncHarness = { contacts, companies, requests: [], operations: [], syncPlan: [], malformedContacts: false, releaseSync: null, activeSyncs: 0, maxConcurrentSyncs: 0, failCompanyDeletes: false, companyDeleteRetrySnapshots: [], countOverrides: {}, contactWriteFailure: null, deferContactWrite: false, releaseContactWrite: null }
+  contacts.forEach((contact) => { contact.updated_at = "2026-10-14T00:00:00.123456Z"; contact.created_at = "2026-10-01T00:00:00Z"; contact.source_key = `source-${contact.id}` })
+  const mode = new URLSearchParams(location.search).get("mode")
+  const auth: FixtureAuth = { loading: false, authenticated: mode !== "signedout", actorKey: "synthetic-actor-a", resetRequired: false, username: "synthetic-user", displayName: "Synthetic User", role: "USER", permissions: { phonebook: mode === "view" ? "view" : "edit" }, pages: ADMIN_PAGE_DEFINITIONS }
+  window.__phonebookSyncHarness = { contacts, companies, requests: [], operations: [], contactReads: [], syncPlan: [], malformedContacts: false, releaseSync: null, activeSyncs: 0, maxConcurrentSyncs: 0, failCompanyDeletes: false, companyDeleteRetrySnapshots: [], countOverrides: {}, contactWriteFailure: null, deferContactWrite: false, releaseContactWrite: null, auth }
   window.fetch = async (input, init) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, window.location.origin)
     const method = init?.method || (input instanceof Request ? input.method : "GET")
@@ -66,6 +82,13 @@ export function installPhonebookSyncHarness() {
     if (url.pathname === "/api/phonebook/carddav-sync" && method === "GET") return json({ savedContactCount: harness.contacts.length, carddavContactCount: harness.contacts.length, carddavTotalCount: harness.contacts.length + 5, carddavOtherCount: 5, carddavMatchedCount: harness.contacts.length, carddavMissingCount: 0, carddavOrphanCount: 0, ...harness.countOverrides, checkedAt: new Date().toISOString() })
     if (url.pathname === "/api/phonebook/contacts" && method === "GET") {
       if (harness.malformedContacts) return json({})
+      if (url.searchParams.get("all") === "1" && harness.deferCacheFetch) {
+        const snapshot = clone(harness.contacts)
+        await new Promise<void>(resolve => { harness.releaseCacheFetch = resolve })
+        harness.deferCacheFetch = false
+        harness.releaseCacheFetch = undefined
+        return json({ contacts: snapshot, limited: false })
+      }
       const company = url.searchParams.get("company")
       return json({ contacts: company ? harness.contacts.filter((contact) => contact.company === company) : harness.contacts, limited: false })
     }
@@ -119,6 +142,19 @@ class Query implements PromiseLike<QueryResult> {
     if (!rows) throw new Error(`Unexpected table in local fixture: ${operation.table}`)
     const matches = (row: Row) => operation.filters.every(({ field, value, operator }) => operator === "in" ? (value as unknown[]).includes(row[field]) : row[field] === value)
     if (operation.method === "GET") {
+      if (operation.table === "phonebook_contacts" && operation.filters.some(filter => filter.field === "id")) {
+        harness.contactReads.push(operation)
+        const failure = harness.contactReadFailure
+        harness.contactReadFailure = undefined
+        if (failure === "hold") await new Promise<void>(resolve => { harness.releaseContactRead = resolve })
+        if (failure === "reject") throw new Error("Synthetic read network failure")
+        if (failure === "error") return { data: null, error: { message: "Synthetic read database failure" } }
+        if (failure === "malformed") return { data: { id: rows.find(matches)?.id }, error: null }
+        if (failure === "false") return { data: false, error: null }
+        if (failure === "zero") return { data: 0, error: null }
+        if (failure === "null") return { data: null, error: null }
+        if (failure === "empty-string") return { data: "", error: null }
+      }
       const result = clone(rows.filter(matches))
       if (operation.table === "phonebook_companies" && this.singular && harness.companyReadPlan?.shift()) {
         await new Promise<void>((resolve) => { (harness.releaseCompanyReads ||= []).push(resolve) })
@@ -135,22 +171,33 @@ class Query implements PromiseLike<QueryResult> {
       ? harness.contactWriteFailure : null
     if (contactWriteFailure) harness.contactWriteFailure = null
     if (contactWriteFailure === "reject") throw new Error("Synthetic contact write network failure")
+    if (contactWriteFailure === "error") return { data: null, error: { code: "XX000", message: "Synthetic database failure" } }
     if (operation.table === "phonebook_companies" && operation.method === "DELETE") {
       harness.companyDeleteRetrySnapshots.push(JSON.parse(localStorage.getItem("phonebook_carddav_pending:v2") || "[]") as Array<{ id: string; operation: string }>)
       if (harness.failCompanyDeletes) return { data: null, error: { message: "Synthetic company deletion failure" } }
     }
     if (operation.method === "PATCH") {
       const matched = rows.filter(matches)
+      if (this.singular && matched.length === 0) return { data: null, error: { code: "PGRST116", message: "Cannot coerce zero rows to a single JSON object" } }
       matched.forEach((row) => Object.assign(row, operation.payload))
+      if (operation.table === "phonebook_contacts") matched.forEach((row) => { row.updated_at = `2026-10-14T00:00:01.${String(harness.contactWriteSequence = (harness.contactWriteSequence || 0) + 1).padStart(6, "0")}Z` })
       if (contactWriteFailure === "commit-reject") throw new Error("Synthetic lost contact write response")
+      if (operation.table === "phonebook_contacts" && harness.malformedContactReply) {
+        const reply = harness.malformedContactReply
+        harness.malformedContactReply = false
+        return { data: reply === "false" ? false : reply === "zero" ? 0 : reply === "empty-string" ? "" : reply === "null" ? null : { id: matched[0]?.id }, error: null }
+      }
       return { data: this.singular ? clone(matched[0] || null) : clone(matched), error: null }
     }
     if (operation.method === "DELETE") {
+      const matched = clone(rows.filter(matches))
+      if (this.singular && matched.length === 0) return { data: null, error: { code: "PGRST116", message: "Cannot coerce zero rows to a single JSON object" } }
       for (let index = rows.length - 1; index >= 0; index--) if (matches(rows[index])) rows.splice(index, 1)
-      return { data: null, error: null }
+      return { data: this.singular ? matched[0] || null : null, error: null }
     }
     if (operation.method === "POST") {
       const inserted = { ...operation.payload, id: operation.payload?.id || crypto.randomUUID() } as Row
+      if (operation.table === "phonebook_contacts" && !inserted.updated_at) inserted.updated_at = `2026-10-14T00:00:01.${String(harness.contactWriteSequence = (harness.contactWriteSequence || 0) + 1).padStart(6, "0")}Z`
       if (rows.some((row) => row.id === inserted.id)) return { data: null, error: { code: "23505", message: "Synthetic duplicate primary key" } }
       rows.push(inserted)
       if (contactWriteFailure === "commit-reject") throw new Error("Synthetic lost contact write response")
@@ -161,4 +208,4 @@ class Query implements PromiseLike<QueryResult> {
 }
 
 export const supabase = { from: (table: string) => new Query(table) }
-export function useSimpleAdminAuth() { return { loading: false, authenticated: true } }
+export function useSimpleAdminAuth() { return window.__phonebookSyncHarness.auth }
