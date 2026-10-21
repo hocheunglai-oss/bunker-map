@@ -147,6 +147,26 @@ test("Tech Stack never accepts an incomplete inventory or unmasked credential re
   assert.equal(isTechStackResponse([]), false)
 })
 
+test("Tech Stack and recovery docs distinguish the verified one-time media snapshot from recurring backup and full recovery", () => {
+  const implementation = readFileSync(new URL("../docs/storage-media-backup-source-implementation.md", import.meta.url), "utf8")
+  const restoreRunbook = readFileSync(new URL("../docs/backup-restore-runbook.md", import.meta.url), "utf8")
+  assert.match(pageSource, /PRESENTATION MEDIA — VERIFIED 2026-10-21/)
+  assert.match(pageSource, /ONE-TIME PRIVATE GOOGLE CLOUD STORAGE COPY OF ALL 15 FILES \(224,309,367 BYTES\)/)
+  assert.match(pageSource, /TWO READ-BACK CHECKS MATCHED THE COPIED BYTES/)
+  assert.match(pageSource, /TEMPORARY SOURCE ACCESS IS OFF; NO RECURRING MEDIA BACKUP IS SCHEDULED/)
+  assert.match(pageSource, /WHOLE-DATABASE RESTORE AND HISTORICAL FILE-VERSION MATCHING REMAIN UNPROVED/)
+  assert.match(pageSource, /SYSTEM HEALTH DOES NOT MONITOR THIS MEDIA SNAPSHOT/)
+  assert.doesNotMatch(pageSource, /INDEPENDENT RECOVERY COVERAGE HAS NOT BEEN ESTABLISHED/)
+  assert.match(implementation, /## Verified one-time rollout — 2026-10-21/)
+  assert.match(implementation, /At the preparation stage, no activation values had been set/)
+  assert.match(implementation, /2026-10-21T11:14:20\.572Z/)
+  assert.match(implementation, /3bc8ed980232559f2a3d0832d09677b582b2f8f064918d150d5b1d161744bc04/)
+  assert.match(implementation, /`historicalByteCorrespondence` remains `"unproved"`/)
+  assert.match(restoreRunbook, /\*\*2026-10-21 follow-up:\*\*/)
+  assert.match(restoreRunbook, /no recurring media backup is\nscheduled/)
+  assert.match(restoreRunbook, /not a whole-database restore or a timed recovery rehearsal/)
+})
+
 test("Tech Stack alert guidance matches the executable backup policy rather than blanket-muting warnings", () => {
   const now = Date.parse("2026-10-16T03:00:00.000Z")
   const waiting = evaluateDatabaseBackupProtection({

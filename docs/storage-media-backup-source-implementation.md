@@ -2,8 +2,39 @@
 
 This source-access stage is based on released commit
 `b8d4eb020c19d168e5fb5f021473fd6a75a38f8c`, tree
-`41555465c1123494cfe99123c297a0307baf48ed`. It does not configure providers,
-deploy, run a backup, or change the existing Drive backup workflow/resources.
+`41555465c1123494cfe99123c297a0307baf48ed`. Preparing that implementation did
+not configure providers, deploy, run a backup, or change the existing Drive
+backup workflow/resources. The preparation-stage details below are retained as
+historical provenance; the subsequently approved live rollout is recorded here.
+
+## Verified one-time rollout — 2026-10-21
+
+The approved copy execution `lp9hs` completed at `2026-10-21T10:58:54Z`.
+All 15 files, totaling 224,309,367 bytes, were copied into the existing private
+Google Cloud Storage bucket and read back at their exact stored generations.
+SHA-256 and CRC32C matched the copied bytes. The copy manifest maps the snapshot
+to the two database archives retained when the run checked them; it does not
+prove that these bytes match historical file versions referenced by those
+archives.
+
+A separate read-only verification execution `cmt8w` passed at
+`2026-10-21T11:14:20.572Z`: all 15 files and 224,309,367 bytes again matched
+their recorded SHA-256, CRC32C and exact generations. This second check used no
+source access and wrote no GCS objects. The verified manifest is 26,555 bytes,
+generation `1792580327687835`, with SHA-256
+`3bc8ed980232559f2a3d0832d09677b582b2f8f064918d150d5b1d161744bc04`.
+Private object paths and source identities are not reproduced in this document.
+
+Temporary source access is off. Twelve disabled-route checks passed across
+both production domains at `2026-10-21T11:04:57.704Z`. No recurring media backup
+is scheduled, and System Health's database/Drive checks do not monitor this
+media snapshot. The existing scheduled Drive backup keeps its default command,
+environment, secret references and resources. No permanent keys or source-file
+deletions were introduced.
+
+This proves the one-time copy and independent byte read-back, not a
+whole-database restore, a timed end-to-end recovery, or historical file-version
+matching. `historicalByteCorrespondence` remains `"unproved"`.
 
 ## Read-only protocol
 
@@ -23,8 +54,9 @@ The source remains off unless all runtime activation gates are present:
 - `STORAGE_MEDIA_BACKUP_APPROVED_INVENTORY_SHA256`, the exact identity snapshot
   approved for this copy, computed with exported `storageSourceInventorySha256`.
 
-No activation values have been set. Snapshot identities contain the literal
-bucket/path, genuine object ID/version, and size; sort/canonical hashing does
+At the preparation stage, no activation values had been set. Snapshot
+identities contain the literal bucket/path, genuine object ID/version, and
+size; sort/canonical hashing does
 not normalise paths. The approved bucket, 15-object count and 224,309,367-byte
 total are pinned in canonical configuration. Private object paths/versions
 must not be committed to the public repository.
@@ -110,8 +142,9 @@ return 404 `not_found`, private/no-store headers, no provider redirect, source
 identity, byte stream or credential, and no cookie. Preview and alternate-URL
 requests must also deny. Do not enable the window merely to test disabled mode.
 
-Actual GCP build/image execution and all four activation values remain a
-separate, explicitly approved rollout. Before activation, recheck the exact
+At the preparation stage, actual GCP build/image execution and all four
+activation values remained a separate, explicitly approved rollout. Before
+any later activation, recheck the exact
 account/project/job resources, target bucket's enforced PAP/Uniform/versioning,
 fresh complete source snapshot hash, and existing secret references. The live
 hosted Storage list/info/stream contract must be checked fail-closed before any
