@@ -8,6 +8,7 @@ import {
 import { EVENT_CALENDAR_PROTOCOL_VERSION } from "@/lib/eventCalendarProtocol"
 import { parseEventCalendarResponse, type EventCalendarResponse } from "@/lib/eventCalendarResponse"
 import { validateCalendarEmailList } from "@/lib/calendarRecipients"
+import { readClientStorage, writeClientStorage } from "@/lib/clientStorage"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
 import { addCalendarDays, getHongKongDateKey, isValidCalendarDate, preserveCalendarEndDate } from "@/lib/eventCalendarDates"
@@ -522,6 +523,11 @@ export default function EventCalendarPage() {
   const [googleRefreshKey, setGoogleRefreshKey] = useState(0)
   const loadedRef = useRef(false)
   const eventsRef = useRef<ManagedEvent[]>([])
+  // Legacy references stay document-local. Only an explicit event action may
+  // add one to the shared store; canonical records always take precedence.
+  const legacyFallbackEventsRef = useRef<ManagedEvent[]>([])
+  const legacyFallbackDeletedIdsRef = useRef<string[]>([])
+  const legacyAbsentAllowedRef = useRef(false)
   const calendarMutationPendingRef = useRef(false)
   const eventSubmissionPendingRef = useRef(false)
   const eventSubmissionTokenRef = useRef(0)
@@ -560,26 +566,42 @@ export default function EventCalendarPage() {
 
   function applyCanonicalCalendarPayload(canonical: EventCalendarResponse) {
     const payload = canonical.payload
+    if (canonical.legacyAbsent) {
+      // A still-absent legacy store is a valid refresh, not a failed read. Once
+      // a canonical row was observed, disappearance must not revive old data.
+      if (!legacyAbsentAllowedRef.current) return false
+      setEventVersions(canonical.eventVersions)
+      setSettingVersions(canonical.settingVersions)
+      return true
+    }
     if (!payload) return false
     if (!Array.isArray(payload.events)) return false
 
-    const nextEvents = normalizeStoredEvents(payload.events)
+    legacyAbsentAllowedRef.current = false
+    const deletedIds = normalizeStringList(payload.deletedEventIds ?? [])
+    const deletedSeedIds = normalizeStringList(payload.deletedRequiredSeedIds ?? [])
+    const canonicalEvents = normalizeStoredEvents(payload.events)
+    const canonicalIds = new Set(canonicalEvents.map(event => event.id))
+    const suppressedIds = new Set([...deletedIds, ...deletedSeedIds, ...legacyFallbackDeletedIdsRef.current])
+    const localReferences = legacyFallbackEventsRef.current.filter(event => !canonicalIds.has(event.id) && !suppressedIds.has(event.id))
+    const nextEvents = ensureRequiredSeedEvents([...canonicalEvents, ...localReferences], [...suppressedIds])
     const nextEventVersions = canonical.eventVersions
     eventsRef.current = nextEvents
     setEventVersions(nextEventVersions)
     setSettingVersions(canonical.settingVersions)
     if (
       draftEventIdRef.current &&
-      draftEventVersionRef.current &&
-      nextEventVersions[draftEventIdRef.current] !== draftEventVersionRef.current
+      (draftEventVersionRef.current
+        ? nextEventVersions[draftEventIdRef.current] !== draftEventVersionRef.current
+        : Boolean(nextEventVersions[draftEventIdRef.current]) || deletedIds.includes(draftEventIdRef.current) || deletedSeedIds.includes(draftEventIdRef.current))
     ) {
       setDraftEventChangedElsewhere(true)
     }
     setEvents(nextEvents)
-    setDeletedEventIds(normalizeStringList(Array.isArray(payload.deletedEventIds) ? payload.deletedEventIds.map(String) : []))
+    setDeletedEventIds(deletedIds)
     setPeople(payload.people === undefined ? defaultPeople : normalizePeople(payload.people))
     setEmailRecipientsText(payload.emailRecipientsText ?? "")
-    setDeletedRequiredSeedIds(normalizeStringList(payload.deletedRequiredSeedIds ?? []))
+    setDeletedRequiredSeedIds(deletedSeedIds)
     return true
   }
 
@@ -594,12 +616,13 @@ export default function EventCalendarPage() {
       let fallbackDeletedRequiredSeedIds: string[] = []
       let fallbackEventVersions: Record<string, string> = {}
       let fallbackSettingVersions: Record<string, string> = {}
+      let usingLegacyFallback = true
       try {
-        const stored = window.localStorage.getItem(STORAGE_KEY)
-        const storedPeople = window.localStorage.getItem(PEOPLE_STORAGE_KEY)
-        const storedEmailRecipients = window.localStorage.getItem(EMAIL_RECIPIENTS_STORAGE_KEY)
-        const storedDeletedEventIds = window.localStorage.getItem(DELETED_EVENT_IDS_STORAGE_KEY)
-        const storedDeletedRequiredSeedIds = window.localStorage.getItem(DELETED_REQUIRED_SEED_IDS_STORAGE_KEY)
+        const stored = readClientStorage(STORAGE_KEY)
+        const storedPeople = readClientStorage(PEOPLE_STORAGE_KEY)
+        const storedEmailRecipients = readClientStorage(EMAIL_RECIPIENTS_STORAGE_KEY)
+        const storedDeletedEventIds = readClientStorage(DELETED_EVENT_IDS_STORAGE_KEY)
+        const storedDeletedRequiredSeedIds = readClientStorage(DELETED_REQUIRED_SEED_IDS_STORAGE_KEY)
         if (stored) fallbackEvents = normalizeStoredEvents(JSON.parse(stored))
         if (storedPeople) fallbackPeople = normalizePeople(JSON.parse(storedPeople))
         if (storedEmailRecipients) fallbackEmailRecipients = storedEmailRecipients
@@ -615,6 +638,7 @@ export default function EventCalendarPage() {
         if (!response.ok) throw new Error("Could not load shared calendar data.")
         const data = await response.json()
         const canonical = await parseEventCalendarResponse(data)
+        usingLegacyFallback = canonical.legacyAbsent
         const payload = canonical.payload
         fallbackEventVersions = canonical.eventVersions
         fallbackSettingVersions = canonical.settingVersions
@@ -644,9 +668,14 @@ export default function EventCalendarPage() {
         return
       }
 
-      fallbackEvents = ensureRequiredSeedEvents(fallbackEvents, [...fallbackDeletedRequiredSeedIds, ...fallbackDeletedEventIds])
+      const fallbackDeletedIds = new Set([...fallbackDeletedRequiredSeedIds, ...fallbackDeletedEventIds])
+      if (usingLegacyFallback) fallbackEvents = fallbackEvents.filter(event => !fallbackDeletedIds.has(event.id))
+      fallbackEvents = ensureRequiredSeedEvents(fallbackEvents, [...fallbackDeletedIds])
 
       if (cancelled) return
+      legacyAbsentAllowedRef.current = usingLegacyFallback
+      legacyFallbackEventsRef.current = usingLegacyFallback ? fallbackEvents : []
+      legacyFallbackDeletedIdsRef.current = usingLegacyFallback ? [...fallbackDeletedIds] : []
       eventsRef.current = fallbackEvents
       setEventVersions(fallbackEventVersions)
       setSettingVersions(fallbackSettingVersions)
@@ -671,27 +700,27 @@ export default function EventCalendarPage() {
   useEffect(() => {
     if (!loadedRef.current) return
     eventsRef.current = events
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(events))
+    writeClientStorage(STORAGE_KEY, JSON.stringify(events))
   }, [events])
 
   useEffect(() => {
     if (!loadedRef.current) return
-    window.localStorage.setItem(PEOPLE_STORAGE_KEY, JSON.stringify(people))
+    writeClientStorage(PEOPLE_STORAGE_KEY, JSON.stringify(people))
   }, [people])
 
   useEffect(() => {
     if (!loadedRef.current) return
-    window.localStorage.setItem(EMAIL_RECIPIENTS_STORAGE_KEY, emailRecipientsText)
+    writeClientStorage(EMAIL_RECIPIENTS_STORAGE_KEY, emailRecipientsText)
   }, [emailRecipientsText])
 
   useEffect(() => {
     if (!loadedRef.current) return
-    window.localStorage.setItem(DELETED_EVENT_IDS_STORAGE_KEY, JSON.stringify(deletedEventIds))
+    writeClientStorage(DELETED_EVENT_IDS_STORAGE_KEY, JSON.stringify(deletedEventIds))
   }, [deletedEventIds])
 
   useEffect(() => {
     if (!loadedRef.current) return
-    window.localStorage.setItem(DELETED_REQUIRED_SEED_IDS_STORAGE_KEY, JSON.stringify(deletedRequiredSeedIds))
+    writeClientStorage(DELETED_REQUIRED_SEED_IDS_STORAGE_KEY, JSON.stringify(deletedRequiredSeedIds))
   }, [deletedRequiredSeedIds])
 
   useEffect(() => {
@@ -874,6 +903,7 @@ export default function EventCalendarPage() {
     expectedEventVersions: Record<string, string> = {},
     expectedSettingVersions: Record<string, string> = {},
     confirmEmailRecipientsClear = false,
+    expectedAbsentEventIds: string[] = [],
   ) {
     const owner = componentLifetimeRef.current.sequence
     if (!ownsCalendar(owner)) throw new Error("This calendar is no longer active. Check the saved result in the current account.")
@@ -899,6 +929,7 @@ export default function EventCalendarPage() {
           expectedEventVersions,
           expectedSettingVersions,
           ...(confirmEmailRecipientsClear ? { confirmEmailRecipientsClear: true } : {}),
+          ...(expectedAbsentEventIds.length ? { expectedAbsentEventIds } : {}),
         }),
       })
       const payload = await response.json().catch(() => null)
@@ -1095,11 +1126,11 @@ export default function EventCalendarPage() {
       }
 
       const result = await mutateCalendar(
-        wasEdit ? "update" : "create",
+        wasEdit && draftEventVersion ? "update" : "create",
         [nextEvent],
         [],
         {},
-        wasEdit ? { [nextEvent.id]: draftEventVersion } : {},
+        wasEdit && draftEventVersion ? { [nextEvent.id]: draftEventVersion } : {},
       )
       if (!ownsCalendar(owner)) return
       const committedEvent = normalizeStoredEvents(result.payload.events).find((event) => event.id === nextEvent.id) || nextEvent
@@ -1522,21 +1553,16 @@ export default function EventCalendarPage() {
     if (calendarMutationPendingRef.current || eventSubmissionPendingRef.current) return
     if (!window.confirm("Are you sure you want to delete this event?")) return
 
-    const nextDeletedRequiredSeedIds = requiredSeedEventIds.includes(draftEvent.id)
-      ? Array.from(new Set([...deletedRequiredSeedIds, draftEvent.id]))
-      : deletedRequiredSeedIds
     try {
-      await mutateCalendar("delete", [], [draftEvent.id], {
-        deletedRequiredSeedIds: nextDeletedRequiredSeedIds,
-      }, { [draftEvent.id]: draftEventVersion })
+      await mutateCalendar("delete", [], [draftEvent.id],
+        requiredSeedEventIds.includes(draftEvent.id) ? { deletedRequiredSeedIds: [draftEvent.id] } : {},
+        draftEventVersion ? { [draftEvent.id]: draftEventVersion } : {},
+        {}, false, draftEventVersion ? [] : [draftEvent.id])
       if (!ownsCalendar(owner)) return
     } catch (error) {
       if (!ownsCalendar(owner)) return
       window.alert(error instanceof Error ? error.message : "The event was not deleted. Please try again.")
       return
-    }
-    if (requiredSeedEventIds.includes(draftEvent.id)) {
-      setDeletedRequiredSeedIds(nextDeletedRequiredSeedIds)
     }
     closeEventModal()
   }
@@ -2017,7 +2043,12 @@ export default function EventCalendarPage() {
                         onDoubleClick={() => openEditModal(event)}
                         style={{ ...tdStyle, color: "var(--fc-admin-panel-text)", fontWeight: isTodayEvent ? 900 : 500 }}
                       >
-                        {event.title}
+                        <span>{event.title}</span>
+                        {!eventVersions[event.id] && (
+                          <span style={{ display: "inline-block", color: "var(--fc-admin-muted)", fontSize: "11px", marginLeft: "8px" }}>
+                            NOT YET SHARED
+                          </span>
+                        )}
                         {meetingRoomBooked && (
                           <span style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, marginLeft: "8px" }}>
                             MEETING ROOM BOOKED
@@ -2130,6 +2161,11 @@ export default function EventCalendarPage() {
             <h2 id="event-editor-title" style={{ margin: "0 0 14px", fontSize: "24px" }}>
               {eventModalMode === "add" ? "New Event" : "Edit Event"}
             </h2>
+            {eventModalMode === "edit" && !draftEventVersion && (
+              <p role="note" style={{ margin: "0 0 12px", color: "var(--fc-admin-muted)", fontSize: "12px" }}>
+                This event is not yet shared. Save adds it to the shared calendar; Delete removes this reference.
+              </p>
+            )}
             {draftEventChangedElsewhere && (
               <div
                 style={{

@@ -1,6 +1,7 @@
 import {
   buildShortenedEnquiry,
   detectVlsfoMaxRemarks,
+  excludeEnquiryProductMetadata,
   findEnquiryDates,
   formatVlsfoMaxRemark,
   normalizeEnquiryQuantityNumber,
@@ -493,6 +494,10 @@ export function parseSpcEnquiryText(
   }
 
   const delimited = parseDelimitedSpcEnquiryText(rawText, manualVlsfoRemarks)
+  // Keep legacy identity/date parsing on the original input, but do not let
+  // its fuel fallback reintroduce an explicitly excluded metadata value.
+  const productText = excludeEnquiryProductMetadata(rawText)
+  const productDelimited = productText === rawText ? delimited : parseDelimitedSpcEnquiryText(productText, manualVlsfoRemarks)
   const guess = parseEnquiryWorksheetGuess(rawText, { detectBuyer: false })
   const vesselName = upperText(guess.vesselName || delimited.vesselName)
   const imo = guess.imo || delimited.imo
@@ -508,9 +513,9 @@ export function parseSpcEnquiryText(
   const eta = (shortenedParts?.eta || delimited.eta)
     .replace(/^(?:singapore|spore|sing|sgp|sin|sg)\s+/i, "")
     .trim()
-  const hsfo = shortenedParts?.hsfo || delimited.hsfo
-  const vlsfo = shortenedParts?.vlsfo || delimited.vlsfo
-  const lsmgo = shortenedParts?.lsmgo || delimited.lsmgo
+  const hsfo = shortenedParts?.hsfo || productDelimited.hsfo
+  const vlsfo = shortenedParts?.vlsfo || productDelimited.vlsfo
+  const lsmgo = shortenedParts?.lsmgo || productDelimited.lsmgo
   const remarks = ""
   const explicitVlsfoRemarks = /\b80\s*cst\s*min\b/i.test(delimited.vlsfo)
     ? (["80cst min"] as VlsfoMaxRemark[])

@@ -200,7 +200,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          npx --no-install tsx --test tests/enquiry-parsers.test.ts tests/enquiry-parser-correctness.test.ts 2>&1 | tee enquiry-parser-tests.tap
+          npx --no-install tsx --test tests/enquiry-parsers.test.ts tests/enquiry-parser-correctness.test.ts tests/enquiry-product-metadata.test.ts 2>&1 | tee enquiry-parser-tests.tap
 
       - name: Verify optional client storage and Exchange trigger acknowledgement
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -320,6 +320,7 @@ jobs:
           ADMIN_VIEW_CONTROL_EVIDENCE="$evidence_dir/view-control-state" node tests/admin-view-control-state.browser.test.cjs 2>&1 | tee "$test_runtime/view-control-state.log"
           mkdir -p "$evidence_dir/enquiry-parser"
           ENQUIRY_CORRECTNESS_EVIDENCE="$evidence_dir/enquiry-parser" node tests/enquiry-parser-correctness.browser.test.cjs 2>&1 | tee "$test_runtime/enquiry-parser.log"
+          SPC_ENQUIRY_METADATA_EVIDENCE="$evidence_dir/spc-enquiry-metadata" node tests/spc-enquiry-metadata.browser.test.cjs 2>&1 | tee "$test_runtime/spc-enquiry-metadata.log"
 
       - name: Retain synthetic browser verification evidence
         if: always()
@@ -333,6 +334,7 @@ jobs:
             ${{ runner.temp }}/fcuno-report-browser-runtime/view-filters.log
             ${{ runner.temp }}/fcuno-report-browser-runtime/view-control-state.log
             ${{ runner.temp }}/fcuno-report-browser-runtime/enquiry-parser.log
+            ${{ runner.temp }}/fcuno-report-browser-runtime/spc-enquiry-metadata.log
           if-no-files-found: warn
           retention-days: 90
 
@@ -491,6 +493,51 @@ jobs:
             ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/spc-record-pages.log
             ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/lost-date.log
             ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/audit.log
+          if-no-files-found: warn
+          retention-days: 90
+
+  calendar-fallback-browser-regressions:
+    name: Calendar fallback references desktop and mobile
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Verify explicit fallback actions in isolated Chromium and WebKit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_runtime="${RUNNER_TEMP}/fcuno-calendar-fallback-browser-runtime"
+          evidence_dir="${RUNNER_TEMP}/fcuno-calendar-fallback-browser-evidence"
+          npm install --prefix "$test_runtime" --ignore-scripts --no-fund playwright@1.62.1
+          npm audit --prefix "$test_runtime" --audit-level=high
+          npm audit signatures --prefix "$test_runtime"
+          export NODE_PATH="$test_runtime/node_modules"
+          export PLAYWRIGHT_BROWSERS_PATH="${RUNNER_TEMP}/fcuno-calendar-fallback-browser-cache"
+          "$test_runtime/node_modules/.bin/playwright" install --with-deps chromium webkit
+          EVENT_CALENDAR_FALLBACK_OUTPUT="$evidence_dir" node tests/event-calendar-fallback.browser.test.cjs 2>&1 | tee "$test_runtime/calendar-fallback.log"
+
+      - name: Retain synthetic calendar fallback verification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: calendar-fallback-browser-evidence-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/fcuno-calendar-fallback-browser-evidence
+            ${{ runner.temp }}/fcuno-calendar-fallback-browser-runtime/calendar-fallback.log
           if-no-files-found: warn
           retention-days: 90
 

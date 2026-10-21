@@ -95,8 +95,8 @@ test("the current client uses versioned create, update, and delete mutations", (
   const page = source("../app/admin/eventcalendar/page.tsx")
 
   assert.match(page, /protocolVersion: EVENT_CALENDAR_PROTOCOL_VERSION/)
-  assert.match(page, /wasEdit \? "update" : "create"/)
-  assert.match(page, /wasEdit \? \{ \[nextEvent\.id\]: draftEventVersion \} : \{\}/)
+  assert.match(page, /wasEdit && draftEventVersion \? "update" : "create"/)
+  assert.match(page, /wasEdit && draftEventVersion \? \{ \[nextEvent\.id\]: draftEventVersion \} : \{\}/)
   assert.match(page, /await mutateCalendar\("delete", \[\], \[draftEvent\.id\],[\s\S]*draftEventVersion/)
   assert.match(page, /await mutateCalendar\("create", nextEvents\)/)
   assert.match(page, /id: `\$\{draftRecurrentEvent\.id\}-\$\{dateKey\}`/)

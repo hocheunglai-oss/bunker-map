@@ -7,6 +7,7 @@ export type CalendarMutation = {
   events?: unknown[]
   eventIds?: string[]
   expectedEventVersions?: Record<string, unknown>
+  expectedAbsentEventIds?: unknown
   expectedSettingVersions?: Record<string, unknown>
   settings?: Record<string, unknown>
   confirmEmailRecipientsClear?: boolean
@@ -206,6 +207,29 @@ function expectedSettingVersions(value: unknown) {
   return versions
 }
 
+function expectedAbsentEventIds(mutation: CalendarMutation, requestedEventIds: string[]) {
+  const value = mutation.expectedAbsentEventIds
+  const absentIds = new Set<string>()
+  if (value === undefined) return absentIds
+  if (mutation.operation !== "delete" || !Array.isArray(value) || value.length > EVENT_CALENDAR_MAX_MUTATION_EVENTS) {
+    throw new EventCalendarValidationError("Missing-event preconditions are only valid for a bounded Event Calendar deletion.")
+  }
+  const requestedIds = new Set(requestedEventIds)
+  const suppliedVersionIds = new Set(Object.keys(asRecord(mutation.expectedEventVersions)).map((id) => id.trim()))
+  for (const id of value) {
+    if (typeof id !== "string" || !id || id !== id.trim() || id.length > MAX_EVENT_ID_LENGTH || absentIds.has(id) || !requestedIds.has(id)) {
+      throw new EventCalendarValidationError("The missing-event deletion precondition is invalid.")
+    }
+    // Normalize raw keys just like expectedEventVersions, without filtering
+    // values: an empty or malformed version still contradicts "absent".
+    if (suppliedVersionIds.has(id)) {
+      throw new EventCalendarValidationError("An event cannot have both an existing-version and missing-event deletion precondition.")
+    }
+    absentIds.add(id)
+  }
+  return absentIds
+}
+
 function safeMutationSettings(mutation: CalendarMutation) {
   const source = asRecord(mutation.settings)
   const allowedKeys = mutation.operation === "settings"
@@ -261,10 +285,14 @@ export function applyEventCalendarMutation(
   const current = asRecord(currentValue)
   const incomingEvents = validatedIncomingEvents(mutation.events)
   const requestedEventIds = stringList(mutation.eventIds)
+  const expectedAbsentIds = expectedAbsentEventIds(mutation, requestedEventIds)
   const expectedVersions = expectedEventVersions(mutation.expectedEventVersions)
   const expectedSettings = expectedSettingVersions(mutation.expectedSettingVersions)
   const settings = safeMutationSettings(mutation)
   const deletedIds = new Set(stringList(current.deletedEventIds))
+  // A legacy required-seed marker is deletion intent too. Use it only for
+  // eligibility; do not copy unrelated markers into general tombstones.
+  const blockedIds = new Set([...deletedIds, ...stringList(current.deletedRequiredSeedIds)])
   let events = Array.isArray(current.events) ? [...current.events] : []
 
   const rebuildEventIndex = () => new Map(
@@ -288,7 +316,7 @@ export function applyEventCalendarMutation(
       const existing = eventIndex.get(id)
 
       if (mutation.operation === "create") {
-        if (deletedIds.has(id)) {
+        if (blockedIds.has(id)) {
           conflict(current, "This event ID was previously deleted. Nothing was overwritten; reopen the calendar and create the event again.")
         }
         if (existing) {
@@ -301,7 +329,7 @@ export function applyEventCalendarMutation(
       }
 
       if (!existing) {
-        if (mutation.operation === "upsert" && !expectedVersions[id] && !deletedIds.has(id)) {
+        if (mutation.operation === "upsert" && !expectedVersions[id] && !blockedIds.has(id)) {
           events.push(incomingEvent)
           eventIndex.set(id, { event: incomingEvent, index: events.length - 1 })
           continue
@@ -321,7 +349,7 @@ export function applyEventCalendarMutation(
     const eventIndex = rebuildEventIndex()
     for (const incomingEvent of incomingEvents) {
       const id = recordId(incomingEvent)
-      if (eventIndex.has(id) || deletedIds.has(id)) continue
+      if (eventIndex.has(id) || blockedIds.has(id)) continue
       events.push(incomingEvent)
       eventIndex.set(id, { event: incomingEvent, index: events.length - 1 })
     }
@@ -333,8 +361,11 @@ export function applyEventCalendarMutation(
     for (const id of requestedEventIds) {
       const existing = eventIndex.get(id)
       if (!existing) {
-        if (deletedIds.has(id)) continue
+        if (deletedIds.has(id) || expectedAbsentIds.has(id)) continue
         conflict(current, "This event is no longer available. Nothing else was changed; refresh the calendar before continuing.")
+      }
+      if (expectedAbsentIds.has(id)) {
+        conflict(current, "This event was saved by another tab. Nothing was deleted; reopen it to review the current event first.")
       }
       if (!expectedVersions[id] || expectedVersions[id] !== getEventCalendarRecordVersion(existing.event)) {
         conflict(current)
