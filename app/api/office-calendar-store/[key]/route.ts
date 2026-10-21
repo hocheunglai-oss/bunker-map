@@ -214,6 +214,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ key: 
       events: Array.isArray(body.events) ? body.events : [],
       eventIds: normalizeStringList(body.eventIds),
       expectedEventVersions: asRecord(body.expectedEventVersions),
+      expectedAbsentEventIds: body.expectedAbsentEventIds,
       expectedSettingVersions: asRecord(body.expectedSettingVersions),
       settings: asRecord(body.settings),
       confirmEmailRecipientsClear: body.confirmEmailRecipientsClear === true,

@@ -1,4 +1,5 @@
 import sanitizeHtml from "sanitize-html"
+import { html as parse5Html, parseFragment, type DefaultTreeAdapterTypes } from "parse5"
 
 export type SanitizableEmailTemplate = {
   subject?: string
@@ -482,11 +483,98 @@ function normaliseLineBreaks(value: string) {
   return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
 }
 
-function prepareRawContent(value: string) {
+// This is only a fast path, never the discard decision: attribute values,
+// comments and raw text may contain the same bytes without an HTML element.
+const POTENTIAL_NOSCRIPT_OPENER = /<[nN][oO][sS][cC][rR][iI][pP][tT](?=[\t\n\f\r />])/
+
+function discardHtmlNoscriptRegions(value: string) {
+  if (!POTENTIAL_NOSCRIPT_OPENER.test(value)) return value
+
+  const fragment = parseFragment(value, { scriptingEnabled: true, sourceCodeLocationInfo: true })
+  const pending: DefaultTreeAdapterTypes.ParentNode[] = [fragment]
+  const ranges: Array<{ startOffset: number; endOffset: number }> = []
+  function validateRange(location: { startOffset: number; endOffset: number } | null | undefined): asserts location is { startOffset: number; endOffset: number } {
+    if (!location || !Number.isSafeInteger(location.startOffset) || !Number.isSafeInteger(location.endOffset) ||
+      location.startOffset < 0 || location.endOffset <= location.startOffset || location.endOffset > value.length) {
+      throw new Error("Template HTML could not be normalized safely.")
+    }
+  }
+  function collect(location: { startOffset: number; endOffset: number } | null | undefined) {
+    validateRange(location)
+    ranges.push({ startOffset: location.startOffset, endOffset: location.endOffset })
+  }
+
+  while (pending.length) {
+    const parent = pending.pop()!
+    for (const node of parent.childNodes) {
+      if ("tagName" in node && node.tagName === "noscript" && node.namespaceURI === parse5Html.NS.HTML) {
+        const location = node.sourceCodeLocation
+        const startTag = location?.startTag
+        validateRange(startTag)
+        if (!location || startTag.startOffset !== location.startOffset ||
+          value.slice(location.startOffset, startTag.endOffset).search(POTENTIAL_NOSCRIPT_OPENER) !== 0) {
+          throw new Error("Template HTML could not be normalized safely.")
+        }
+        if (location.endTag) {
+          validateRange(location.endTag)
+          if (location.endTag.startOffset < startTag.endOffset || location.endTag.endOffset !== location.endOffset) {
+            throw new Error("Template HTML could not be normalized safely.")
+          }
+          collect(location)
+        }
+        else {
+          // parse5 can report a zero-length element location for raw text at
+          // EOF. Accept only its contiguous text locations through exact EOF,
+          // never infer a closing position from a regex or keep unsafe input.
+          let endOffset = startTag.endOffset
+          for (const child of node.childNodes) {
+            const textLocation = child.sourceCodeLocation
+            if (child.nodeName !== "#text" || !textLocation || textLocation.startOffset !== endOffset ||
+              !Number.isSafeInteger(textLocation.endOffset) || textLocation.endOffset <= endOffset || textLocation.endOffset > value.length) {
+              throw new Error("Template HTML could not be normalized safely.")
+            }
+            endOffset = textLocation.endOffset
+          }
+          if (endOffset !== value.length) throw new Error("Template HTML could not be normalized safely.")
+          collect({ startOffset: location.startOffset, endOffset })
+        }
+        continue
+      }
+      // Comments are already discarded by the HTML path. Removing their real
+      // HTML5 source spans also prevents a leftover CDATA/bogus-comment prefix
+      // from consuming legitimate content in the later htmlparser2 pass.
+      if (node.nodeName === "#comment") collect(node.sourceCodeLocation)
+      if ("childNodes" in node) pending.push(node)
+      if ("tagName" in node && node.tagName === "template" && node.namespaceURI === parse5Html.NS.HTML) {
+        pending.push((node as DefaultTreeAdapterTypes.Template).content)
+      }
+    }
+  }
+  if (!ranges.length) return value
+
+  ranges.sort((a, b) => a.startOffset - b.startOffset || b.endOffset - a.endOffset)
+  const merged: typeof ranges = []
+  for (const range of ranges) {
+    const previous = merged[merged.length - 1]
+    if (previous && range.startOffset <= previous.endOffset) previous.endOffset = Math.max(previous.endOffset, range.endOffset)
+    else merged.push({ ...range })
+  }
+  const parts: string[] = []
+  let cursor = 0
+  for (const range of merged) {
+    parts.push(value.slice(cursor, range.startOffset))
+    cursor = range.endOffset
+  }
+  parts.push(value.slice(cursor))
+  return parts.join("")
+}
+
+function prepareRawContent(value: string, transformHtml?: (decoded: string) => string) {
   const normalized = normaliseLineBreaks(value || "")
   const encodedMimePart = extractEncodedMimePart(normalized)
   const decoded = decodeQuotedPrintable(encodedMimePart || normalized)
-  return stripMimeNoise(cleanEncodedEntities(decoded))
+  const cleaned = cleanEncodedEntities(decoded)
+  return stripMimeNoise(transformHtml ? transformHtml(cleaned) : cleaned)
     .replace(/(^|[^=])=\r?\n/g, "$1")
     .replace(/^\s*=\s*$/gm, "")
     .replace(/[ \t]+\n/g, "\n")
@@ -649,7 +737,7 @@ export function htmlToPlainText(html: string) {
 }
 
 export function sanitizeTemplateBodyHtml(value: string) {
-  const prepared = prepareRawContent(value)
+  const prepared = prepareRawContent(value, discardHtmlNoscriptRegions)
   const withoutWrappers = prepared
     .replace(/<!doctype[^>]*>/gi, "")
     .replace(/<\/?(html|head|body)[^>]*>/gi, "")

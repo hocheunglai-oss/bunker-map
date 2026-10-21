@@ -917,6 +917,7 @@ function extractQuantityBeforeProduct(lines: string[], productIndex: number) {
   const unitOnlyPattern = new RegExp(String.raw`^${QUANTITY_UNIT_PATTERN}$`, "i")
   for (let index = nearby.length - 1; index >= 0; index -= 1) {
     const line = nearby[index]
+    if (line === PRODUCT_METADATA_BOUNDARY) break
     if (unitOnlyPattern.test(line)) {
       const hasTableHeader = nearby
         .slice(0, Math.max(0, index - 1))
@@ -949,8 +950,88 @@ function stripOperationalRateClause(value: string) {
   )
 }
 
+const PRODUCT_METADATA_BOUNDARY = "Enquiry product metadata boundary:"
+const PRODUCT_METADATA_LABEL_PATTERN = /^\s*(?:[-*']+\s*)?(?:vessel(?:\s+name)?|vsl|ship(?:\s+name)?|imo(?:\s+no\.?)?|port|bunker\s+port|buyer|company|agent|reference|ref\.?)\s*(?::\s*(.*)|$)/i
+
+function isMetadataGradeValue(value: string) {
+  const compact = value.toLowerCase().replace(/\s+/g, "")
+  return /^(?:hsfo|hfo|ifo|rmk|vlsfo|vslfo|lsmfo|lsfo|lsmgo|lemgo|lsgo|mgo|mdo|dma|dmb|gasoil|rmg)(?:\d{2,3})?(?:cst)?$/.test(compact) &&
+    containsProduct(value)
+}
+
+function isProductBlockBoundary(value: string) {
+  return containsProduct(value) ||
+    (isLabelLine(value) && !isSulphurSpecLine(value) && !/^(?:product|qty|quantity)\b/i.test(value))
+}
+
+function readProductBlock(lines: string[], index: number) {
+  const block = [lines[index]]
+  let endIndex = index
+  for (let offset = index + 1; offset < Math.min(lines.length, index + 6); offset += 1) {
+    const nextLine = lines[offset]
+    if (isProductBlockBoundary(nextLine)) break
+    block.push(nextLine)
+    endIndex = offset
+    if (new RegExp(String.raw`^${QUANTITY_UNIT_PATTERN}$`, "i").test(nextLine) || new RegExp(String.raw`${QUANTITY_UNIT_PATTERN}(?=$|[^A-Za-z0-9])`, "i").test(nextLine)) break
+  }
+  return { block, endIndex }
+}
+
+function readQuantityClausePrefix(value: string) {
+  const clauses = value.split(/([;/|]|,(?!\d))/)
+  let prefix = ""
+  let hasUnitOnlyClause = false
+  for (let index = 0; index < clauses.length; index += 2) {
+    const clause = cleanSpaces(clauses[index])
+    if (isProductBlockBoundary(clause)) return { prefix, stopped: true, hasUnitOnlyClause }
+    hasUnitOnlyClause ||= new RegExp(String.raw`^${QUANTITY_UNIT_PATTERN}$`, "i").test(clause)
+    prefix += clauses[index] + (clauses[index + 1] || "")
+  }
+  return { prefix, stopped: false, hasUnitOnlyClause }
+}
+
+function hasQuantityContinuation(lines: string[], index: number, sameLineClauses: string) {
+  // Use the request extractor's own quantity semantics and bounded block stops,
+  // excluding the metadata grade digits themselves from continuation evidence.
+  // A new product clause cannot supply a quantity for the metadata value.
+  const { prefix, stopped, hasUnitOnlyClause } = readQuantityClausePrefix(sameLineClauses)
+  const followingLines = stopped ? [] : lines.slice(index + 1, index + 6)
+  const { block } = readProductBlock([prefix, ...followingLines], 0)
+  // A unit-only continuation already gives the grade digits a legacy quantity
+  // interpretation. Preserve that ambiguous case rather than change its policy.
+  return Boolean(extractQuantityFromBlock(block)) || hasUnitOnlyClause ||
+    block.some((line) => new RegExp(String.raw`^${QUANTITY_UNIT_PATTERN}$`, "i").test(line))
+}
+
+function excludeMetadataGradeValues(lines: string[]) {
+  let wrappedMetadataValue = false
+  return lines.flatMap((line, index) => {
+    const label = line.match(PRODUCT_METADATA_LABEL_PATTERN)
+    const value = label ? label[1] || "" : wrappedMetadataValue ? line : null
+    wrappedMetadataValue = Boolean(label && !value)
+    if (value === null || !value) return [line]
+
+    // Only a grade/spec-only metadata value is excluded. Do not discard a whole
+    // mixed line or change the existing unquantified PRODUCT/grade policy.
+    const separator = value.search(/[;/|]|,(?!\d)/)
+    const metadataValue = cleanSpaces(separator < 0 ? value : value.slice(0, separator))
+    const requestClause = separator < 0 ? "" : cleanSpaces(value.slice(separator + 1))
+    if (!isMetadataGradeValue(metadataValue) || hasQuantityContinuation(lines, index, requestClause)) return [line]
+
+    // Retain a barrier so excluding metadata cannot join an earlier quantity
+    // to a later grade. The barrier is internal to product extraction only.
+    return requestClause ? [PRODUCT_METADATA_BOUNDARY, requestClause] : [PRODUCT_METADATA_BOUNDARY]
+  })
+}
+
+export function excludeEnquiryProductMetadata(text: string) {
+  const lines = normalizeInput(text).split("\n").map(cleanSpaces).filter(Boolean)
+  const filtered = excludeMetadataGradeValues(lines)
+  return filtered.some((line) => line === PRODUCT_METADATA_BOUNDARY) ? filtered.join("\n") : text
+}
+
 function extractProducts(text: string, autoDetectVlsfoRemarks: boolean) {
-  const lines = normalizeInput(text)
+  const lines = normalizeInput(excludeEnquiryProductMetadata(text))
     .split("\n")
     .map(cleanSpaces)
     .map(stripOperationalRateClause)
@@ -973,19 +1054,7 @@ function extractProducts(text: string, autoDetectVlsfoRemarks: boolean) {
     const product = classifyProduct(line)
     if (!product) continue
 
-    const block = [line]
-    let endIndex = index
-
-    for (let offset = index + 1; offset < Math.min(lines.length, index + 6); offset += 1) {
-      const nextLine = lines[offset]
-      if (containsProduct(nextLine)) break
-      if (isLabelLine(nextLine) && !isSulphurSpecLine(nextLine) && !/^(?:product|qty|quantity)\b/i.test(nextLine)) break
-
-      block.push(nextLine)
-      endIndex = offset
-
-      if (new RegExp(String.raw`^${QUANTITY_UNIT_PATTERN}$`, "i").test(nextLine) || new RegExp(String.raw`${QUANTITY_UNIT_PATTERN}(?=$|[^A-Za-z0-9])`, "i").test(nextLine)) break
-    }
+    const { block, endIndex } = readProductBlock(lines, index)
 
     const quantity = extractQuantityBeforeProduct(lines, index) || extractQuantityFromBlock(block)
     if (quantity) {

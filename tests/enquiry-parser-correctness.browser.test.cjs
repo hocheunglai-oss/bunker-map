@@ -3,13 +3,18 @@ const assert = require("node:assert/strict")
 const http = require("node:http")
 const path = require("node:path")
 const os = require("node:os")
-const { mkdtempSync, writeFileSync } = require("node:fs")
+const { mkdtempSync, writeFileSync, readFileSync, mkdirSync } = require("node:fs")
+const { createHash } = require("node:crypto")
 const { build } = require("esbuild")
 
 // Optional actual old source tree for RED comparison; parser modules themselves
 // are never mocked/replaced, and the same desired expectations remain in force.
 const root = path.resolve(process.env.ENQUIRY_CORRECTNESS_SOURCE_ROOT || path.join(__dirname, ".."))
 const evidence = process.env.ENQUIRY_CORRECTNESS_EVIDENCE || mkdtempSync(path.join(os.tmpdir(), "fcuno-parser-correctness-browser-"))
+mkdirSync(evidence, { recursive: true })
+const sourceNames = ["app/admin/enquiryworksheet/page.tsx", "lib/enquiryShortener.ts", "lib/enquiryWorksheetParser.ts", "lib/spcEnquiryText.ts"]
+const hashSources = () => Object.fromEntries(sourceNames.map(name => [name, createHash("sha256").update(readFileSync(path.join(root, name))).digest("hex")]))
+const sources = hashSources()
 const fields = "PORT: SINGAPORE\nETA: 12 JUL\nVLSFO 100MT"
 const cases = [
   { id: "telephone-not-imo", raw: `VESSEL: ALPHA\nIMO: 9450670\nTEL: 9450674\n${fields}`, vessel: "ALPHA", imo: "", output: "alpha / singapore 12 jul / vlsfo 100mts", invalidImoWarning: true },
@@ -19,7 +24,7 @@ const cases = [
   { id: "valid-leap-year", raw: "VESSEL: ALPHA\nIMO: 9450674\nPORT: SINGAPORE\nETA: 29 FEB 2028\nVLSFO 100MT", vessel: "ALPHA", imo: "9450674", output: "alpha / 9450674 / singapore 29 feb / vlsfo 100mts" },
   { id: "valid-later-labelled-imo", raw: `VESSEL: ALPHA\nIMO: 9450670\nIMO No.: 9450674\nFax: 1094644\n${fields}`, vessel: "ALPHA", imo: "9450674", output: "alpha / 9450674 / singapore 12 jul / vlsfo 100mts" },
   { id: "unlabelled-adjacent-imo", raw: "ALPHA (9450674) / SINGAPORE / 12 JUL / VLSFO 100MT", vessel: "ALPHA", imo: "9450674", output: "alpha / 9450674 / singapore 12 jul / vlsfo 100mts" },
-  { id: "actual-fuel-not-vessel", raw: `VESSEL: IFO380\nIMO: 9450674\n${fields}`, vessel: "", imo: "9450674", output: "9450674 / singapore 12 jul / HSFO 380mts / vlsfo 100mts" },
+  { id: "actual-fuel-not-vessel", raw: `VESSEL: IFO380\nIMO: 9450674\n${fields}`, vessel: "", imo: "9450674", output: "9450674 / singapore 12 jul / vlsfo 100mts" },
   { id: "spaced-fuel-attached-quantity-not-vessel", raw: "IMO: 9450674\nV L S F O380\nPORT: SINGAPORE\nETA: 12 JUL", vessel: "", imo: "9450674", output: "9450674 / singapore 12 jul / vlsfo 380mts" },
   { id: "quantity-not-explicit-year", raw: "VESSEL: ALPHA\nIMO: 9450674\nPORT: SINGAPORE\nETA: 29 FEB 1000 MT VLSFO", vessel: "ALPHA", imo: "9450674", output: "alpha / 9450674 / singapore 29 feb / vlsfo 1,000mts" },
   { id: "lf-quantity-unit-not-explicit-year", raw: "VESSEL: ALPHA\nIMO: 9450674\nPORT: SINGAPORE\nETA: 29 FEB 1000\nMT VLSFO", vessel: "ALPHA", imo: "9450674", output: "alpha / 9450674 / singapore 29 feb" },
@@ -28,7 +33,10 @@ const cases = [
   { id: "eta-continuation-date-stays-separate", raw: "VESSEL: ALPHA\nIMO: 9450674\nPORT: SINGAPORE\nETA: 1000\nMT 12 JUL", vessel: "ALPHA", imo: "9450674", output: "alpha / 9450674 / singapore" },
   { id: "delivery-continuation-date-stays-separate", raw: "VESSEL: ALPHA\nIMO: 9450674\nPORT: SINGAPORE\nDELIVERY: 1000\nMT 12 JUL", vessel: "ALPHA", imo: "9450674", output: "alpha / 9450674 / singapore" },
   { id: "continuation-port-keeps-own-date", raw: "VESSEL: ALPHA\nIMO: 9450674\nPORT: SINGAPORE\nETA: 12 JUL 1000\nMT ROTTERDAM 13 JUL", vessel: "ALPHA", imo: "9450674", output: "alpha / 9450674 / rotterdam 13 jul" },
+  ...require("./fixtures/enquiry-metadata-cases.cjs"),
 ]
+assert.equal(cases.length, 40)
+assert.equal(new Set(cases.map(item => item.id)).size, cases.length)
 
 async function main() {
   const bundle = await build({
@@ -80,6 +88,12 @@ async function main() {
           results.push({ engine, browserVersion: browser.version(), width, colorScheme, id: item.id, passed, actual, expected })
           if (item.id === "telephone-not-imo") { await raw.scrollIntoViewIfNeeded(); await page.screenshot({ path: path.join(evidence, `${engine}-${width}-${colorScheme}-phone-imo.png`), fullPage: true }) }
           if (item.id === "lf-quantity-unit-not-explicit-year") { await raw.scrollIntoViewIfNeeded(); await page.screenshot({ path: path.join(evidence, `${engine}-${width}-${colorScheme}-newline-quantity.png`), fullPage: true }) }
+          if (item.id === "metadata-quantity-prefix-multiple-clauses" || item.id === "metadata-retained-exact-metadata") {
+            await raw.scrollIntoViewIfNeeded()
+            const layout = await page.evaluate(() => ({ width: innerWidth, scroll: document.documentElement.scrollWidth }))
+            assert.ok(layout.scroll <= layout.width + 1, JSON.stringify(layout))
+            await page.screenshot({ path: path.join(evidence, `${engine}-${width}-${colorScheme}-${item.id}.png`), fullPage: true })
+          }
         }
         assert.deepEqual(blocked, []); assert.deepEqual(errors, [])
         assert.deepEqual(await page.evaluate(() => window.__messages), [])
@@ -89,7 +103,9 @@ async function main() {
       await browser.close(); browser = null
     }
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)) }
-  const receipt = { sourceRoot: root, contexts: 12, cases: results.length, passed: results.length - failures.length, failures, results, scope: "Actual worksheet/parser; synthetic auth/port response/theme variables. Chromium/WebKit phone-width contexts, not physical iPhone or complete shell permission/theme verification.", externalRequests: 0, messages: 0, ownedResourcesClosed: true }
+  assert.deepEqual(hashSources(), sources)
+  const receipt = { sourceRoot: root, sources, sourceStable: true, contexts: 12, casesPerContext: cases.length, originalCaseIdsPreserved: 16, originalExpectedOutputChanges: ["actual-fuel-not-vessel"], cases: results.length, passed: results.length - failures.length, failures, results, scope: "Actual worksheet/parser; synthetic auth/port response/theme variables. Chromium/WebKit phone-width contexts, not physical iPhone or complete shell permission/theme verification.", externalRequests: 0, messages: 0, ownedResourcesClosed: true }
+  assert.equal(results.length, 480)
   writeFileSync(path.join(evidence, "results.json"), JSON.stringify(receipt, null, 2) + "\n")
   console.log(JSON.stringify({ contexts: receipt.contexts, cases: receipt.cases, passed: receipt.passed, failed: failures.length, evidence, ownedResourcesClosed: true }))
   assert.equal(failures.length, 0, "Actual worksheet parser correctness regressions")
