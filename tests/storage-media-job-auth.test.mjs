@@ -1,7 +1,9 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { spawnSync } from "node:child_process"
-import { readFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { fcunoConnectionPolicy } from "../config/fcunoConnections.ts"
 import { createMetadataAccessTokenProvider, createExistingDriveAccessTokenProvider, requireStorageMediaJobRuntime } from "../scripts/lib/storage-media-job-auth.mjs"
 import { main } from "../scripts/backup-storage-media-to-gcs.mjs"
@@ -95,4 +97,47 @@ test("image packaging retains the existing Drive default and adds only the one-t
   assert.match(docker, /CMD \["npm", "run", "backup:drive-files:gcs"\]/)
   for (const required of ["scripts/backup-storage-media-to-gcs.mjs", "scripts/lib/storage-media-*.mjs", "config/fcunoConnections.ts", "lib/storageMediaBackup.mjs lib/backupValidationSpool.mjs"]) assert.ok(docker.includes(required))
   assert.doesNotMatch(docker, /ENV STORAGE_MEDIA_BACKUP_|GOOGLE_APPLICATION_CREDENTIALS|\.env|oauth-token/)
+})
+
+test("Cloud Build upload allowlist includes every Docker COPY source and excludes local private files", () => {
+  const docker = readFileSync(new URL("../Dockerfile.drive-backup", import.meta.url), "utf8")
+  const ignore = readFileSync(new URL("../.gcloudignore", import.meta.url), "utf8")
+  // This file uses ordinary gitignore syntax only. Keep the offline check honest
+  // if a future change introduces gcloud's include directive.
+  assert.doesNotMatch(ignore, /^#!include:/m)
+  const sources = new Set(["cloudbuild.drive-backup.yaml", "Dockerfile.drive-backup"])
+  for (const line of docker.split("\n").filter(line => line.startsWith("COPY "))) {
+    for (const source of line.trim().split(/\s+/).slice(1, -1)) {
+      assert.doesNotMatch(source, /^--|\[|\?|\*\*/)
+      if (!source.includes("*")) {
+        readFileSync(new URL(`../${source}`, import.meta.url))
+        sources.add(source)
+        continue
+      }
+      const slash = source.lastIndexOf("/")
+      const directory = source.slice(0, slash + 1)
+      const pattern = new RegExp(`^${source.slice(slash + 1).split("*").map(part => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`)
+      const matches = readdirSync(new URL(`../${directory}`, import.meta.url), { withFileTypes: true })
+        .filter(entry => entry.isFile() && pattern.test(entry.name)).map(entry => directory + entry.name)
+      assert.ok(matches.length > 0, `Docker COPY wildcard has no files: ${source}`)
+      for (const match of matches) sources.add(match)
+    }
+  }
+  const denied = [".env", ".env.local", ".git/config", ".google-drive-oauth-token.json", ".vercel/project.json",
+    "browser-state/session.json", "backups/database.json", "exports/database.sql", "node_modules/package/index.js",
+    "scripts/auth-google-drive.mjs", "scripts/lib/private-key.json", "scripts/lib/storage-media-token.json",
+    "config/private-key.json", "lib/credentials.mjs", "app/page.tsx", "tests/storage-media-job-auth.test.mjs"]
+  const fixture = mkdtempSync(join(tmpdir(), "fcuno-gcloudignore-test-"))
+  try {
+    const initialized = spawnSync("git", ["init", "--quiet", "--template=", fixture], { encoding: "utf8" })
+    assert.equal(initialized.status, 0, initialized.stderr)
+    writeFileSync(join(fixture, ".gitignore"), ignore)
+    const checked = spawnSync("git", ["-c", "core.excludesFile=/dev/null", "check-ignore", "--no-index", "--stdin"], {
+      cwd: fixture, input: [...sources, ...denied].join("\n") + "\n", encoding: "utf8",
+    })
+    assert.equal(checked.status, 0, checked.stderr)
+    assert.deepEqual(checked.stdout.trim().split("\n").sort(), [...denied].sort())
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
 })

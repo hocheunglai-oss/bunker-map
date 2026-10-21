@@ -1,4 +1,4 @@
-# Only upload the files required by the Drive backup image. Never send local
+# Only upload the files required by the backup image. Never send local
 # credentials, browser state, database exports, application builds or caches.
 **
 !Dockerfile.drive-backup
@@ -7,3 +7,11 @@
 !package-lock.json
 !scripts/
 !scripts/backup-google-drive-files-to-gcs.mjs
+!scripts/backup-storage-media-to-gcs.mjs
+!scripts/lib/
+!scripts/lib/storage-media-*.mjs
+!config/
+!config/fcunoConnections.ts
+!lib/
+!lib/storageMediaBackup.mjs
+!lib/backupValidationSpool.mjs
