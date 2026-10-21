@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { createClient } from "@supabase/supabase-js"
 import type { SpcSession } from "@/lib/spcAuth"
 import {
@@ -402,8 +403,7 @@ export async function moveSpcPresentationChunk(
 export async function deleteSpcPresentationChunk(id: string, revision: unknown, context: SpcAuditContext) {
   const changed = () => new Error("This section changed in another session. Refresh and review it before deleting.")
   if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 1) throw changed()
-  // The returned paths belong to the exact revision deleted by this statement.
-  // A separate pre-read could remove media belonging to a concurrent edit.
+  // Delete only the exact revision the user reviewed; a concurrent edit survives.
   const { data: row, error: deleteError } = await createSpcAuditedSupabaseClient(context)
     .from(PRESENTATION_TABLE)
     .delete()
@@ -415,12 +415,8 @@ export async function deleteSpcPresentationChunk(id: string, revision: unknown, 
   if (deleteError) throw new Error(`Could not delete presentation section: ${deleteError.message}`)
   if (!row || row.id !== id || row.revision !== revision) throw changed()
 
-  const paths = [row.video_path, row.narration_path].filter(
-    (path): path is string => typeof path === "string" && Boolean(path),
-  )
-  if (paths.length > 0) {
-    await presentationClient().storage.from(PRESENTATION_BUCKET).remove(paths)
-  }
+  // Keep physical media: older database recovery points may still reference it.
+  // Cleanup requires independently verified byte backups and a retention policy.
 }
 
 async function ensurePresentationBucket() {
@@ -473,11 +469,11 @@ export async function prepareSpcPresentationUpload(
   if (!chunk) throw new Error("Presentation section was not found.")
 
   await ensurePresentationBucket()
-  const path = `${id}/${kind}-${Date.now()}-${safeFileName(fileName)}`
+  const path = `${id}/${kind}-${randomUUID()}-${safeFileName(fileName)}`
   const { data, error: signError } = await presentationClient()
     .storage
     .from(PRESENTATION_BUCKET)
-    .createSignedUploadUrl(path)
+    .createSignedUploadUrl(path, { upsert: false })
   if (signError) throw new Error(`Could not prepare media upload: ${signError.message}`)
   return { bucket: PRESENTATION_BUCKET, path, token: data.token, signedUrl: data.signedUrl }
 }
@@ -541,10 +537,7 @@ export async function completeSpcPresentationUpload(
   if (updateError) throw new Error(`Could not attach presentation media: ${updateError.message}`)
   if (!updated) throw new Error("This section changed in another session. Refresh before attaching media.")
 
-  const previousPath = kind === "video" ? current.video_path : current.narration_path
-  if (previousPath && previousPath !== path) {
-    await client.storage.from(PRESENTATION_BUCKET).remove([previousPath])
-  }
+  // Preserve replaced media until backup-aware retention is separately verified.
   return presentSingleRow(updated as unknown as PresentationRow)
 }
 

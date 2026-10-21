@@ -139,7 +139,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/spc-record-state-api.test.ts tests/spc-lost-reasons-and-today-enquiries.test.ts tests/spc-presentation-layout.test.ts tests/taiwan-remarks-save.test.ts tests/audit-log-supplier-visibility.test.ts tests/audit-browsing.test.ts tests/tech-stack-register.test.ts 2>&1 | tee state-integrity-tests.tap
+          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/spc-record-state-api.test.ts tests/spc-presentation-preservation.test.ts tests/spc-lost-reasons-and-today-enquiries.test.ts tests/spc-presentation-layout.test.ts tests/taiwan-remarks-save.test.ts tests/audit-log-supplier-visibility.test.ts tests/audit-browsing.test.ts tests/tech-stack-register.test.ts 2>&1 | tee state-integrity-tests.tap
 
       - name: Verify complete analytics snapshots and failure ownership
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}

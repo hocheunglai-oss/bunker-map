@@ -8,7 +8,7 @@ const root=resolve(dirname(fileURLToPath(import.meta.url)),"../.."),require=crea
 export const stateActor={authenticated:true,username:"synthetic@example.test",displayName:"Synthetic Editor",role:"ADMIN",userId:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
 export const recordVersion="2026-10-14T01:02:03.123456Z"
 export const lostRow={id:"dddddddd-dddd-4ddd-8ddd-dddddddddddd",enquiry_number:"SPC-SYNTHETIC",title:"SYNTHETIC VESSEL",vessel_name:"SYNTHETIC VESSEL",port:"Singapore",product:"VLSFO",quantity:"500",delivery_date:"2026-10-20",supplier_name:null,status:"cancelled",notes:"SYNTHETIC VESSEL / Singapore / VLSFO 500mts",revision_number:1,created_by_username:stateActor.username,created_by_display_name:stateActor.displayName,created_at:recordVersion,updated_at:recordVersion}
-export const presentationRow={id:"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",slug:"synthetic",sort_order:10,chapter_label:"CHAPTER 1",section_label:"SECTION",title:"Original",summary:"",narration:"",key_points:[],q_and_a_prompt:"",visual_kind:"video",visual_copy:[],video_path:"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee/video-original.mp4",video_mime_type:"video/mp4",video_bytes:100,narration_path:null,narration_mime_type:null,narration_bytes:0,duration_seconds:null,media_version:1,revision:1,status:"published",created_at:recordVersion,updated_at:recordVersion}
+export const presentationRow={id:"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",slug:"synthetic",sort_order:10,chapter_label:"CHAPTER 1",section_label:"SECTION",title:"Original",summary:"",narration:"",key_points:[],q_and_a_prompt:"",visual_kind:"video",visual_copy:[],video_path:"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee/video-original.mp4",video_mime_type:"video/mp4",video_bytes:100,narration_path:/** @type {string|null} */(null),narration_mime_type:/** @type {string|null} */(null),narration_bytes:0,duration_seconds:null,media_version:1,revision:1,status:"published",created_at:recordVersion,updated_at:recordVersion}
 export const reviewPayload=(overrides={})=>({id:lostRow.id,expectedUpdatedAt:recordVersion,supplierLostReason:"OTHER",supplierLostReasonDetails:"Verified reason",spcComments:"Verified comment",...overrides})
 // Real routes, parsers, version checks and audit headers; only auth/transport are synthetic.
 /** @param {{createClient:(headers:Record<string,string>)=>unknown,kind?:string,permission?:string,actor?:typeof stateActor|null}} options */
@@ -33,12 +33,18 @@ export function createRecordStateRoute({createClient,kind="lost",permission="edi
   const route=load(kind==="lost"?"@/app/api/spc/lost-record/route":"@/app/api/spc/readme/route")
   return {async mutate(payload){const method=kind==="lost"?"PATCH":"POST",response=await route[method](new Request("https://synthetic.invalid/api/spc/"+(kind==="lost"?"lost-record":"readme"),{method,headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}));return{status:response.status,body:await response.json()}}}
 }
-export function recordStateMemory({beforeWrite=async()=>{},readError=null,writeError=null,loseMediaAck=false}={}) {
-  const rows={spc_enquiries:[structuredClone(lostRow)],spc_presentation_chunks:[structuredClone(presentationRow)]},writes=[],removes=[],headers=[]
+/** @param {{beforeWrite?:()=>Promise<void>,readError?:{message:string,code?:string}|null,writeError?:{message:string,code?:string}|null,loseMediaAck?:boolean,storageListError?:{message:string,code?:string}|null,storageListMissing?:boolean,signError?:{message:string,code?:string}|null}} [options] */
+export function recordStateMemory({beforeWrite=async()=>{},readError=null,writeError=null,loseMediaAck=false,storageListError=null,storageListMissing=false,signError=null}={}) {
+  const rows={spc_enquiries:[structuredClone(lostRow)],spc_presentation_chunks:[structuredClone(presentationRow)]},writes=[],removes=[],headers=[],signs=[]
+  const media=new Map([[presentationRow.video_path,"O".repeat(presentationRow.video_bytes)]])
   let clock=0
-  return {rows,writes,removes,headers,client(context){
+  return {rows,writes,removes,headers,signs,media,client(context){
     headers.push(context)
-    return {storage:{from(){return {remove:async paths=>{removes.push(paths);return{data:paths,error:null}},list:async(_id,options)=>({data:[{name:options.search,metadata:{size:123}}],error:null}),createSignedUrls:async paths=>{
+    return {storage:{getBucket:async()=>({data:{name:"spc-presentation-media",public:false},error:null}),from(){return {
+      remove:async paths=>{removes.push(paths);for(const path of paths)media.delete(path);return{data:paths,error:null}},
+      list:async(_id,options)=>({data:storageListMissing?[]:[{name:options.search,metadata:{size:123}}],error:storageListError}),
+      createSignedUploadUrl:async(path,options)=>{signs.push({path,options});return{data:signError?null:{path,token:"synthetic-upload-token",signedUrl:"https://synthetic.invalid/upload"},error:signError}},
+      createSignedUrls:async paths=>{
       if(loseMediaAck&&writes.length){loseMediaAck=false;return{data:null,error:{message:"Synthetic response loss after commit"}}}
       return{data:paths.map(path=>({path,signedUrl:"https://synthetic.invalid/"+path})),error:null}
     }}}},
