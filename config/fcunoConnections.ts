@@ -1,3 +1,5 @@
+const presentationMediaBucket = "spc-presentation-media"
+
 export const fcunoConnectionPolicy = Object.freeze({
   schemaVersion: 1,
   policyVersion: 2,
@@ -15,6 +17,21 @@ export const fcunoConnectionPolicy = Object.freeze({
   },
   supabase: {
     projectRef: "gglyugbrnyvyfktgwert",
+    presentationMediaBucket,
+  },
+  storageMediaBackup: {
+    sourcePath: "/api/backups/storage-media",
+    sourceBucket: presentationMediaBucket,
+    approvedObjectCount: 15,
+    approvedTotalBytes: 224309367,
+    googleProjectId: "bunker-map-drive-uploader",
+    googleAccount: "wider.custom@gmail.com",
+    googleRegion: "us-central1",
+    googleJob: "bunker-map-drive-file-backup",
+    googleServiceAccount: "bunker-map-drive-backup@bunker-map-drive-uploader.iam.gserviceaccount.com",
+    targetBucket: "bunker-map-drive-uploader-bunker-map-drive-file-backups",
+    targetPrefix: "fcuno-storage-media",
+    googleTokenIssuer: "https://accounts.google.com",
   },
   browser: {
     fallbackProfile: "Otto",
@@ -62,6 +79,13 @@ export function validateFcunoConnectionPolicy(
   requireNonEmpty(policy.vercel.teamId, "vercel.teamId")
   requireNonEmpty(policy.vercel.projectId, "vercel.projectId")
   requireNonEmpty(policy.supabase.projectRef, "supabase.projectRef")
+  requireNonEmpty(policy.storageMediaBackup.sourceBucket, "storageMediaBackup.sourceBucket")
+  requireNonEmpty(policy.storageMediaBackup.googleServiceAccount, "storageMediaBackup.googleServiceAccount")
+  requireNonEmpty(policy.storageMediaBackup.targetBucket, "storageMediaBackup.targetBucket")
+  if (policy.storageMediaBackup.sourceBucket !== policy.supabase.presentationMediaBucket ||
+      !policy.storageMediaBackup.googleServiceAccount.endsWith(`@${policy.storageMediaBackup.googleProjectId}.iam.gserviceaccount.com`)) {
+    throw new Error("Storage media backup must retain the pinned source and Google job identity.")
+  }
   requireNonEmpty(policy.ecosystem.productionOrigin, "ecosystem.productionOrigin")
   requireNonEmpty(policy.federation.issuer, "federation.issuer")
   requireNonEmpty(policy.federation.protocolVersion, "federation.protocolVersion")

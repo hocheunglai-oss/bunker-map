@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { createClient } from "@supabase/supabase-js"
+import { fcunoConnectionPolicy } from "@/config/fcunoConnections"
 import type { SpcSession } from "@/lib/spcAuth"
 import {
   createSpcAuditContext,
@@ -8,7 +9,7 @@ import {
 } from "@/lib/spcAudit"
 
 const PRESENTATION_TABLE = "spc_presentation_chunks"
-const PRESENTATION_BUCKET = "spc-presentation-media"
+const PRESENTATION_BUCKET = fcunoConnectionPolicy.supabase.presentationMediaBucket
 const SIGNED_MEDIA_SECONDS = 8 * 60 * 60
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024
 const MAX_NARRATION_BYTES = 50 * 1024 * 1024
