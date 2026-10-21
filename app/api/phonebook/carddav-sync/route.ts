@@ -1,14 +1,77 @@
 import { NextResponse } from "next/server"
+import { performance } from "node:perf_hooks"
 import { createClient } from "@supabase/supabase-js"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
+import { observePhonebookCarddavSemanticShadow } from "@/lib/phonebookCarddavSemanticShadow"
 
 import { SYNC_BATCH_SIZE, SyncError, safeSyncError, httpSyncError, logSyncFailure, logVerifiedContacts, requireEnv, getCardDavConfig, readSavedContactIds, cardDavRequest, countAddressBookCards, inspectOtherCards, validateSyncRequest, deleteCard, fetchContacts, putContact, type SyncStage, acquireCardDavWriteLease, readCardDavQueueVersions, acknowledgeCardDavQueue } from "@/lib/phonebookCarddav"
 
 export const maxDuration = 300
 
+const PRIVATE_DIAGNOSTIC_HEADERS = { "Cache-Control": "private, no-store, max-age=0", Pragma: "no-cache" }
+const CONTENT_PROPERTIES = ["UID", "FN", "N", "ORG", "TITLE", "TEL", "EMAIL", "NOTE", "CATEGORIES", "X-BUNKER-MAP-CONTACT-ID", "X-BUNKER-MAP-SYNC-HASH"]
+const COVERAGE_PROPERTIES = ["FN", "N", "ORG", "TITLE", "TEL", "EMAIL", "NOTE"]
+const SHAPE_FLAGS = ["nonAsciiName", "escapedText", "multiplePhoneEndpoints", "multipleEmailEndpoints"]
+
+function diagnosticJson(body: unknown, status: number) {
+  return NextResponse.json(body, { status, headers: PRIVATE_DIAGNOSTIC_HEADERS })
+}
+
+function fixedDiagnosticWindow(params: URLSearchParams) {
+  const keys = ["verifyContent", "startsAt", "expiresAt"]
+  if ([...params.keys()].some((key) => !keys.includes(key)) || keys.some((key) => params.getAll(key).length !== 1)) return null
+  const startsAt = params.get("startsAt")!, expiresAt = params.get("expiresAt")!
+  const strictTime = (value: string) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value
+  if (!strictTime(startsAt) || !strictTime(expiresAt)) return null
+  const starts = Date.parse(startsAt), expires = Date.parse(expiresAt), now = Date.now()
+  if (expires <= starts || expires - starts > 900_000 || now < starts || now >= expires) return null
+  return { approved: true, startsAt, expiresAt }
+}
+
+function safeDiagnosticSummary(value: Record<string, unknown> | null, commit: string) {
+  if (!value || value.commit !== commit || typeof value.version !== "string" || !/^fcuno-vcard3-shadow\/\d{4}-\d{2}-\d{2}\.\d+$/.test(value.version)) return null
+  const countKeys = ["match", "different", "unsupported", "incompleteCards", "comparableCards"]
+  const integer = (item: unknown, max: number) => typeof item === "number" && Number.isSafeInteger(item) && item >= 0 && item <= max
+  if (![1, 2].includes(Number(value.sampleSize)) || typeof value.sampleSize !== "number" || countKeys.some((key) => !integer(value[key], 2))) return null
+  if (Number(value.match) + Number(value.different) + Number(value.unsupported) + Number(value.incompleteCards) !== value.sampleSize || Number(value.comparableCards) !== Number(value.match) + Number(value.different)) return null
+  if (value.observationIncomplete !== false || value.incompleteCards !== 0 || value.wholeBookContentVerified !== false || value.physicalDeviceVerified !== false || !integer(value.elapsedMs, 300_000)) return null
+  const hash = (item: unknown) => typeof item === "string" && /^[a-f0-9]{64}$/.test(item)
+  if (!hash(value.sourceBeforeSha256) || !hash(value.sourceAfterSha256) || value.sourceChanged !== (value.sourceBeforeSha256 !== value.sourceAfterSha256)) return null
+  if (!Array.isArray(value.differingProperties) || value.differingProperties.length > CONTENT_PROPERTIES.length || value.differingProperties.some((item) => typeof item !== "string" || !CONTENT_PROPERTIES.includes(item))) return null
+  const coverage = (item: unknown) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return null
+    const record = item as Record<string, unknown>
+    return COVERAGE_PROPERTIES.every((key) => integer(record[key], 10_000)) ? Object.fromEntries(COVERAGE_PROPERTIES.map((key) => [key, record[key]])) : null
+  }
+  const expectedNonempty = coverage(value.expectedNonempty), observedNonempty = coverage(value.observedNonempty)
+  const flags = value.expectedShapeFlags as Record<string, unknown> | null
+  if (!expectedNonempty || !observedNonempty || !flags || SHAPE_FLAGS.some((key) => typeof flags[key] !== "boolean")) return null
+  const keys = ["version", "commit", "sampleSize", ...countKeys, "observationIncomplete", "sourceChanged", "sourceBeforeSha256", "sourceAfterSha256", "differingProperties", "wholeBookContentVerified", "physicalDeviceVerified", "elapsedMs"]
+  return { ...Object.fromEntries(keys.map((key) => [key, value[key]])), expectedNonempty, observedNonempty, expectedShapeFlags: Object.fromEntries(SHAPE_FLAGS.map((key) => [key, flags[key]])) }
+}
+
 export async function GET(request: Request) {
+  const params = new URL(request.url).searchParams
+  const contentRequested = params.getAll("verifyContent").includes("1")
+  const requestStartedMonotonicMs = contentRequested ? performance.now() : 0
   try {
     await requireAdminPagePermission("phonebook", "view")
+    if (contentRequested) {
+      const window = fixedDiagnosticWindow(params)
+      if (!window) return diagnosticJson({ message: "A current fixed content-verification window of at most 15 minutes is required." }, 400)
+      const environment = process.env.VERCEL_ENV
+      const commit = process.env.DEPLOY_COMMIT || process.env.NEXT_PUBLIC_DEPLOY_COMMIT || process.env.VERCEL_GIT_COMMIT_SHA || ""
+      if (environment !== "production" || !/^[a-f0-9]{40}$/.test(commit)) return diagnosticJson({ message: "CardDAV content verification is unavailable." }, 503)
+      const captured: { summary: Record<string, unknown> | null } = { summary: null }
+      // One explicit read-only observation inside the caller's fixed interval,
+      // not monitoring, a sliding activation window, or a synchronization ACK.
+      await observePhonebookCarddavSemanticShadow({ sourceUrl: requireEnv("NEXT_PUBLIC_SUPABASE_URL"), serviceRoleKey: requireEnv("SUPABASE_SERVICE_ROLE_KEY"), requestStartedMonotonicMs }, {
+        window, metadata: { environment, commit },
+        log: (event, summary) => { if (event === "phonebook_carddav_semantic_shadow") captured.summary = summary },
+      })
+      const summary = safeDiagnosticSummary(captured.summary, commit)
+      return summary ? diagnosticJson({ contentVerification: summary }, 200) : diagnosticJson({ message: "CardDAV content verification did not complete." }, 503)
+    }
     const supabase = createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), requireEnv("SUPABASE_SERVICE_ROLE_KEY"))
     const { addressBookUrl } = getCardDavConfig()
     const [saved, remote] = await Promise.all([
@@ -64,8 +127,10 @@ export async function GET(request: Request) {
     }, { headers: { "Cache-Control": "private, no-store" } })
   } catch (error) {
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
-      return NextResponse.json({ message: error.message }, { status: error.message === "Unauthorized" ? 401 : 403 })
+      const status = error.message === "Unauthorized" ? 401 : 403
+      return contentRequested ? diagnosticJson({ message: error.message }, status) : NextResponse.json({ message: error.message }, { status })
     }
+    if (contentRequested) return diagnosticJson({ message: "CardDAV content verification did not complete." }, 503)
     const safeError = safeSyncError(error, "verification")
     logSyncFailure(undefined, safeError)
     return NextResponse.json({ message: "CardDAV count unavailable. Please retry." }, { status: 503 })

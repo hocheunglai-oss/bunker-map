@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { createHash, randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
+import { performance } from "node:perf_hooks"
 import test from "node:test"
 import vm from "node:vm"
 import ts from "typescript"
@@ -28,6 +29,9 @@ type FixtureOptions = {
   databaseError?: boolean
   missingServiceKey?: boolean
   lockBusy?: boolean
+  diagnosticMetadata?: { environment?: string; commit?: string }
+  shadowMode?: "skip" | "throw" | "incomplete"
+  shadowSummary?: Record<string, unknown>
   onFetch?: (call: FetchCall, remote: Map<string, string>, rows: Contact[]) => Response | undefined | Promise<Response | undefined>
 }
 
@@ -38,17 +42,23 @@ function fixture(options: FixtureOptions = {}) {
   const queries: Array<{ table: string; range?: number[]; order?: string; count?: string }> = []
   const logs: unknown[][] = []
   const permissions: string[][] = []
+  const observations: Array<{ input: Record<string, unknown>; window: unknown; metadata: unknown }> = []
+  const rpcCalls: string[] = []
+  let clientCreations = 0
   const remote = new Map<string, string>()
   const queue: Array<{ contact_id: string; version: string }> = []
   const exports: { POST?: (request: Request) => Promise<Response>; GET?: (request?: Request) => Promise<Response>; maxDuration?: number } = {}
   const dependencies: Record<string, unknown> = {
     "node:crypto": { createHash, randomUUID },
+    "node:perf_hooks": { performance },
     "next/server": { NextResponse: Response },
     "@supabase/supabase-js": { createClient: (url: string, key: string) => {
+      clientCreations += 1
       assert.equal(url, "https://database-fixture.invalid")
       assert.equal(key, "synthetic-service-key")
       return {
         async rpc(name: string, args: { p_contact_ids?: string[] }) {
+          rpcCalls.push(name)
           if (name === "claim_bunker_map_backup_lock") return { data: !options.lockBusy, error: null }
           if (name === "enqueue_phonebook_carddav") {
             for (const contact_id of args.p_contact_ids || []) {
@@ -95,11 +105,31 @@ function fixture(options: FixtureOptions = {}) {
       if (options.permissionError) throw new Error(options.permissionError)
       return { username: "test-admin" }
     } },
+    "@/lib/phonebookCarddavSemanticShadow": { observePhonebookCarddavSemanticShadow: async (input: Record<string, unknown>, deps: { window: unknown; metadata: unknown; log: (event: string, value: Record<string, unknown>) => void }) => {
+      observations.push({ input, window: deps.window, metadata: deps.metadata })
+      assert.equal(clientCreations, 0, "The explicit diagnostic must not construct the ordinary inventory client")
+      assert.equal(input.sourceUrl, "https://database-fixture.invalid")
+      assert.equal(input.serviceRoleKey, "synthetic-service-key")
+      assert.equal(typeof input.requestStartedMonotonicMs, "number")
+      if (options.shadowMode === "skip") return
+      if (options.shadowMode === "throw") throw new Error("PRIVATE PROVIDER CONTACT AND PASSWORD")
+      const coverage = { FN: 2, N: 2, ORG: 2, TITLE: 2, TEL: 4, EMAIL: 2, NOTE: 0 }
+      deps.log("phonebook_carddav_semantic_shadow", {
+        version: "fcuno-vcard3-shadow/2026-10-21.1", commit: "1".repeat(40), sampleSize: 2, match: 2, different: 0, unsupported: 0, incompleteCards: 0,
+        observationIncomplete: options.shadowMode === "incomplete", sourceChanged: false, sourceBeforeSha256: "2".repeat(64), sourceAfterSha256: "2".repeat(64),
+        differingProperties: [], expectedNonempty: coverage, observedNonempty: coverage, comparableCards: 2,
+        expectedShapeFlags: { nonAsciiName: false, escapedText: false, multiplePhoneEndpoints: true, multipleEmailEndpoints: false },
+        wholeBookContentVerified: false, physicalDeviceVerified: false, elapsedMs: 1,
+        privateUpstreamBody: "PRIVATE CONTACT NAME EMAIL synthetic@example.invalid PASSWORD", ...options.shadowSummary,
+      })
+    } },
   }
+  const metadata = options.diagnosticMetadata || { environment: "production", commit: "1".repeat(40) }
   const context = {
     exports, Error, URL, Buffer, AbortSignal, setTimeout: (callback: () => void) => setTimeout(callback, 0),
     console: { error: (...values: unknown[]) => logs.push(values), info: (...values: unknown[]) => logs.push(values) },
     process: { env: {
+      VERCEL_ENV: metadata.environment, VERCEL_GIT_COMMIT_SHA: metadata.commit,
       NEXT_PUBLIC_SUPABASE_URL: "https://database-fixture.invalid",
       SUPABASE_SERVICE_ROLE_KEY: options.missingServiceKey ? undefined : "synthetic-service-key",
       NEXT_PUBLIC_SUPABASE_ANON_KEY: "unsafe-anonymous-fallback",
@@ -133,7 +163,8 @@ function fixture(options: FixtureOptions = {}) {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
   }))
   const get = (details = false) => exports.GET!(new Request(`https://app-fixture.invalid/api/phonebook/carddav-sync${details ? "?details=1" : ""}`))
-  return { post, get, calls, queries, logs, permissions, remote, rows, queue }
+  const diagnostic = (query: Record<string, string> = {}, rawQuery?: string) => exports.GET!(new Request(`https://app-fixture.invalid/api/phonebook/carddav-sync?${rawQuery ?? new URLSearchParams({ verifyContent: "1", ...query })}`))
+  return { post, get, diagnostic, calls, queries, logs, permissions, observations, rpcCalls, clientCreations: () => clientCreations, remote, rows, queue }
 }
 
 test("read-only count reports saved contacts and distinct managed CardDAV cards", async () => {
@@ -149,6 +180,7 @@ test("read-only count reports saved contacts and distinct managed CardDAV cards"
   assert.ok(!Number.isNaN(Date.parse(payload.checkedAt)))
   assert.deepEqual(f.permissions, [["phonebook", "view"]])
   assert.deepEqual(f.calls.map((call) => call.method), ["PROPFIND"])
+  assert.equal(f.observations.length, 0)
 })
 
 test("inventory includes phone-created cards without a vcf suffix and excludes collections", async () => {
@@ -539,5 +571,144 @@ test("database failures fail closed with sanitized output and no upstream mutati
     assert.ok([207, 503].includes(response.status))
     assert.ok(!JSON.stringify({ result: await response.json(), logs: f.logs }).match(/PRIVATE|CREDENTIAL|12345678/))
     assert.equal(f.calls.length, 0)
+  }
+})
+
+const fixedWindow = () => ({ startsAt: new Date(Date.now() - 60_000).toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() })
+function assertPrivateDiagnostic(response: Response) {
+  assert.equal(response.headers.get("cache-control"), "private, no-store, max-age=0")
+  assert.equal(response.headers.get("pragma"), "no-cache")
+}
+function assertDiagnosticIsolation(f: ReturnType<typeof fixture>) {
+  assert.equal(f.clientCreations(), 0)
+  assert.deepEqual(f.calls, [])
+  assert.deepEqual(f.queries, [])
+  assert.deepEqual(f.rpcCalls, [])
+  assert.deepEqual(f.logs, [], "Diagnostic outcomes must not reach sync-failure logs or alert paths")
+  assert.deepEqual(f.queue, [])
+}
+
+test("content diagnostic preserves exact view authorization before window validation or observation", async () => {
+  for (const permissionError of ["Unauthorized", "Forbidden"] as const) {
+    const f = fixture({ permissionError })
+    const response = await f.diagnostic()
+    assert.equal(response.status, permissionError === "Unauthorized" ? 401 : 403)
+    assert.deepEqual(await response.json(), { message: permissionError })
+    assertPrivateDiagnostic(response)
+    assert.deepEqual(f.permissions, [["phonebook", "view"]])
+    assert.equal(f.observations.length, 0)
+    assertDiagnosticIsolation(f)
+  }
+})
+
+test("content diagnostic rejects absent, invalid, duplicate, expired, future and overlong fixed windows before all IO", async () => {
+  const valid = fixedWindow(), now = Date.now()
+  const cases: Array<Record<string, string>> = [
+    {}, { startsAt: valid.startsAt }, { expiresAt: valid.expiresAt },
+    { ...valid, startsAt: "not-a-time" }, { ...valid, expiresAt: "not-a-time" },
+    { ...valid, startsAt: valid.startsAt.replace(/\.\d{3}Z$/, "Z") },
+    { ...valid, expiresAt: valid.expiresAt.replace("Z", "+00:00") },
+    { ...valid, startsAt: "2026-02-30T00:00:00.000Z" },
+    { startsAt: new Date(now - 120_000).toISOString(), expiresAt: new Date(now - 60_000).toISOString() },
+    { startsAt: new Date(now + 60_000).toISOString(), expiresAt: new Date(now + 120_000).toISOString() },
+    { startsAt: new Date(now - 60_000).toISOString(), expiresAt: new Date(now + 840_001).toISOString() },
+    { startsAt: valid.expiresAt, expiresAt: valid.startsAt },
+    { startsAt: valid.startsAt, expiresAt: valid.startsAt },
+    { ...valid, details: "1" },
+  ]
+  const rawCases = [
+    new URLSearchParams({ verifyContent: "1", ...valid }).toString() + "&startsAt=" + encodeURIComponent(valid.startsAt),
+    new URLSearchParams({ verifyContent: "1", ...valid }).toString() + "&expiresAt=" + encodeURIComponent(valid.expiresAt),
+    new URLSearchParams({ verifyContent: "1", ...valid }).toString() + "&verifyContent=1",
+    "verifyContent=0&" + new URLSearchParams({ verifyContent: "1", ...valid }).toString(),
+  ]
+  for (const query of cases) {
+    const f = fixture(), response = await f.diagnostic(query)
+    assert.equal(response.status, 400, JSON.stringify(query)); assertPrivateDiagnostic(response)
+    assert.equal(f.observations.length, 0); assertDiagnosticIsolation(f)
+  }
+  for (const query of rawCases) {
+    const f = fixture(), response = await f.diagnostic({}, query)
+    assert.equal(response.status, 400); assertPrivateDiagnostic(response)
+    assert.equal(f.observations.length, 0); assertDiagnosticIsolation(f)
+  }
+})
+
+test("ordinary GET remains inventory-only even with unrelated window parameters or verifyContent=0", async () => {
+  const f = fixture(), response = await f.diagnostic({ ...fixedWindow(), verifyContent: "0" })
+  assert.equal(response.status, 200)
+  assert.equal(f.observations.length, 0)
+  assert.deepEqual(f.calls.map((call) => call.method), ["PROPFIND"])
+  assert.equal(response.headers.get("cache-control"), "private, no-store")
+  assert.equal((await response.json()).contentVerification, undefined)
+})
+
+test("content diagnostic requires existing production metadata and credentials without fallback or source/provider IO", async () => {
+  for (const diagnosticMetadata of [{}, { environment: "preview", commit: "1".repeat(40) }, { environment: "production" }, { environment: "production", commit: "not-a-commit" }, { environment: "production", commit: "A".repeat(40) }]) {
+    const f = fixture({ diagnosticMetadata }), response = await f.diagnostic(fixedWindow())
+    assert.equal(response.status, 503); assertPrivateDiagnostic(response)
+    assert.equal(f.observations.length, 0); assertDiagnosticIsolation(f)
+  }
+  const f = fixture({ missingServiceKey: true }), response = await f.diagnostic(fixedWindow())
+  assert.equal(response.status, 503); assertPrivateDiagnostic(response)
+  assert.equal(f.observations.length, 0); assertDiagnosticIsolation(f)
+})
+
+test("content diagnostic isolates missing results, observation failures and incomplete evidence without leaking private errors", async () => {
+  for (const shadowMode of ["skip", "throw", "incomplete"] as const) {
+    const f = fixture({ shadowMode }), response = await f.diagnostic(fixedWindow())
+    assert.equal(response.status, 503); assertPrivateDiagnostic(response)
+    assert.equal(f.observations.length, 1); assertDiagnosticIsolation(f)
+    assert.doesNotMatch(await response.text(), /PRIVATE|PASSWORD|synthetic|Bearer|Basic/)
+  }
+})
+
+test("content diagnostic returns only complete allowlisted aggregate evidence for one explicit fixed-window observation", async () => {
+  const window = fixedWindow(), f = fixture(), response = await f.diagnostic(window)
+  assert.equal(response.status, 200); assertPrivateDiagnostic(response)
+  assertDiagnosticIsolation(f)
+  assert.equal(f.observations.length, 1)
+  assert.deepEqual(JSON.parse(JSON.stringify(f.observations[0].window)), { approved: true, ...window })
+  assert.deepEqual(JSON.parse(JSON.stringify(f.observations[0].metadata)), { environment: "production", commit: "1".repeat(40) })
+  const payload = await response.json(), summary = payload.contentVerification
+  assert.equal(summary.sampleSize, 2); assert.equal(summary.match, 2)
+  assert.equal(summary.sourceChanged, false); assert.equal(summary.wholeBookContentVerified, false); assert.equal(summary.physicalDeviceVerified, false)
+  assert.equal(summary.expectedNonempty.TEL, 4); assert.equal(summary.observedNonempty.EMAIL, 2)
+  assert.equal(summary.privateUpstreamBody, undefined)
+  assert.doesNotMatch(JSON.stringify(payload), /PRIVATE|PASSWORD|synthetic|example\.invalid|00000000-0000|https?:|Bearer|Basic/)
+})
+
+test("content diagnostic accepts the exact fixed15minute bound without generating or extending its timestamps", async () => {
+  const starts = Date.now() - 60_000, window = { startsAt: new Date(starts).toISOString(), expiresAt: new Date(starts + 900_000).toISOString() }
+  const f = fixture(), response = await f.diagnostic(window)
+  assert.equal(response.status, 200); assertPrivateDiagnostic(response); assertDiagnosticIsolation(f)
+  assert.deepEqual(JSON.parse(JSON.stringify(f.observations[0].window)), { approved: true, ...window })
+})
+
+test("content diagnostic does not turn completed differences, unsupported cards or source churn into synchronization acknowledgements", async () => {
+  for (const shadowSummary of [
+    { match: 0, different: 2, differingProperties: ["FN"] },
+    { match: 0, unsupported: 2, comparableCards: 0 },
+    { sourceChanged: true, sourceAfterSha256: "3".repeat(64) },
+  ]) {
+    const f = fixture({ shadowSummary }), response = await f.diagnostic(fixedWindow())
+    assert.equal(response.status, 200); assertPrivateDiagnostic(response); assertDiagnosticIsolation(f)
+    const payload = await response.json()
+    assert.equal(payload.verified, undefined); assert.equal(payload.verifiedIds, undefined)
+    assert.equal(payload.contentVerification.wholeBookContentVerified, false)
+    assert.equal(payload.contentVerification.physicalDeviceVerified, false)
+  }
+})
+
+test("content diagnostic rejects malformed or non-aggregate observer results instead of exposing them", async () => {
+  for (const shadowSummary of [
+    { commit: "3".repeat(40) }, { version: "PRIVATE CONTACT" }, { sampleSize: 0 }, { sampleSize: "2" },
+    { match: 3 }, { comparableCards: 0 }, { sourceAfterSha256: "PRIVATE CONTACT" }, { sourceChanged: true },
+    { differingProperties: ["PRIVATE EMAIL"] }, { expectedNonempty: { FN: "PRIVATE CONTACT" } },
+    { expectedShapeFlags: { nonAsciiName: "PRIVATE" } }, { wholeBookContentVerified: true }, { physicalDeviceVerified: true },
+  ]) {
+    const f = fixture({ shadowSummary }), response = await f.diagnostic(fixedWindow())
+    assert.equal(response.status, 503); assertPrivateDiagnostic(response); assertDiagnosticIsolation(f)
+    assert.doesNotMatch(await response.text(), /PRIVATE|CONTACT|EMAIL/)
   }
 })

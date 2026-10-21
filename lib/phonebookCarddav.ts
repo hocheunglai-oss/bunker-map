@@ -449,6 +449,131 @@ export function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+export type VCardContentComparison = {
+  status: "match" | "different" | "unsupported"
+  differingProperties: string[]
+}
+
+// Compare the actual fields we publish, not a hash supplied by the remote
+// card itself. Formatting/ordering is not content; unknown encodings are not
+// proof of successful delivery. No contact values are returned or logged.
+export function compareManagedVCard(expected: string, actual: string): VCardContentComparison {
+  const controlled = new Set(["UID", "FN", "N", "ORG", "TITLE", "TEL", "EMAIL", "NOTE", "CATEGORIES", "X-BUNKER-MAP-CONTACT-ID", "X-BUNKER-MAP-SYNC-HASH"])
+  const singleton = ["UID", "FN", "N", "ORG", "TITLE", "NOTE", "X-BUNKER-MAP-CONTACT-ID", "X-BUNKER-MAP-SYNC-HASH"]
+  const required = ["UID", "FN", "N", "X-BUNKER-MAP-CONTACT-ID", "X-BUNKER-MAP-SYNC-HASH"]
+  const invalid = (): never => { throw new Error("Unsupported vCard content.") }
+  const parts = (value: string, delimiter: string, quoted = false) => {
+    const values: string[] = []; let item = "", inQuotes = false
+    for (let index = 0; index < value.length; index += 1) {
+      const character = value[index]
+      if (character === "\\") {
+        if (++index >= value.length) invalid()
+        item += character + value[index]
+      } else if (quoted && character === '"') { inQuotes = !inQuotes; item += character }
+      else if (character === delimiter && !inQuotes) { values.push(item); item = "" }
+      else item += character
+    }
+    if (inQuotes) invalid()
+    values.push(item); return values
+  }
+  const text = (value: string) => {
+    let decoded = ""
+    for (let index = 0; index < value.length; index += 1) {
+      const character = value[index]
+      if (character === "\\") {
+        const escaped = value[++index]
+        if (!["\\", "n", "N", ",", ";"].includes(escaped)) invalid()
+        decoded += escaped === "n" || escaped === "N" ? "\n" : escaped
+      } else {
+        if (character === ";" || character === ",") invalid()
+        decoded += character
+      }
+    }
+    return decoded.normalize("NFC")
+  }
+  const unquote = (value: string) => {
+    if (value.startsWith('"') && value.endsWith('"')) return value.slice(1, -1)
+    if (value.includes('"')) invalid()
+    return value
+  }
+  const parse = (card: string) => {
+    if (Buffer.byteLength(card, "utf8") > 1_000_000 || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(card)) invalid()
+    const normalized = card.replace(/\r\n/g, "\n")
+    if (normalized.includes("\r")) invalid()
+    const lines = normalized.replace(/\n[ \t]/g, "").split("\n")
+    if (lines.at(-1) === "") lines.pop()
+    if (lines.length > 5000 || lines[0]?.toUpperCase() !== "BEGIN:VCARD" || lines.at(-1)?.toUpperCase() !== "END:VCARD") invalid()
+    const properties = new Map<string, string[]>(), counts = new Map<string, number>()
+    let versions = 0
+    for (const line of lines.slice(1, -1)) {
+      let colon = -1, inQuotes = false
+      for (let index = 0; index < line.length; index += 1) {
+        if (line[index] === '"') inQuotes = !inQuotes
+        else if (line[index] === ":" && !inQuotes) { colon = index; break }
+      }
+      if (colon < 1 || inQuotes) invalid()
+      const header = parts(line.slice(0, colon), ";", true)
+      const qualified = header.shift()!
+      if (!/^(?:[A-Za-z0-9-]+\.)?[A-Za-z0-9-]+$/.test(qualified)) invalid()
+      const name = qualified.split(".").at(-1)!.toUpperCase(), value = line.slice(colon + 1)
+      if (name === "BEGIN" || name === "END") invalid()
+      if (name === "VERSION") {
+        if (header.length || value !== "3.0") invalid()
+        versions += 1; continue
+      }
+      if (!controlled.has(name)) continue // REV/PRODID and provider-owned metadata.
+      const types = new Set<string>()
+      for (const parameter of header) {
+        const equal = parameter.indexOf("=")
+        if (equal < 1) invalid()
+        const key = parameter.slice(0, equal).toUpperCase(), raw = parameter.slice(equal + 1)
+        if (key === "TYPE" && (name === "TEL" || name === "EMAIL")) {
+          for (const group of parts(raw, ",", true)) for (const item of unquote(group).split(",")) {
+            if (!/^[A-Za-z0-9-]+$/.test(item)) invalid()
+            types.add(item.toUpperCase())
+          }
+        } else if (key === "VALUE") {
+          if (unquote(raw).toUpperCase() !== (name === "TEL" ? "PHONE-NUMBER" : "TEXT")) invalid()
+        } else if (key === "CHARSET") {
+          if (unquote(raw).toUpperCase() !== "UTF-8") invalid()
+        } else invalid()
+      }
+      if (name === "TEL" && types.size === 0) types.add("VOICE")
+      if (name === "EMAIL" && types.size === 0) types.add("INTERNET")
+      const key = name + (types.size ? ";TYPE=" + [...types].sort().join(",") : "")
+      let canonical: string
+      if (name === "N") {
+        const components = parts(value, ";").map((component) => parts(component, ",").map(text))
+        if (components.length > 5) invalid()
+        while (components.length < 5) components.push([""])
+        canonical = JSON.stringify(components)
+      } else if (name === "ORG") {
+        const components = parts(value, ";").map(text)
+        while (components.length > 1 && components.at(-1) === "") components.pop()
+        canonical = JSON.stringify(components)
+      } else if (name === "CATEGORIES") {
+        canonical = JSON.stringify([...new Set(parts(value, ",").map(text))].sort())
+      } else canonical = JSON.stringify(text(value))
+      properties.set(key, [...(properties.get(key) || []), canonical])
+      counts.set(name, (counts.get(name) || 0) + 1)
+    }
+    if (versions !== 1 || required.some((name) => counts.get(name) !== 1) || singleton.some((name) => (counts.get(name) || 0) > 1)) invalid()
+    // Exact duplicate phone/email values do not add an endpoint. A provider
+    // may deduplicate them; different values or different types remain distinct.
+    for (const [key, values] of properties) properties.set(key, [...new Set(values)].sort())
+    return properties
+  }
+  try {
+    const source = parse(expected), remote = parse(actual)
+    const keys = [...new Set([...source.keys(), ...remote.keys()])].sort()
+    const different = keys.filter((key) => JSON.stringify(source.get(key) || []) !== JSON.stringify(remote.get(key) || []))
+    return { status: different.length ? "different" : "match", differingProperties: [...new Set(different.map((key) => key.split(";", 1)[0]))] }
+  } catch {
+    return { status: "unsupported", differingProperties: [] }
+  }
+}
+
+
 export async function verifyContact(contact: PhonebookContact, syncHash: string) {
   const response = await cardDavRequest(cardHref(contact.id), {
     method: "GET",
