@@ -7,5 +7,9 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 COPY scripts/backup-google-drive-files-to-gcs.mjs ./scripts/backup-google-drive-files-to-gcs.mjs
+COPY scripts/backup-storage-media-to-gcs.mjs ./scripts/backup-storage-media-to-gcs.mjs
+COPY scripts/lib/storage-media-*.mjs ./scripts/lib/
+COPY config/fcunoConnections.ts ./config/fcunoConnections.ts
+COPY lib/storageMediaBackup.mjs lib/backupValidationSpool.mjs ./lib/
 
 CMD ["npm", "run", "backup:drive-files:gcs"]

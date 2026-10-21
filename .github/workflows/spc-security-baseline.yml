@@ -164,6 +164,13 @@ jobs:
           NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/spc-feedback*.test.ts 2>&1 | tee directory-feedback-tests.tap
           node --import tsx --test tests/ccinfo-index-sdk.test.mjs 2>&1 | tee directory-sdk-tests.tap
 
+      - name: Verify temporary storage backup identity streams copies and publication fences
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          FCUNO_MEDIA_REFERENCE_SCALE_TEST=1 node --max-old-space-size=256 --import tsx --test tests/storage-media-*.test.mjs tests/storage-media-backup-source.test.ts tests/backup-media-reference-stream.test.mjs 2>&1 | tee storage-media-backup-tests.tap
+
       - name: Verify streaming backup validation at full inventory scale
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
@@ -267,6 +274,7 @@ jobs:
             spc-operational-api-tests.tap
             directory-feedback-tests.tap
             directory-sdk-tests.tap
+            storage-media-backup-tests.tap
             backup-stream-tests.tap
             backup-protection-tests.tap
             backup-protection-sql-tests.tap
