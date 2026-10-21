@@ -218,6 +218,17 @@ not their bytes, and the Drive-to-GCS job does not copy that bucket. On
 an independent backup and restore test for those bytes was not established by
 this review. Do not treat a healthy Drive backup as proof of their recovery.
 
+**2026-10-21 follow-up:** a separate one-time snapshot copied all 15 media files
+(224,309,367 bytes) to private Google Cloud Storage. The copy's read-back and a
+second independent read-only check matched SHA-256 and CRC32C at the exact
+stored generations. Its manifest maps the snapshot to the two database
+archives retained at the time; historical file-version matching remains
+unproved. Temporary source access is off, no recurring media backup is
+scheduled, and System Health does not monitor this media snapshot. This was
+not a whole-database restore or a timed recovery rehearsal. See the
+[dated rollout evidence and limits](storage-media-backup-source-implementation.md#verified-one-time-rollout--2026-10-21)
+before relying on this snapshot.
+
 Google Calendar and Google Contacts remain their own live systems, although a
 current API export is included for investigation. Google Drive remains the live
 source for CCINFO file bytes; Google Cloud Storage is the independent copy.
