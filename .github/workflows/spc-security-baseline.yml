@@ -139,7 +139,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/spc-record-state-api.test.ts tests/spc-lost-reasons-and-today-enquiries.test.ts tests/spc-presentation-layout.test.ts tests/taiwan-remarks-save.test.ts tests/audit-log-supplier-visibility.test.ts tests/audit-browsing.test.ts tests/tech-stack-register.test.ts 2>&1 | tee state-integrity-tests.tap
+          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/spc-record-state-api.test.ts tests/spc-presentation-preservation.test.ts tests/spc-lost-reasons-and-today-enquiries.test.ts tests/spc-presentation-layout.test.ts tests/taiwan-remarks-save.test.ts tests/audit-log-supplier-visibility.test.ts tests/audit-browsing.test.ts tests/tech-stack-register.test.ts 2>&1 | tee state-integrity-tests.tap
 
       - name: Verify complete analytics snapshots and failure ownership
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -570,5 +570,126 @@ jobs:
         with:
           name: spc-live-security-baseline-${{ github.run_id }}
           path: live-security-baseline.txt
+          if-no-files-found: warn
+          retention-days: 90
+
+  native-spc-record-state:
+    name: Native SPC record state on PostgreSQL 17.6
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build the checksum-pinned owned PostgreSQL test runtime
+        shell: bash
+        env:
+          NATIVE_PG_BIN: ${{ runner.temp }}/fcuno-native-pg17.6/install/bin
+          NATIVE_PG_TMP_ROOT: ${{ runner.temp }}/fcuno-native-fixtures
+          NATIVE_PG_EVIDENCE: ${{ runner.temp }}/fcuno-native-record-evidence
+        run: |
+          set -euo pipefail
+          runtime_root="${RUNNER_TEMP}/fcuno-native-pg17.6"
+          mkdir -m 700 "$runtime_root" "$NATIVE_PG_TMP_ROOT" "$NATIVE_PG_EVIDENCE"
+          curl --disable --fail --location --proto '=https' --proto-redir '=https' --max-time 60 \
+            --output "$runtime_root/postgresql-17.6.tar.bz2" \
+            https://ftp.postgresql.org/pub/source/v17.6/postgresql-17.6.tar.bz2
+          printf '%s  %s\n' e0630a3600aea27511715563259ec2111cd5f4353a4b040e0be827f94cd7a8b0 "$runtime_root/postgresql-17.6.tar.bz2" \
+            | sha256sum --check --strict | tee "$NATIVE_PG_EVIDENCE/archive-check.log"
+          tar -xjf "$runtime_root/postgresql-17.6.tar.bz2" -C "$runtime_root"
+          cd "$runtime_root/postgresql-17.6"
+          timeout --signal=TERM --kill-after=5s 120s ./configure \
+            --prefix="$runtime_root/install" --without-readline --without-zlib --without-icu \
+            2>&1 | tee "$NATIVE_PG_EVIDENCE/configure.log"
+          timeout --signal=TERM --kill-after=5s 600s make -j2 \
+            2>&1 | tee "$NATIVE_PG_EVIDENCE/build.log"
+          timeout --signal=TERM --kill-after=5s 120s make -j2 install \
+            2>&1 | tee "$NATIVE_PG_EVIDENCE/install.log"
+          for command in postgres initdb pg_ctl psql createdb pg_dump; do
+            "$NATIVE_PG_BIN/$command" --version | tee -a "$NATIVE_PG_EVIDENCE/versions.log"
+            sha256sum "$NATIVE_PG_BIN/$command" | tee -a "$NATIVE_PG_EVIDENCE/binaries.sha256"
+          done
+
+      - name: Verify real record-state SQL and preserve cleanup evidence
+        shell: bash
+        env:
+          NATIVE_PG_BIN: ${{ runner.temp }}/fcuno-native-pg17.6/install/bin
+          NATIVE_PG_TMP_ROOT: ${{ runner.temp }}/fcuno-native-fixtures
+          NATIVE_PG_EVIDENCE: ${{ runner.temp }}/fcuno-native-record-evidence
+        run: |
+          set -euo pipefail
+          cleanup() {
+            original_status=$?
+            trap - EXIT INT TERM
+            set +e
+            env -i PATH="$PATH" NATIVE_PG_BIN="$NATIVE_PG_BIN" NATIVE_PG_TMP_ROOT="$NATIVE_PG_TMP_ROOT" NATIVE_PG_EVIDENCE="$NATIVE_PG_EVIDENCE" \
+              node --input-type=module <<'NODE'
+          import assert from "node:assert/strict"
+          import {existsSync,readFileSync,readdirSync,realpathSync,lstatSync,writeFileSync} from "node:fs"
+          import {join} from "node:path"
+          import {spawnSync} from "node:child_process"
+          const root=realpathSync(process.env.NATIVE_PG_TMP_ROOT),evidence=process.env.NATIVE_PG_EVIDENCE
+          const clusters=[]
+          let complete=true
+          for(const name of readdirSync(root).filter(name=>name.startsWith("fcuno-native-ccinfo-"))){
+            assert.match(name,/^fcuno-native-ccinfo-[A-Za-z0-9]+$/)
+            const path=join(root,name);assert.equal(realpathSync(path),path);assert.equal(lstatSync(path).uid,process.getuid())
+            const data=join(path,"data"),pidFile=join(data,"postmaster.pid"),wasRunning=existsSync(pidFile)
+            let stopped=null
+            if(wasRunning){
+              assert.equal(readFileSync(pidFile,"utf8").split("\n")[1],data)
+              stopped=spawnSync(join(process.env.NATIVE_PG_BIN,"pg_ctl"),["-D",data,"-m","fast","-w","stop"],{
+                env:{PATH:process.env.PATH,LANG:"C",LC_ALL:"C",PGPASSFILE:join(path,"no-personal-password-file")},encoding:"utf8",timeout:15000,
+              })
+              complete=false
+            }
+            const closed=!existsSync(pidFile),sockets=existsSync(join(path,"socket"))?readdirSync(join(path,"socket")):[]
+            if(!closed||sockets.length)complete=false
+            clusters.push({path,wasRunningAfterTest:wasRunning,stopped:stopped?{code:stopped.status,signal:stopped.signal,stdout:stopped.stdout,stderr:stopped.stderr}:null,postmasterPidAbsent:closed,sockets})
+          }
+          writeFileSync(join(evidence,"cleanup.json"),JSON.stringify({clusters,complete,observedAt:new Date().toISOString()},null,2)+"\n",{flag:"wx",mode:0o600})
+          assert.equal(clusters.length,1,"Exactly one owned native test cluster must execute")
+          assert.equal(complete,true,"The test must close its owned sessions and cluster itself")
+          NODE
+            cleanup_status=$?
+            if [ "$original_status" -ne 0 ]; then exit "$original_status"; fi
+            exit "$cleanup_status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          git rev-parse HEAD HEAD^{tree} | tee "$NATIVE_PG_EVIDENCE/source.log"
+          timeout --signal=TERM --kill-after=5s 180s env -i PATH="$PATH" LANG=C LC_ALL=C \
+            TMPDIR="$NATIVE_PG_TMP_ROOT" NATIVE_PG_BIN="$NATIVE_PG_BIN" NATIVE_PG_TMP_ROOT="$NATIVE_PG_TMP_ROOT" \
+            node --conditions=react-server --import tsx --test --test-reporter=tap tests/spc-record-state-native.test.mjs \
+            2>&1 | tee "$NATIVE_PG_EVIDENCE/native-record-state.tap"
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict"
+          import {readFileSync} from "node:fs"
+          const text=readFileSync(process.env.NATIVE_PG_EVIDENCE+"/native-record-state.tap","utf8")
+          for(const [name,expected] of [["tests",10],["pass",10],["fail",0],["cancelled",0],["skipped",0]]){
+            const values=[...text.matchAll(new RegExp("^# "+name+" (\\d+)","gm"))]
+            assert.equal(Number(values.at(-1)?.[1]),expected,name)
+          }
+          NODE
+
+      - name: Retain actual native SQL and cleanup evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-spc-record-state-${{ github.run_id }}
+          path: ${{ runner.temp }}/fcuno-native-record-evidence
           if-no-files-found: warn
           retention-days: 90

@@ -1,9 +1,10 @@
 import assert from "node:assert/strict"
 import { spawn, execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync } from "node:fs"
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { isAbsolute, join } from "node:path"
 import { createHash, randomUUID } from "node:crypto"
+import { tmpdir } from "node:os"
 
 const execute = promisify(execFile)
 export const literal = value => `'${String(value).replaceAll("'", "''")}'`
@@ -106,7 +107,14 @@ export async function setupNativeCcinfo(sql) {
   const environment = { PATH: process.env.PATH, LC_ALL: "C", LANG: "C", PGAPPNAME: "fcuno-owned-native-ccinfo-verification" }
   const version = (await execute(join(bin, "postgres"), ["--version"], { env: environment })).stdout.trim()
   assert.equal(version, "postgres (PostgreSQL) 17.6")
-  const root = mkdtempSync("/private/tmp/fcuno-native-ccinfo-")
+  const configuredTmpRoot = process.env.NATIVE_PG_TMP_ROOT
+  const tmpRoot = configuredTmpRoot ?? (process.platform === "darwin" ? "/private/tmp" : tmpdir())
+  assert.ok(isAbsolute(tmpRoot), "NATIVE_PG_TMP_ROOT must be an absolute owned test directory")
+  const canonicalTmpRoot = realpathSync(tmpRoot)
+  assert.ok(statSync(canonicalTmpRoot).isDirectory(), "Native test scratch root must be a directory")
+  const longestSocket = join(canonicalTmpRoot, "fcuno-native-ccinfo-XXXXXX", "socket", ".s.PGSQL.55489")
+  assert.ok(Buffer.byteLength(longestSocket) < 104, "Native test scratch root is too long for a portable UNIX socket")
+  const root = mkdtempSync(join(canonicalTmpRoot, "fcuno-native-ccinfo-"))
   environment.PGPASSFILE = join(root, "no-personal-password-file")
   const data = join(root, "data"), socket = join(root, "socket")
   mkdirSync(socket, { mode: 0o700 })

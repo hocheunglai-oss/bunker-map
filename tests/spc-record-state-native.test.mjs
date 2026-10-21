@@ -95,14 +95,14 @@ test("actual lost-record/presentation API on isolated PostgreSQL 17.6 preserves 
       const before=await state(f),app=nativeApp(f,"presentation"),result=await app.mutate({action:"delete",id:baseline.id,revision:1})
       assert.equal(result.status,409);assert.deepEqual(await state(f),before);assert.deepEqual(app.removes,[])
     })
-    await t.test("current presentation DELETE returns its exact paths once and preserves audited/fenced semantics",async()=>{
+    await t.test("current presentation DELETE preserves physical media and audited/fenced semantics",async()=>{
       const baseline=await seed(f,"presentation"),before=await state(f),app=nativeApp(f,"presentation")
       assert.equal((await app.mutate({action:"delete",id:baseline.id,revision:1})).status,200)
       const after=await state(f);assert.equal(after.chunks.length,before.chunks.length-1);assert.equal(after.audit.length,before.audit.length+1);assert.ok(after.epochs.length>before.epochs.length)
-      assert.deepEqual(app.removes,[[baseline.id+"/video-original.mp4"]])
+      assert.deepEqual(app.removes,[])
       assert.equal(after.audit.at(-1).request_context.actorUserId,undefined)
       assert.equal(after.audit.at(-1).actor_user_id,"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
-      const again=await app.mutate({action:"delete",id:baseline.id,revision:1});assert.equal(again.status,409);assert.deepEqual(await state(f),after);assert.equal(app.removes.length,1)
+      const again=await app.mutate({action:"delete",id:baseline.id,revision:1});assert.equal(again.status,409);assert.deepEqual(await state(f),after);assert.equal(app.removes.length,0)
     })
     await t.test("trigger-suppressed review UPDATE and presentation DELETE refuse success and roll back audit/fence",async()=>{
       for(const kind of ["lost","presentation"]){
@@ -119,11 +119,11 @@ test("actual lost-record/presentation API on isolated PostgreSQL 17.6 preserves 
       const committed=await state(f),row=committed.chunks.find(row=>row.id===baseline.id)
       assert.equal(row.video_path,payload.path);assert.equal(row.video_bytes,321);assert.equal(row.revision,2);assert.equal(row.media_version,2)
       const replay=await app.mutate(payload);assert.equal(replay.status,200,JSON.stringify(replay));assert.equal(replay.body.chunk.videoBytes,321);assert.equal(replay.body.chunk.revision,2)
-      assert.deepEqual(await state(f),committed);assert.deepEqual(app.removes,[[baseline.id+"/video-original.mp4"]])
+      assert.deepEqual(await state(f),committed);assert.deepEqual(app.removes,[])
       await f.owner.query("update public.spc_presentation_chunks set revision=3,title='Later colleague edit' where id="+literal(baseline.id)+";")
-      const newer=await state(f);assert.equal((await app.mutate(payload)).status,409);assert.deepEqual(await state(f),newer);assert.equal(app.removes.length,1)
+      const newer=await state(f);assert.equal((await app.mutate(payload)).status,409);assert.deepEqual(await state(f),newer);assert.equal(app.removes.length,0)
     })
-    await t.test("audit INSERT exception rolls back each operation before media cleanup",async()=>{
+    await t.test("audit INSERT exception rolls back each operation without physical media removal",async()=>{
       for(const kind of ["lost","presentation"]){
         const baseline=await seed(f,kind)
         await f.owner.query("create or replace function public.fail_record_audit() returns trigger language plpgsql as $$ begin raise exception 'Synthetic audit failure';end $$;create trigger fail_record_audit before insert on public.audit_logs for each row execute function public.fail_record_audit();")

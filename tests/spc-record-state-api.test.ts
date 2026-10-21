@@ -44,12 +44,12 @@ test("presentation deletion rejects stale/legacy clients, permissions and missin
     assert.equal(response.status,status);assert.equal(db.writes.length,0);assert.equal(db.removes.length,0)
   }
 })
-test("presentation deletion uses one exact revision DELETE and only that returned row's paths; retries do not delete again",async()=>{
+test("presentation deletion uses one exact revision DELETE while preserving physical media; retries do not mutate again",async()=>{
   const db=recordStateMemory(),app=createRecordStateRoute({kind:"presentation",createClient:db.client}),payload={action:"delete",id:presentationRow.id,revision:1}
   assert.equal((await app.mutate(payload)).status,200);assert.equal(db.writes.length,1)
   assert.deepEqual(db.writes[0].filters,[["id",presentationRow.id],["revision",1]])
-  assert.deepEqual(db.removes,[[presentationRow.video_path]])
-  assert.equal((await app.mutate(payload)).status,409);assert.equal(db.writes.length,1);assert.equal(db.removes.length,1)
+  assert.deepEqual(db.removes,[])
+  assert.equal((await app.mutate(payload)).status,409);assert.equal(db.writes.length,1);assert.equal(db.removes.length,0)
 })
 test("presentation delete cannot remove a revision updated just before its DML",async()=>{
   const db=recordStateMemory({beforeWrite:async()=>{db.rows.spc_presentation_chunks[0].revision=2;db.rows.spc_presentation_chunks[0].video_path="new-media.mp4"}})
