@@ -578,10 +578,6 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      NATIVE_PG_BIN: ${{ runner.temp }}/fcuno-native-pg17.6/install/bin
-      NATIVE_PG_TMP_ROOT: ${{ runner.temp }}/fcuno-native-fixtures
-      NATIVE_PG_EVIDENCE: ${{ runner.temp }}/fcuno-native-record-evidence
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -599,6 +595,10 @@ jobs:
 
       - name: Build the checksum-pinned owned PostgreSQL test runtime
         shell: bash
+        env:
+          NATIVE_PG_BIN: ${{ runner.temp }}/fcuno-native-pg17.6/install/bin
+          NATIVE_PG_TMP_ROOT: ${{ runner.temp }}/fcuno-native-fixtures
+          NATIVE_PG_EVIDENCE: ${{ runner.temp }}/fcuno-native-record-evidence
         run: |
           set -euo pipefail
           runtime_root="${RUNNER_TEMP}/fcuno-native-pg17.6"
@@ -624,6 +624,10 @@ jobs:
 
       - name: Verify real record-state SQL and preserve cleanup evidence
         shell: bash
+        env:
+          NATIVE_PG_BIN: ${{ runner.temp }}/fcuno-native-pg17.6/install/bin
+          NATIVE_PG_TMP_ROOT: ${{ runner.temp }}/fcuno-native-fixtures
+          NATIVE_PG_EVIDENCE: ${{ runner.temp }}/fcuno-native-record-evidence
         run: |
           set -euo pipefail
           cleanup() {
