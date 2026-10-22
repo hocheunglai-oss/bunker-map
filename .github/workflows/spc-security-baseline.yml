@@ -221,6 +221,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          export FCUNO_PWSH_PATH="$(command -v pwsh)"
           npm run test:exchange-worker 2>&1 | tee exchange-worker-tests.txt
 
       - name: Audit production dependencies
