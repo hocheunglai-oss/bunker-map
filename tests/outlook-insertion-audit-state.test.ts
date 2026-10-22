@@ -12,7 +12,7 @@ const migrationFile = new URL(
   import.meta.url,
 )
 const activeSyncContinuityMigrationFile = new URL(
-  "../supabase/migrations/20260825045312_keep_outlook_templates_available_during_sync.sql",
+  "../supabase/migrations/20261022024949_bound_outlook_insertion_reservation_verification.sql",
   import.meta.url,
 )
 const auditBaselineFile = new URL("../supabase/audit_log.sql", import.meta.url)

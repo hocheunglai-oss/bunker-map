@@ -8,6 +8,7 @@ export const revalidate = 0
 const RECIPIENT_MAP_TTL_SECONDS = 120
 const DEFAULT_CERTIFICATION_MAX_AGE_SECONDS = 36 * 60 * 60
 const MAX_CERTIFICATION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+const INSERTION_AUDIT_RPC_TIMEOUT_MS = 12_000
 const OUTLOOK_SHELL_BROWSER_CACHE_CONTROL =
   "public, max-age=0, must-revalidate"
 const OUTLOOK_SHELL_EDGE_CACHE_CONTROL =
@@ -109,6 +110,51 @@ function insertionAuditSuccess(phase: InsertionAuditPhase) {
   })
 }
 
+function runInsertionAuditRpc<T>(
+  request: Request,
+  operation: (signal: AbortSignal) => PromiseLike<T>,
+): Promise<T> {
+  const controller = new AbortController()
+  const deadline = Date.now() + INSERTION_AUDIT_RPC_TIMEOUT_MS
+  return new Promise<T>((resolve, reject) => {
+    let settled = false
+    const cleanup = () => {
+      clearTimeout(timer)
+      request.signal.removeEventListener("abort", expire)
+    }
+    const expire = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      controller.abort()
+      reject(new Error("Insertion audit request did not complete in time."))
+    }
+    const timer = setTimeout(expire, INSERTION_AUDIT_RPC_TIMEOUT_MS)
+    request.signal.addEventListener("abort", expire, { once: true })
+    if (request.signal.aborted) { expire(); return }
+    Promise.resolve().then(() => {
+      if (settled || controller.signal.aborted) {
+        throw new Error("Insertion audit request did not complete in time.")
+      }
+      return operation(controller.signal)
+    }).then(
+      value => {
+        if (settled) return
+        if (request.signal.aborted || Date.now() >= deadline) { expire(); return }
+        settled = true
+        cleanup()
+        resolve(value)
+      },
+      error => {
+        if (settled) return
+        settled = true
+        cleanup()
+        reject(error)
+      },
+    )
+  })
+}
+
 export async function POST(request: Request) {
   try {
     const session = await requireOutlookAddinPagePermissionForRequest(
@@ -190,7 +236,7 @@ export async function POST(request: Request) {
     const typedOutcome = outcome as InsertionAuditOutcome | null
 
     if (typedPhase === "reserved") {
-      const { error: reservationError } = await auditClient.rpc(
+      const { error: reservationError } = await runInsertionAuditRpc(request, signal => auditClient.rpc(
         "reserve_outlook_template_insertion",
         {
           p_operation_id: attemptIdentity.operationId,
@@ -202,7 +248,7 @@ export async function POST(request: Request) {
           p_actor_name: session.displayName || actorId,
           p_certification_max_age_seconds: certificationMaxAgeSeconds(),
         },
-      )
+      ).abortSignal(signal))
       if (!reservationError) {
         return insertionAuditSuccess("reserved")
       }
@@ -250,7 +296,7 @@ export async function POST(request: Request) {
       throw reservationError
     }
 
-    const { error: terminalError } = await auditClient.rpc(
+    const { error: terminalError } = await runInsertionAuditRpc(request, signal => auditClient.rpc(
       "complete_outlook_template_insertion",
       {
         p_operation_id: attemptIdentity.operationId,
@@ -262,7 +308,7 @@ export async function POST(request: Request) {
         p_actor_name: session.displayName || actorId,
         p_outcome: typedOutcome!,
       },
-    )
+    ).abortSignal(signal))
     if (!terminalError) {
       return insertionAuditSuccess("terminal")
     }
@@ -535,6 +581,8 @@ export async function GET(request: Request) {
         var INDEX_CACHE_SCHEMA = "fcuno.outlook-template-index-cache/v1";
         var RECIPIENT_CACHE_SCHEMA = "fcuno.outlook-recipient-map-cache/v1";
         var INDEX_CACHE_TTL_MS = 2 * 60 * 1000;
+        var INSERTION_AUDIT_ATTEMPT_TIMEOUT_MS = 15000;
+        var INSERTION_AUDIT_OVERALL_TIMEOUT_MS = 35000;
         var state = {
           templates: [],
           detailCache: {},
@@ -545,6 +593,7 @@ export async function GET(request: Request) {
           recipientMapExpiresAt: 0,
           recipientCertification: null,
           recipientMapPromise: null,
+          recipientMapGeneration: 0,
           folderRoot: null,
           folderIndex: {},
           expanded: { "": true },
@@ -885,6 +934,9 @@ export async function GET(request: Request) {
             headers: headers
           });
           var response = await fetch(url, requestOptions);
+          if (requestOptions.signal && requestOptions.signal.aborted) {
+            throw insertionAuditTimeoutError();
+          }
           var context = {
             generation: generation,
             mode: state.authMode,
@@ -1452,6 +1504,7 @@ export async function GET(request: Request) {
         }
 
         function clearRecipientMap(removeStoredCache) {
+          state.recipientMapGeneration += 1;
           state.recipientsBySourceKey = {};
           state.recipientMapLoaded = false;
           state.recipientMapFromNetwork = false;
@@ -1604,6 +1657,7 @@ export async function GET(request: Request) {
           }
 
           var requestGeneration = state.authGeneration;
+          var mapGeneration = state.recipientMapGeneration;
           var recipientRequest = (async function () {
             var result = await authenticatedFetch(RECIPIENT_MAP_URL);
             if (!result.response.ok) {
@@ -1611,6 +1665,9 @@ export async function GET(request: Request) {
             }
             var data = await result.response.json();
             assertAuthRequestCurrent(result.context);
+            if (mapGeneration !== state.recipientMapGeneration) {
+              throw new Error("The certified recipient map changed. Select the template again.");
+            }
             if (!state.authenticated) {
               throw new Error("Sign in to FC Uno before loading recipients.");
             }
@@ -1626,7 +1683,8 @@ export async function GET(request: Request) {
             return state.recipientsBySourceKey;
           })()
             .catch(function (error) {
-              if (requestGeneration === state.authGeneration) {
+              if (requestGeneration === state.authGeneration &&
+                  mapGeneration === state.recipientMapGeneration) {
                 clearRecipientMap();
               }
               throw error;
@@ -2041,6 +2099,43 @@ export async function GET(request: Request) {
           });
         }
 
+        function insertionAuditTimeoutError() {
+          var error = new Error("FC Uno could not confirm the insertion request in time. Please try again.");
+          error.auditRetryable = true;
+          return error;
+        }
+
+        function withinInsertionAuditDeadline(operation, timeoutMs) {
+          var controller = new AbortController();
+          var deadline = Date.now() + timeoutMs;
+          return new Promise(function (resolve, reject) {
+            var settled = false;
+            function expire() {
+              if (settled) return;
+              settled = true;
+              window.clearTimeout(timer);
+              controller.abort();
+              reject(insertionAuditTimeoutError());
+            }
+            var timer = window.setTimeout(expire, timeoutMs);
+            Promise.resolve().then(function () {
+              if (settled || controller.signal.aborted) throw insertionAuditTimeoutError();
+              return operation(controller.signal);
+            }).then(function (value) {
+              if (settled) return;
+              if (Date.now() >= deadline) { expire(); return; }
+              settled = true;
+              window.clearTimeout(timer);
+              resolve(value);
+            }, function (error) {
+              if (settled) return;
+              settled = true;
+              window.clearTimeout(timer);
+              reject(error);
+            });
+          });
+        }
+
         function createInsertionAuditContext(template, operationId) {
           var certification = state.recipientCertification || {};
           var certificationRunId = String(
@@ -2071,14 +2166,26 @@ export async function GET(request: Request) {
           };
         }
 
+        function invalidateInsertionDependencies(templateId) {
+          Object.keys(state.detailCache).forEach(function (key) {
+            if (state.detailCache[key] && state.detailCache[key].id === templateId) {
+              delete state.detailCache[key];
+            }
+          });
+          clearRecipientMap();
+        }
+
         async function recordInsertionAuditEvent(auditContext, phase, outcome) {
           var auditGeneration = auditContext.authGeneration;
           var retryDelays = [250, 700];
           var lastError = null;
+          var auditDeadline = Date.now() + INSERTION_AUDIT_OVERALL_TIMEOUT_MS;
           for (var attempt = 0; attempt < 3; attempt += 1) {
             if (auditGeneration !== state.authGeneration) {
               throw new Error("The FC Uno sign-in changed before the insertion attempt could be audited.");
             }
+            var remainingMs = auditDeadline - Date.now();
+            if (remainingMs <= 0) throw insertionAuditTimeoutError();
             try {
               var auditPayload = {
                 phase: phase,
@@ -2089,11 +2196,18 @@ export async function GET(request: Request) {
                 sourceFingerprint: auditContext.sourceFingerprint
               };
               if (phase === "terminal") auditPayload.outcome = outcome;
-              var result = await authenticatedFetch(INSERTION_AUDIT_URL, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(auditPayload)
-              });
+              var result = await withinInsertionAuditDeadline(async function (signal) {
+                var fetched = await authenticatedFetch(INSERTION_AUDIT_URL, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(auditPayload),
+                  signal: signal
+                });
+                var errorData = fetched.response.ok ? null : await fetched.response.json().catch(function () {
+                  return {};
+                });
+                return { response: fetched.response, context: fetched.context, errorData: errorData };
+              }, Math.min(INSERTION_AUDIT_ATTEMPT_TIMEOUT_MS, remainingMs));
               if (result.response.ok) {
                 assertAuthRequestCurrent(result.context);
                 if (
@@ -2109,10 +2223,12 @@ export async function GET(request: Request) {
                 }
                 return;
               }
-              var errorData = await result.response.json().catch(function () {
-                return {};
-              });
+              var errorData = result.errorData || {};
               assertAuthRequestCurrent(result.context);
+              if (errorData.code === "TEMPLATE_REVISION_CHANGED" ||
+                  errorData.code === "INSERT_CERTIFICATION_CHANGED") {
+                invalidateInsertionDependencies(auditContext.templateId);
+              }
               var retryable =
                 errorData.code === "INSERT_RESERVATION_BUSY" ||
                 result.response.status === 429 ||
@@ -2129,11 +2245,14 @@ export async function GET(request: Request) {
               if (lastError.auditRetryable === false ||
                   !state.authenticated ||
                   auditGeneration !== state.authGeneration ||
+                  Date.now() >= auditDeadline ||
                   attempt >= retryDelays.length) {
                 throw lastError;
               }
             }
-            await waitForRetry(retryDelays[attempt]);
+            var retryDelay = retryDelays[attempt];
+            if (Date.now() + retryDelay >= auditDeadline) throw insertionAuditTimeoutError();
+            await waitForRetry(retryDelay);
           }
           throw lastError || new Error("The insertion attempt audit could not be recorded.");
         }
@@ -2206,7 +2325,7 @@ export async function GET(request: Request) {
           var auditContext = null;
           try {
             var prepared = await Promise.all([
-              loadTemplateDetail(state.selectedId, false),
+              loadTemplateDetail(state.selectedId, true),
               loadRecipientMap(true)
             ]);
             var template = prepared[0];

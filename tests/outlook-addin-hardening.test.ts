@@ -239,7 +239,7 @@ test("taskpane caches are versioned, bounded, and never authorize insertion offl
     /!state\.recipientMapFromNetwork[\s\S]*state\.recipientMapExpiresAt <= Date\.now\(\)/,
   )
   assert.match(taskpane, /loadRecipientMap\(true\)/)
-  assert.match(taskpane, /loadTemplateDetail\(state\.selectedId, false\)/)
+  assert.match(taskpane, /loadTemplateDetail\(state\.selectedId, true\)/)
   assert.match(taskpane, /cache: "no-store"/)
   assert.match(taskpane, /credentials: state\.authMode === "cookie" \? "include" : "omit"/)
   assert.match(taskpane, /headers\.Authorization = "Bearer " \+ session\.token/)
