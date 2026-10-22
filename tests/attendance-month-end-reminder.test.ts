@@ -2,7 +2,11 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { getOpenAnnualAttendancePunchAnomalyCount } from "../lib/attendanceData"
+import {
+  buildAttendanceMonthEndReviewEmail,
+  buildAttendanceSecondReminderEmail,
+  getOpenAnnualAttendancePunchAnomalyCount,
+} from "../lib/attendanceData"
 import {
   hongKongWorkingDayNumber,
   isLastHongKongWorkingDay,
@@ -69,10 +73,36 @@ test("single email gives confirmation instructions, deadline, and dispute rights
   assert.match(data, /select <strong>MONTHLY STATEMENT<\/strong>/)
   assert.match(data, /click <strong>CONFIRM<\/strong>/)
   assert.match(data, /Open Attendance Record/)
-  assert.match(data, /18:00 HKT on the third Hong Kong working day/)
+  assert.match(data, /after the 18:00 HKT deadline on the third Hong Kong working day/)
   assert.match(data, /No further reminder will be sent/)
   assert.match(data, /SYSTEM CONFIRMED/)
   assert.match(data, /contact an administrator directly/)
+})
+
+test("month-end review describes next month's deadline without promising exact execution time", () => {
+  const email = buildAttendanceMonthEndReviewEmail({ displayName: "Test User", year: 2026, month: 10 })
+  assert.equal(email.subject, "***** Attendance Review Reminder - October 2026")
+  assert.match(email.html, /A second reminder will be sent on the first Hong Kong working day of the next month/)
+  assert.match(email.html, /after the 18:00 HKT deadline on the third Hong Kong working day of that month, once attendance synchronization has been verified/)
+  assert.doesNotMatch(email.html, /SYSTEM CONFIRMED<\/strong> at 18:00|18:10|10:10/)
+  assert.match(email.html, /SYSTEM CONFIRMED/)
+  assert.match(email.html, /does not remove your right to dispute/)
+  assert.match(email.html, /contact an administrator directly/)
+  assert.match(email.html, /href="https:\/\/fcuno\.com\/admin\/attendancerecord"/)
+})
+
+test("confirmation reminder keeps instructions and dispute rights while distinguishing deadline from execution", () => {
+  const email = buildAttendanceSecondReminderEmail({ displayName: "Test User", year: 2026, month: 10 })
+  assert.equal(email.subject, "***** Attendance Confirmation Reminder - October 2026")
+  assert.match(email.html, /after the 18:00 HKT deadline on the third Hong Kong working day of this month, once attendance synchronization has been verified/)
+  assert.doesNotMatch(email.html, /SYSTEM CONFIRMED<\/strong> at 18:00|18:10|10:10/)
+  assert.match(email.html, /select <strong>MONTHLY STATEMENT<\/strong>/)
+  assert.match(email.html, /click <strong>CONFIRM<\/strong>/)
+  assert.match(email.html, /No further reminder will be sent/)
+  assert.match(email.html, /does not mean that you personally approved every entry/)
+  assert.match(email.html, /does not remove your right to dispute/)
+  assert.match(email.html, /contact an administrator directly/)
+  assert.match(email.html, /href="https:\/\/fcuno\.com\/admin\/attendancerecord"/)
 })
 
 test("all eligible users receive the reminder and system confirmation remains distinct", () => {
