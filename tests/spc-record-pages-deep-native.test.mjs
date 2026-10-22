@@ -150,12 +150,12 @@ test("actual record RPC, SDK and API coherent completeness, adversarial parity a
       await f.owner.query(reset + seedRecordPagesSql(251))
       const original = await f.owner.one(rpcSql("lost")), cursor = original.nextCursor
       await f.owner.query(`update public.spc_enquiries set title='CONTENT CHANGED' where id=${literal(original.rows.at(-1).id)};`)
-      await expectedFailure(rpcSql("lost", cursor), "40001")
+      await expectedFailure(rpcSql("lost", cursor), "P0001")
       const refreshed = await f.owner.one(rpcSql("lost"))
       await f.owner.query(`delete from public.spc_enquiries where id=${literal(refreshed.rows[0].id)};` + seedRecordPagesSql(1).replaceAll("'record-'", "'replacement-'"))
-      await expectedFailure(rpcSql("lost", refreshed.nextCursor), "40001")
+      await expectedFailure(rpcSql("lost", refreshed.nextCursor), "P0001")
       const current = await f.owner.one(rpcSql("lost"))
-      for (const change of [{ kind: "today" }, { day: "1999-01-01" }, { revision: "a".repeat(64) }, { id: todayId(9999999) }]) await expectedFailure(rpcSql("lost", { ...current.nextCursor, ...change }), "40001")
+      for (const change of [{ kind: "today" }, { day: "1999-01-01" }, { revision: "a".repeat(64) }, { id: todayId(9999999) }]) await expectedFailure(rpcSql("lost", { ...current.nextCursor, ...change }), "P0001")
       await expectedFailure(rpcSql("lost", { ...current.nextCursor, id: current.rows[0].id, createdAt: current.rows[0].created_at }), "22023")
     })
 

@@ -1,4 +1,5 @@
 import type { SpcSession } from "@/lib/spcAuth"
+import { SpcLocalWriteConflict } from "@/lib/spcWriteErrors"
 import { createSpcAuditContext, createSpcAuditedSupabaseClient } from "@/lib/spcAudit"
 import {
   formatSpcEnquiry,
@@ -496,7 +497,7 @@ async function loadFixtureRow(
     .eq("id", id)
     .single()
   if (error?.code === "PGRST116") {
-    throw Object.assign(new Error("This fixture is no longer available. Refresh and review the latest fixtures."), { code: "40001" })
+    throw new SpcLocalWriteConflict("This fixture is no longer available. Refresh and review the latest fixtures.")
   }
   if (error) throw error
   return data as unknown as SpcFixtureRow

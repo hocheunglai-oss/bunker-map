@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { readFileSync } from "node:fs"
 import { createSpcStemRoute, enquiry, stemPayload, users } from "./fixtures/spc-stem-api.mjs"
+import { currentSpcWriteDefinition } from "./fixtures/spc-write-conflicts-sql.mjs"
 
 function harness(options: Record<string, unknown> = {}) {
   const calls: Array<Record<string, unknown>> = []
@@ -78,7 +79,7 @@ test("actual STEM API makes one audited aggregate RPC with exact microsecond ver
 })
 
 test("actual STEM API maps transactional conflict, invalid input and ownership errors to actionable HTTP statuses", async () => {
-  for (const [code, status] of [["40001", 409], ["22023", 400], ["42501", 403]] as const) {
+  for (const [code, status] of [["40001", 500], ["22023", 400], ["42501", 403]] as const) {
     const app = harness({ rpcError: { code, message: "Synthetic transaction rejected" } })
     assert.equal((await app.patch()).status, status)
     assert.equal(app.calls.length, 1)
@@ -117,9 +118,8 @@ test("STEM UI captures source version and keeps a stable UUID on retry; changing
 })
 
 test("fresh SPC schema and forward migration define the identical atomic STEM boundary", () => {
-  const migration = readFileSync(new URL("../supabase/migrations/20261014112636_atomic_spc_stem_fixture.sql", import.meta.url), "utf8")
   const baseline = readFileSync(new URL("../supabase/spc_schema.sql", import.meta.url), "utf8")
-  assert.ok(baseline.includes(migration.trim()))
+  assert.ok(baseline.includes(currentSpcWriteDefinition("stem_spc_enquiry_with_fixture")))
 })
 
 test("actual legacy fixture-note API rejects old clients without an exact saved source version", async () => {

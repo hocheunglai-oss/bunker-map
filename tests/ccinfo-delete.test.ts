@@ -6,6 +6,7 @@ import ts from "typescript"
 import { createAdminAuditContext } from "../lib/adminAudit"
 import * as deletion from "../lib/ccinfoDelete"
 import { ccinfoLegacyContentWriteMessage } from "../lib/ccinfoSave"
+import * as operationErrors from "../lib/ccinfoOperationErrors"
 
 const id="11111111-1111-4111-8111-111111111111",version="2099-10-12T00:00:00.123456Z"
 const input:deletion.CcinfoDeleteRequest={kind:"company",id,expectedUpdatedAt:version,deletePorts:false}
@@ -71,6 +72,7 @@ function api({permission="edit",data=receipt,error=null as {code:string}|null,se
     "@/lib/adminAuth":{requireAdminPagePermission:async(page:string,access:string)=>{calls.push({page,access});if(permission==="anonymous")throw Error("Unauthorized");if(permission!=="edit")throw Error("Forbidden");return {authenticated:true,resetRequired:false,username:"SYNTHETIC SERVER USER",displayName:"Synthetic Server User",role:"STAFF",permissions:{ccinfo:"edit"},pages:[]}}},
     "@/lib/adminAudit":{createAdminAuditContext,createAdminAuditedSupabaseClient:(context:unknown)=>{contexts.push(context);return {rpc:async(name:string,args:unknown)=>{rpc.push({name,args});return {data,error}}}}},
     "@/lib/ccinfoDelete":deletion,
+    "@/lib/ccinfoOperationErrors":operationErrors,
   }
   const mod:{exports:{POST?:(request:Request)=>Promise<Response>}}={exports:{}}
   const code=transformSync(readFileSync(new URL("../app/api/ccinfo/delete-record/route.ts",import.meta.url),"utf8"),{loader:"ts",format:"cjs",target:"node24"}).code
@@ -93,7 +95,7 @@ test("actual deletion API authorizes exact CCINFO Edit first, pins trusted audit
 })
 
 test("actual API stale/ambiguous/missingbaseline/auditfail/unavailable/invalidACK responses stay private and cannot claim Deleted",async()=>{
-  for(const [code,status] of [["40001",409],["23514",409],["55P03",409],["40P01",409],["22023",400],["P0001",503]] as const) {
+  for(const [code,status] of [["40001",503],["23514",409],["55P03",409],["40P01",409],["22023",400],["P0001",503]] as const) {
     const response=await api({error:{code}}).request()
     assert.equal(response.status,status);assert.equal(response.headers.get("cache-control"),"private, no-store")
     assert.equal(Object.hasOwn(await response.json(),"deletion"),false)

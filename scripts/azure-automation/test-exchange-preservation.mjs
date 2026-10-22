@@ -44,8 +44,16 @@ for (const file of [
 // This separate fixture permits only its own127.0.0.1 HTTP server. It imports
 // -LibraryOnly with synthetic settings, clean child environments and no SMTP
 // or Exchange connection, and proves the actual PowerShell timeout behavior.
-const localHttp = spawnSync(process.execPath, ["--test", fileURLToPath(new URL("../../tests/exchange-supabase-timeouts-local.test.mjs", import.meta.url))], {
+const localHttp = spawnSync(process.execPath, ["--test", "--test-reporter=tap", fileURLToPath(new URL("../../tests/exchange-supabase-timeouts-local.test.mjs", import.meta.url))], {
   stdio: "inherit", timeout: 30000,
   env: { ...process.env, FCUNO_PWSH_PATH: executable },
 })
 if (localHttp.error || localHttp.status !== 0) throw new Error("Exchange loopback REST timeout regression failed", { cause: localHttp.error })
+
+// Keep native JSON-date transport separate from guarded mock-only fixtures.
+// This suite also permits only its owned loopback server and synthetic settings.
+const localDates = spawnSync(process.execPath, ["--test", "--test-reporter=tap", fileURLToPath(new URL("../../tests/exchange-certified-timestamps-local.test.mjs", import.meta.url))], {
+  stdio: "inherit", timeout: 120000,
+  env: { ...process.env, FCUNO_PWSH_PATH: executable },
+})
+if (localDates.error || localDates.status !== 0) throw new Error("Exchange certified timestamp transport regression failed", { cause: localDates.error })

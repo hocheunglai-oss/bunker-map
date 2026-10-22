@@ -39,7 +39,7 @@ export function createRecordPageRoute({ kind = "lost", enquiries = [], fixtures 
               .sort((a, b) => { const at = Date.parse(a.created_at) - Date.parse(b.created_at); return at ? at * (kind === "lost" ? -1 : 1) : a.id < b.id ? -1 : a.id > b.id ? 1 : 0 })
             const mainRevision = createHash("sha256").update(JSON.stringify(all)).digest("hex"), cursor = args.p_cursor, size = args.p_page_size
             const boundary = cursor ? all.findIndex(row => row.id === cursor.id && Date.parse(row.created_at) === Date.parse(cursor.createdAt)) : -1
-            if (cursor && (cursor.revision !== mainRevision || cursor.day !== day || boundary < 0 || (boundary + 1) % size)) return Response.json({ code: "40001", message: "Refresh required" }, { status: 409 })
+            if (cursor && (cursor.revision !== mainRevision || cursor.day !== day || boundary < 0 || (boundary + 1) % size)) return Response.json({ code: "P0001", message: "SPC_RECORD_PAGE_REFRESH_REQUIRED" }, { status: 400 })
             const start = boundary + 1, rows = all.slice(start, start + size), last = rows.at(-1)
             const sourceFixtures = kind === "today" ? fixtures.filter(row => row.fixture_status === "completed") : []
             const lost = kind === "today" ? enquiries.filter(row => row.status === "cancelled").map(({ id, vessel_name, notes, created_at, updated_at }) => ({ id, vessel_name, notes, created_at, updated_at })) : []

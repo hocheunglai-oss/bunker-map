@@ -34,8 +34,7 @@ export function computeEmailTemplateLibraryRevision(
 
 export function isEmailTemplateConflict(error: unknown) {
   const candidate = (error || {}) as SupabaseErrorLike
-  const message = `${candidate.message || ""} ${candidate.details || ""}`.toUpperCase()
-  return candidate.code === "40001" ||
-    candidate.code === "23505" ||
-    message.includes("EMAIL_TEMPLATE_CONFLICT")
+  return candidate.code === "23505" ||
+    ((candidate.code === "P0001" || candidate.code === "40001") &&
+      candidate.message === "EMAIL_TEMPLATE_CONFLICT")
 }

@@ -198,18 +198,6 @@ function getExplicitPermissions(permissions: unknown) {
   )
 }
 
-function getPermissionMetadata(permissions: unknown) {
-  if (!permissions || typeof permissions !== "object") return {}
-
-  return Object.entries(permissions as Record<string, unknown>).reduce<Record<string, unknown>>(
-    (next, [key, value]) => {
-      if (key.startsWith("__")) next[key] = value
-      return next
-    },
-    {}
-  )
-}
-
 function getStoredAdminRole(row: Pick<AdminUserRow, "role" | "permissions">) {
   const metadataRole = row.permissions?.[ADMIN_ROLE_METADATA_KEY]
   return normaliseAdminRole(
@@ -843,24 +831,8 @@ export async function saveManagedAdminRoleDefault(
     const memberRows = ((usersResult.data || []) as unknown as AdminUserRow[])
       .filter((row) => getStoredAdminRole(row) === role)
 
-    await Promise.all(
-      memberRows.map(async (row) => {
-        const nextPermissions = {
-          ...getPermissionMetadata(row.permissions),
-          ...permissions,
-          [ADMIN_ROLE_METADATA_KEY]: role,
-        }
-        const { error } = await supabase
-          .from("admin_users")
-          .update({
-            permissions: nextPermissions,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", row.id)
-
-        if (error) throw error
-      })
-    )
+    // Persisted group defaults are authoritative when authorization loads.
+    // This read is a member-count snapshot, not a plan to rewrite user metadata.
 
     return {
       role,

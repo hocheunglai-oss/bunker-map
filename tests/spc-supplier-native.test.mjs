@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto"
 import { setupNativeCcinfo, literal } from "./fixtures/native-postgres-ccinfo.mjs"
 import { spcSupplierFixtureSql } from "./fixtures/spc-supplier-sql.mjs"
 import { createSupplierRoute, supplierActor } from "./fixtures/spc-supplier-api.mjs"
+import { nativeSpcPostgrestError } from "./fixtures/spc-write-conflicts-sql.mjs"
 
 const json = value => value == null ? "null" : `${literal(JSON.stringify(value))}::jsonb`
 const call = a => `select public.compare_and_swap_spc_supplier_store(${json(a.p_expected_payload)},${json(a.p_payload)},${a.p_expected_exists},${literal(a.p_actor_username)},${literal(a.p_request_id)},${literal(a.p_action)});`
@@ -34,8 +35,7 @@ function app(f, options = {}) {
           const data = await writer.one(call(args)); await writer.query("commit;")
           if (lost) { lost = false; throw new Error("Injected acknowledgement lost after commit") }
           return { data, error: null }
-        } catch (error) { return { data: null, error: { code: error.code, message: error.message,
-          details: error.message.includes("DETAIL:  supplier-store-cas-contention") ? "supplier-store-cas-contention" : undefined } } }
+        } catch (error) { return { data: null, error: nativeSpcPostgrestError(error) } }
         finally { await writer.close() }
       },
     }) })

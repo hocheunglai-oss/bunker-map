@@ -18,7 +18,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-10-22.2"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-10-22.3"
 # Generated from config/fcunoConnections.ts; validate before Azure publication.
 $ExchangeNotificationAddressBookUrl = "https://fcuno.com/admin/outlookaddressbook"
 $script:ExchangeNotificationRunReceipts = @{}
@@ -2454,9 +2454,21 @@ function Get-AtomicExchangeTemplateActivationContractError(
       (Clean-Text (Get-MapValue $activation "sourceFingerprint")) -cne $fingerprint) {
     return "the atomic template-activation receipt does not match the certified run and projection"
   }
+  # Invoke-RestMethod materializes ISO JSON dates as native DateTime values.
+  # Preserve their offset and fractional ticks instead of locale/second-only text.
+  $certifiedAtValue = $Result.certifiedAt
+  if (($certifiedAtValue -isnot [string] -and $certifiedAtValue -isnot [DateTime] -and $certifiedAtValue -isnot [DateTimeOffset]) -or
+      ($certifiedAtValue -is [DateTime] -and $certifiedAtValue.Kind -eq [DateTimeKind]::Unspecified)) {
+    return "the atomic full-verification receipt has an invalid certification time"
+  }
+  try {
+    $certifiedAtText = ConvertTo-ExchangeQueueTimestampText $certifiedAtValue
+  } catch {
+    return "the atomic full-verification receipt has an invalid certification time"
+  }
   [DateTimeOffset]$certifiedAt = [DateTimeOffset]::MinValue
   if (-not [DateTimeOffset]::TryParse(
-      (Clean-Text (Get-MapValue $Result "certifiedAt")),
+      $certifiedAtText,
       [Globalization.CultureInfo]::InvariantCulture,
       [Globalization.DateTimeStyles]::AllowWhiteSpaces, [ref]$certifiedAt)) {
     return "the atomic full-verification receipt has an invalid certification time"
@@ -6326,7 +6338,14 @@ function Get-OutlookTemplateRecipientRefreshState {
   if (-not (Get-MapValue $state "queueSettled") -and (Get-MapValue $state "mode") -cne "none") { throw "Unsettled queue changes cannot authorize recipient verification." }
   $certificationRunId = Get-MapValue $state "certificationRunId"
   $fingerprint = Get-MapValue $state "sourceFingerprint"
-  $certifiedAt = Get-MapValue $state "certifiedAt"
+  # Read the raw property: Get-MapValue's pipeline can unwrap a one-item array.
+  $certifiedAt = $state.certifiedAt
+  if ($certifiedAt -is [DateTime] -and $certifiedAt.Kind -eq [DateTimeKind]::Unspecified) {
+    throw "Recipient refresh certification identity is malformed."
+  }
+  if ($certifiedAt -is [DateTime] -or $certifiedAt -is [DateTimeOffset]) {
+    $certifiedAt = ConvertTo-ExchangeQueueTimestampText $certifiedAt
+  }
   [DateTimeOffset]$parsedCertifiedAt = [DateTimeOffset]::MinValue
   if (($null -ne $certificationRunId -and ($certificationRunId -isnot [string] -or -not (Test-GuidText $certificationRunId))) -or
       ($null -ne $fingerprint -and ($fingerprint -isnot [string] -or $fingerprint -cnotmatch '^[0-9a-f]{64}$')) -or
@@ -6335,6 +6354,7 @@ function Get-OutlookTemplateRecipientRefreshState {
       (-not $certificationRunId -or -not $fingerprint -or -not $certifiedAt -or
        $parsedCertifiedAt -gt [DateTimeOffset]::UtcNow.AddMinutes(5) -or
        $parsedCertifiedAt -lt [DateTimeOffset]::UtcNow.AddHours(-36))) { throw "Derived recipient refresh requires the existing current certification within36hours." }
+  $state.certifiedAt = $certifiedAt
   return $state
 }
 

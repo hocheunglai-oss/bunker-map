@@ -16,6 +16,7 @@ import {
 } from "@/lib/spcEnquiries"
 import { enqueueSpcMobileEnquiry, processPendingSpcMobileDeliveries } from "@/lib/spcMobileEnquiries"
 import { listSpcLostReasons } from "@/lib/spcLostReasons"
+import { isUnclassifiedSpcDatabaseError, spcWriteRefusalMessage } from "@/lib/spcWriteErrors"
 
 type EnquiryPayload = {
   title?: string
@@ -32,6 +33,9 @@ const ISO_CURSOR_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/
 
 function errorResponse(error: unknown, fallback: string) {
+  const refusal = spcWriteRefusalMessage(error, "stem")
+  if (refusal) return NextResponse.json({ message: refusal }, { status: 409 })
+  if (isUnclassifiedSpcDatabaseError(error)) return NextResponse.json({ message: fallback }, { status: 500 })
   const code = error && typeof error === "object" && "code" in error ? error.code : ""
   const message =
     error instanceof Error
@@ -42,7 +46,6 @@ function errorResponse(error: unknown, fallback: string) {
   let status = 500
   if (message === "Unauthorized") status = 401
   else if (message === "Forbidden" || code === "42501") status = 403
-  else if (code === "40001") status = 409
   else if (code === "22023" || message.includes("required") || message.startsWith("Select a valid")) status = 400
   return NextResponse.json({ message }, { status })
 }

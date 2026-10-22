@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 import { createAdminAuditContext, createAdminAuditedSupabaseClient } from "@/lib/adminAudit"
 import { CCINFO_CONFLICT_MESSAGE } from "@/lib/ccinfoSave"
+import { isCcinfoCountryConflict } from "@/lib/ccinfoOperationErrors"
 
 export const dynamic = "force-dynamic"
 
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
       p_id: id, p_expected_updated_at: input.expectedUpdatedAt, p_name: name,
     })
     if (error) {
-      if (error.code === "40001") return reply(CCINFO_CONFLICT_MESSAGE, 409)
+      if (isCcinfoCountryConflict(error)) return reply(CCINFO_CONFLICT_MESSAGE, 409)
       if (["40P01", "55P03"].includes(error.code || "")) return reply("Another change is being saved. No rename was saved; please try again shortly.", 409)
       if (error.code === "23505") return reply("Another country already uses this name. Please choose a different name.", 400)
       if (error.code === "23514") return reply("Some ports need a country check before this rename. No changes were saved.", 409)

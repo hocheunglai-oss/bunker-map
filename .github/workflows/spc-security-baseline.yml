@@ -85,6 +85,14 @@ jobs:
           set -o pipefail
           npm run test:federation 2>&1 | tee federation-tests.tap
 
+      - name: Verify canonical template conflicts and group-default save ownership
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --no-install tsx --test tests/email-templates-canonical.test.ts 2>&1 | tee canonical-template-conflicts.tap
+          node --test tests/admin-role-default-save.test.mjs 2>&1 | tee admin-role-default-save.tap
+
       - name: Run attendance import and FCUNO calendar regression tests
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
@@ -127,6 +135,22 @@ jobs:
           set -o pipefail
           NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/spc-stem-api.test.ts tests/spc-fixture-api.test.ts 2>&1 | tee spc-stem-tests.tap
 
+      - name: Verify exact SPC write conflicts and unconfirmed outcomes through the SDK
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          NODE_OPTIONS=--conditions=react-server node --import tsx --test --test-reporter=tap tests/spc-write-conflicts-api.test.mjs 2>&1 | tee spc-write-conflicts.tap
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict"
+          import {readFileSync} from "node:fs"
+          const text=readFileSync("spc-write-conflicts.tap","utf8")
+          for(const [name,expected] of [["tests",59],["pass",59],["fail",0],["cancelled",0],["skipped",0]]){
+            const values=[...text.matchAll(new RegExp("^# "+name+" (\\d+)","gm"))]
+            assert.equal(Number(values.at(-1)?.[1]),expected,name)
+          }
+          NODE
+
       - name: Verify supplier concurrency and Outlook draft recovery
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
@@ -154,7 +178,7 @@ jobs:
         run: |
           set -euo pipefail
           npx --no-install tsx --test tests/spc-operational-response.test.ts tests/spc-record-page-response.test.ts tests/spc-enquiry-ownership.test.ts 2>&1 | tee spc-operational-response-tests.tap
-          node --test tests/spc-operational-api.test.mjs tests/spc-today-enquiries-api.test.mjs tests/spc-enquiry-list-permissions.test.mjs tests/spc-record-pages-api.test.mjs 2>&1 | tee spc-operational-api-tests.tap
+          node --test tests/spc-operational-api.test.mjs tests/spc-today-enquiries-api.test.mjs tests/spc-enquiry-list-permissions.test.mjs tests/spc-record-pages-api.test.mjs tests/spc-record-page-conflict-api.test.mjs 2>&1 | tee spc-operational-api-tests.tap
 
       - name: Verify directory query boundaries and feedback revision ownership
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -184,6 +208,22 @@ jobs:
         run: |
           set -o pipefail
           NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/backup-protection-*.test.ts tests/backup-truth-snapshot-export.test.ts tests/drive-file-backup-health.test.ts tests/system-health-alerts.test.ts tests/system-health-backup-window.test.ts 2>&1 | tee backup-protection-tests.tap
+
+      - name: Verify nonretryable backup observation failures through the SDK callback
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap tests/backup-protection-conflicts-api.test.mjs 2>&1 | tee backup-observation-conflicts.tap
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict"
+          import {readFileSync} from "node:fs"
+          const text=readFileSync("backup-observation-conflicts.tap","utf8")
+          for(const [name,expected] of [["tests",12],["pass",12],["fail",0],["cancelled",0],["skipped",0]]){
+            const values=[...text.matchAll(new RegExp("^# "+name+" (\\d+)","gm"))]
+            assert.equal(Number(values.at(-1)?.[1]),expected,name)
+          }
+          NODE
 
       - name: Verify transactional SQL policies with isolated PostgreSQL
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -262,12 +302,15 @@ jobs:
           path: |
             security-tests.tap
             federation-tests.tap
+            canonical-template-conflicts.tap
+            admin-role-default-save.tap
             attendance-tests.tap
             calendar-tests.tap
             ccinfo-table-tests.tap
             country-pricing-tests.tap
             outlook-contact-tests.tap
             spc-stem-tests.tap
+            spc-write-conflicts.tap
             supplier-outlook-reliability-tests.tap
             state-integrity-tests.tap
             report-correctness-tests.tap
@@ -278,6 +321,7 @@ jobs:
             storage-media-backup-tests.tap
             backup-stream-tests.tap
             backup-protection-tests.tap
+            backup-observation-conflicts.tap
             backup-protection-sql-tests.tap
             phonebook-sync-tests.tap
             enquiry-parser-tests.tap
@@ -586,7 +630,7 @@ jobs:
     name: Native SPC record state on PostgreSQL 17.6
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -673,7 +717,12 @@ jobs:
           const hourlyCases=[...readFileSync("tests/outlook-hourly-verification-native.test.mjs","utf8").matchAll(/^test\(/gm)].length
           assert.ok(sourcePolicyCases>=12,"The complete source-policy native suite must be present")
           assert.equal(hourlyCases,26,"The complete atomic daily/hourly certification and exact RPC-name suite must be present")
-          assert.equal(clusters.length,7+sourcePolicyCases+hourlyCases,"Every record-state, insertion, source-policy and hourly fixture must execute its owned native test cluster")
+          // Canonical CAS: four native-suite clusters plus one actual-SQL API cluster.
+          // SPC conflicts: one. Phonebook/Taiwan: four native plus one actual-SQL API.
+          // CCINFO: five native plus one actual-SQL API. Backup guards: three.
+          // SPC supplier/STEM/fixture writes: one new plus three existing native clusters.
+          const additionalClusters=4+1+1+4+1+5+1+3+4
+          assert.equal(clusters.length,7+sourcePolicyCases+hourlyCases+additionalClusters,"Every record-state, insertion, source-policy, hourly, record-page, canonical, Phonebook/Taiwan, CCINFO, backup and SPC write fixture must execute its owned native test cluster")
           assert.equal(complete,true,"The test must close its owned sessions and cluster itself")
           NODE
             cleanup_status=$?
@@ -684,9 +733,9 @@ jobs:
           trap 'exit 130' INT
           trap 'exit 143' TERM
           git rev-parse HEAD HEAD^{tree} | tee "$NATIVE_PG_EVIDENCE/source.log"
-          timeout --signal=TERM --kill-after=5s 240s env -i PATH="$PATH" LANG=C LC_ALL=C \
+          timeout --signal=TERM --kill-after=5s 480s env -i PATH="$PATH" LANG=C LC_ALL=C \
             TMPDIR="$NATIVE_PG_TMP_ROOT" NATIVE_PG_BIN="$NATIVE_PG_BIN" NATIVE_PG_TMP_ROOT="$NATIVE_PG_TMP_ROOT" \
-            node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=tap tests/spc-record-state-native.test.mjs tests/outlook-insertion-reservation-native.test.mjs tests/outlook-template-source-policy-native.test.mjs tests/outlook-hourly-verification-native.test.mjs \
+            node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=tap tests/spc-record-state-native.test.mjs tests/outlook-insertion-reservation-native.test.mjs tests/outlook-template-source-policy-native.test.mjs tests/outlook-hourly-verification-native.test.mjs tests/spc-record-page-conflict-native.test.mjs tests/email-template-cas-native.test.mjs tests/email-template-cas-api.test.mjs tests/phonebook-taiwan-save-conflict-native.test.mjs tests/phonebook-taiwan-save-conflict-api.test.mjs tests/ccinfo-operation-conflicts-native.test.mjs tests/ccinfo-operation-conflicts-api.test.mjs tests/backup-protection-conflicts-native.test.mjs tests/backup-protection-gaps-native.test.mjs tests/spc-write-conflicts-native.test.mjs tests/spc-supplier-native.test.mjs tests/spc-stem-native.test.mjs tests/spc-fixture-native.test.mjs \
             2>&1 | tee "$NATIVE_PG_EVIDENCE/native-record-state.tap"
           node --input-type=module <<'NODE'
           import assert from "node:assert/strict"
@@ -696,7 +745,10 @@ jobs:
           const hourlyCases=[...readFileSync("tests/outlook-hourly-verification-native.test.mjs","utf8").matchAll(/^test\(/gm)].length
           assert.ok(sourcePolicyCases>=12,"The complete source-policy native suite must be present")
           assert.equal(hourlyCases,26,"The complete atomic daily/hourly certification and exact RPC-name suite must be present")
-          for(const [name,expected] of [["tests",16+sourcePolicyCases+hourlyCases],["pass",16+sourcePolicyCases+hourlyCases],["fail",0],["cancelled",0],["skipped",0]]){
+          // SPC conflicts/source fence; canonical native/SDK; Phonebook/Taiwan native/SDK;
+          // CCINFO native/SDK; backup observation/gaps; SPC write guards/existing native callers.
+          const additionalCases=8+15+45+12+41+27+52+27+20+52
+          for(const [name,expected] of [["tests",16+sourcePolicyCases+hourlyCases+additionalCases],["pass",16+sourcePolicyCases+hourlyCases+additionalCases],["fail",0],["cancelled",0],["skipped",0]]){
             const values=[...text.matchAll(new RegExp("^# "+name+" (\\d+)","gm"))]
             assert.equal(Number(values.at(-1)?.[1]),expected,name)
           }

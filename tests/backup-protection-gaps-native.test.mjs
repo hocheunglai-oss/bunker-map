@@ -19,7 +19,7 @@ test("native PostgreSQL durable backup-gap transactions serialize observations a
         create trigger alter_initial_gap_observation before insert on private.backup_protection_observations
           for each row execute function private.alter_initial_gap_observation();`)
       const before = await state(f), writer = await f.session("altered-initial-gap-observation")
-      await assert.rejects(writer.one(call(observation, [gap("opaque-file")], true, "drive-file")), error => error.code === "40001")
+      await assert.rejects(writer.one(call(observation, [gap("opaque-file")], true, "drive-file")), error => error.code === "P0001" && error.message.includes("BACKUP_PROTECTION_OBSERVATION_UNCONFIRMED"))
       assert.deepEqual(await state(f), before)
       await f.owner.query("drop trigger alter_initial_gap_observation on private.backup_protection_observations;")
     })
@@ -74,7 +74,7 @@ test("native PostgreSQL durable backup-gap transactions serialize observations a
           create trigger suppress_gap_write before ${operation} on private.${table} for each row execute function private.suppress_gap_write();`)
         const before = await state(f), writer = await f.session(`suppressed-${operation}`)
         const gaps = operation === "insert" ? [gap("suppressed-key")] : operation === "delete" ? [] : [inventory()]
-        await assert.rejects(writer.one(call("2026-10-14T06:00:00Z", gaps)), error => error.code === "40001")
+        await assert.rejects(writer.one(call("2026-10-14T06:00:00Z", gaps)), error => error.code === "P0001" && error.message.includes("BACKUP_PROTECTION_OBSERVATION_UNCONFIRMED"))
         assert.deepEqual(await state(f), before)
         await f.owner.query(`drop trigger suppress_gap_write on private.${table};`)
       }
@@ -85,7 +85,7 @@ test("native PostgreSQL durable backup-gap transactions serialize observations a
       const before = await state(f), writer = await f.session("suppressed-verified-reset")
       await assert.rejects(writer.one(call("2026-10-14T06:30:00Z", [inventory("2026-10-16T18:00:00Z", {
         requiredVersion: h2, requiredFingerprint: c2, coveredThroughAt: "2026-10-13T23:30:00Z", coveredVersion: h1, coveredFingerprint: c1,
-      })], false)), error => error.code === "40001")
+      })], false)), error => error.code === "P0001" && error.message.includes("BACKUP_PROTECTION_OBSERVATION_UNCONFIRMED"))
       assert.deepEqual(await state(f), before)
       await f.owner.query("drop trigger suppress_gap_write on private.backup_protection_gaps;")
     })

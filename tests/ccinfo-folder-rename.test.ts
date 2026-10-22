@@ -5,6 +5,7 @@ import test from "node:test"
 import { transformSync } from "esbuild"
 import ts from "typescript"
 import * as queryEscaping from "../lib/queryEscaping"
+import * as operationErrors from "../lib/ccinfoOperationErrors"
 
 const entryId = "11111111-1111-4111-8111-111111111111"
 const folderId = "22222222-2222-4222-8222-222222222222"
@@ -27,6 +28,7 @@ function routeFixture(error?: { code: string }, permission = "view") {
   const modules: Record<string, unknown> = {
     "next/server": { NextResponse: Object.assign(Response, { json: Response.json }) },
     "@/lib/queryEscaping": queryEscaping,
+    "@/lib/ccinfoOperationErrors": operationErrors,
     "@/lib/ccinfoDrivePaths": {}, "@/lib/googleApis": {},
     "@/lib/adminAuth": { requireAdminPagePermission: async (...args: string[]) => { calls.push(args); if (permission === "anonymous") throw new Error("Unauthorized"); return { username: "TRUSTED VIEWER" } } },
     "@/lib/adminAudit": {
@@ -73,7 +75,7 @@ test("folder route supports implied folders without accepting forged IDs, invali
 })
 
 test("folder route reports rejected conflicts/failures without acknowledging any partial success", async () => {
-  for (const [code,status] of [["40001",409],["23505",409],["40P01",409],["55P03",409],["22023",400],["XX000",500]] as const) {
+  for (const [code,status] of [["40001",500],["23505",409],["40P01",409],["55P03",409],["22023",400],["XX000",500]] as const) {
     const response=await routeFixture({code}).request()
     assert.equal(response.status,status)
     assert.equal((await response.json()).ok,undefined)

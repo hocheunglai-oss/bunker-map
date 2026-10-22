@@ -44,7 +44,7 @@ test("actual company route rejects unauthorized, forged immutable fields and inv
 })
 
 test("actual company route reports stale/duplicate/ambiguous writes without publishing private SQL errors",async()=>{
-  for(const [error,status] of [["40001",409],["23505",409],["23514",409],["55P03",409],["22023",400],["unexpected",500]] as const){
+  for(const [error,status] of [["40001",500],["23505",409],["23514",409],["55P03",409],["22023",400],["unexpected",500]] as const){
     const response=await fixture({error}).post();assert.equal(response.status,status);assert.doesNotMatch(await response.text(),/private database/)
   }
 })

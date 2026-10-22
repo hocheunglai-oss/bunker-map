@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 export const recordPagesMigration = "supabase/migrations/20261016125653_complete_spc_record_pages.sql"
-export function recordPagesFixtureSql() {
+export function recordPagesFixtureSql({ includeBusinessConflictFix = true } = {}) {
  const baseline=readFileSync(new URL("../../supabase/spc_schema.sql",import.meta.url),"utf8")
  const writer=baseline.match(/create or replace function public\.set_spc_updated_at\(\)[\s\S]*?\n\$\$;/)?.[0]
  if(!writer)throw Error("Canonical writer trigger source unavailable")
@@ -22,7 +22,8 @@ export function recordPagesFixtureSql() {
  create trigger set_spc_enquiries_updated_at before update on public.spc_enquiries for each row execute function public.set_spc_updated_at();
  ${["spc_enquiries","spc_fixtures"].map(name=>`select public.audit_enable_table('public.${name}');
  create trigger bunker_map_backup_epoch_fence after insert or update or delete or truncate on public.${name} for each statement execute function private.record_bunker_map_backup_mutation();`).join("\n")}
- begin;${readFileSync(new URL("../../"+recordPagesMigration,import.meta.url),"utf8")}commit;`
+ begin;${readFileSync(new URL("../../"+recordPagesMigration,import.meta.url),"utf8")}commit;
+ ${includeBusinessConflictFix ? "begin;" + readFileSync(new URL("../../supabase/migrations/20261022094634_stop_spc_record_page_business_conflict_retries.sql", import.meta.url), "utf8") + "commit;" : ""}`
 }
 export function seedRecordPagesSql(count=251,status="cancelled") {
  return `insert into public.spc_enquiries select md5('record-'||n)::uuid,'SYNTHETIC-'||n,'SYNTHETIC VESSEL '||n,'SYNTHETIC VESSEL '||n,'SINGAPORE','VLSFO','500',null,null,'${status}',

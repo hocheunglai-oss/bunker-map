@@ -1,9 +1,9 @@
 {
   "schema": "fcuno.exchange-publication-baseline/v1",
-  "verifiedAt": "2026-10-22T09:37:32Z",
-  "retrievedAt": "2026-10-22T09:36:55Z",
-  "workerVersion": "fcuno-exchange-runbook/2026-10-22.2",
-  "sourceSha256": "2ce967e49af37e6513efa00c054793328888a5b031d06c66fd0b3fa0243c43ae",
+  "verifiedAt": "2026-10-22T11:24:52Z",
+  "retrievedAt": "2026-10-22T11:22:45Z",
+  "workerVersion": "fcuno-exchange-runbook/2026-10-22.3",
+  "sourceSha256": "ac582ffb551b771b4bec96f6df2fb754884580f81f6054b4193d505beec4d981",
   "sourcePath": "scripts/azure-automation/sync-fcuno-outlook-addressbook.ps1",
   "productionOrigin": "https://fcuno.com",
   "supabaseProject": "gglyugbrnyvyfktgwert",
@@ -19,13 +19,29 @@
   },
   "publicationEvidence": {
     "method": "Signed-in Azure Portal publication followed by independent published-source Export and exact binary comparison",
-    "sourceBytes": 337484,
+    "sourceBytes": 338577,
     "libraryOnlyDraftTest": "Completed on FCUNO-PowerShell-7-6; LibraryOnly=true returns before configuration, Exchange connection and synchronization",
     "runtimePackageReadback": "PowerShell 7.6; ExchangeOnlineManagement 3.10.1 Available",
-    "oldJobReadback": "Last pre-publication hourly job completed at 17:32 HKT; no live database lease at 09:37:22 UTC; the old 06:10 HKT full job was already stopped at 09:11 HKT",
-    "previousWorkerVersion": "fcuno-exchange-runbook/2026-10-09.1",
-    "previousSourceSha256": "7fbbff302cc843e231ca6b53a5490a9781839f7a84919117773ad4b2eeb030a4",
-    "scope": "Published bytes/runtime and additive prerequisites verified; this record does not itself assert a subsequent live full Exchange verification"
+    "oldJobReadback": "18:35 HKT incremental job failed on valid PowerShell-native certifiedAt dates; no active lease or outstanding queue rows at 11:23:14 UTC before the separate post-publication incremental verification",
+    "previousWorkerVersion": "fcuno-exchange-runbook/2026-10-22.2",
+    "previousSourceSha256": "2ce967e49af37e6513efa00c054793328888a5b031d06c66fd0b3fa0243c43ae",
+    "scope": "Published source exported independently and byte-compared exactly; LibraryOnly compilation completed on the pinned runtime. Date normalization retains fractional-second precision and all certification guards. This record alone does not assert a subsequent full Exchange verification.",
+    "postPublicationIncrementalVerification": {
+      "checkedAt": "2026-10-22T11:26:17Z",
+      "azureJobId": "52c288cd-0a1d-431f-8a1e-39c0912a5a35",
+      "runId": "bf810225-7b71-49f0-b92f-d03ea54c78a6",
+      "status": "completed",
+      "statusSavedAt": "2026-10-22T11:25:21.905686Z",
+      "azureErrorCount": 0,
+      "outstandingQueueRows": 0,
+      "recipientRefreshMode": "none",
+      "recipientRefreshStatus": "not-required",
+      "checkpointSequence": "8899",
+      "checkpointVerified": true,
+      "exchangeContactOrGroupMutations": 0,
+      "notificationDeliveryAttempted": false,
+      "newCertificationIssued": false
+    }
   },
   "prerequisiteMigrations": [
     {
