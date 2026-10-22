@@ -6228,26 +6228,26 @@ begin
     if source_row.status <> 'quoted'
       or source_row.stem_source_updated_at is distinct from p_expected_updated_at
       or lower(source_row.stem_supplier_username) <> lower(btrim(p_supplier_username)) then
-      raise exception using errcode = '40001', message = 'This STEM request no longer matches the saved enquiry. Refresh and try again.';
+      raise exception using errcode = 'P0001', message = 'This STEM request no longer matches the saved enquiry. Refresh and try again.', detail = 'SPC_STEM_CONFLICT';
     end if;
     -- A committed retry is read-only. Do not reinitialize, upsert, or lock an
     -- edited/completed fixture in the reverse order of its ordinary editor.
     if not exists (select 1 from public.spc_fixtures where enquiry_id = source_row.id) then
-      raise exception using errcode = '40001', message = 'The fixture for this STEM is no longer available. Refresh and ask an administrator to review it.';
+      raise exception using errcode = 'P0001', message = 'The fixture for this STEM is no longer available. Refresh and ask an administrator to review it.', detail = 'SPC_STEM_CONFLICT';
     end if;
     return next source_row;
     return;
   end if;
 
   if source_row.status <> 'sent' or source_row.updated_at is distinct from p_expected_updated_at then
-    raise exception using errcode = '40001', message = 'This enquiry changed while you were editing. Refresh and try again.';
+    raise exception using errcode = 'P0001', message = 'This enquiry changed while you were editing. Refresh and try again.', detail = 'SPC_STEM_CONFLICT';
   end if;
   select * into fixture_row from public.spc_fixtures
     where enquiry_id = source_row.id for update;
   if found then
     -- Never overwrite a pending or completed fixture from a separate/legacy
     -- operation. An administrator must reconcile such pre-existing data.
-    raise exception using errcode = '40001', message = 'This enquiry already has a fixture. Refresh and ask an administrator to review it.';
+    raise exception using errcode = 'P0001', message = 'This enquiry already has a fixture. Refresh and ask an administrator to review it.', detail = 'SPC_STEM_CONFLICT';
   end if;
   if jsonb_typeof(p_fixture) is distinct from 'object'
     or nullif(btrim(p_notes), '') is null
@@ -6288,7 +6288,7 @@ begin
     or source_row.stem_supplier_username is distinct from supplier_row.username
     or lower(source_row.created_by_username) is distinct from lower(buyer_row.username)
     or source_row.notes is distinct from p_notes then
-    raise exception using errcode = '40001', message = 'The STEM enquiry was not saved. Refresh and review before trying again.';
+    raise exception using errcode = 'P0001', message = 'The STEM enquiry was not saved. Refresh and review before trying again.', detail = 'SPC_STEM_UNCONFIRMED';
   end if;
 
   insert into public.spc_fixtures (
@@ -6311,7 +6311,7 @@ begin
     or fixture_row.enquiry_id is distinct from p_enquiry_id or fixture_row.fixture_status is distinct from 'pending'
     or fixture_row.supplier_trader_user_id is distinct from supplier_row.id
     or fixture_row.buyer_trader_user_id is distinct from buyer_row.id then
-    raise exception using errcode = '40001', message = 'The STEM fixture was not created. Your enquiry was not changed. Refresh and try again.';
+    raise exception using errcode = 'P0001', message = 'The STEM fixture was not created. Your enquiry was not changed. Refresh and try again.', detail = 'SPC_STEM_UNCONFIRMED';
   end if;
 
   return next source_row;
@@ -6399,7 +6399,7 @@ begin
   select enquiry_id into source_id from public.spc_fixtures where id = p_fixture_id;
   select * into source_row from public.spc_enquiries where id = source_id for update;
   if not found then
-    raise exception using errcode = '40001', message = 'This fixture is no longer available. Refresh and try again.';
+    raise exception using errcode = 'P0001', message = 'This fixture is no longer available. Refresh and try again.', detail = 'SPC_FIXTURE_CONFLICT';
   end if;
   select * into fixture_row from public.spc_fixtures where id = p_fixture_id for update;
   if not found or fixture_row.enquiry_id is distinct from source_id
@@ -6407,7 +6407,7 @@ begin
     or fixture_row.fixture_status is distinct from p_expected_status
     or (p_action <> 'delete' and (source_row.status <> 'quoted' or fixture_row.fixture_status = 'cancelled'))
     or (p_action = 'complete' and fixture_row.fixture_status <> 'pending') then
-    raise exception using errcode = '40001', message = 'This fixture changed while you were editing. Your draft was not saved. Refresh and review the latest fixture.';
+    raise exception using errcode = 'P0001', message = 'This fixture changed while you were editing. Your draft was not saved. Refresh and review the latest fixture.', detail = 'SPC_FIXTURE_CONFLICT';
   end if;
 
   select * into actor_row from public.spc_users
@@ -6422,7 +6422,7 @@ begin
     -- its status and its original STEM receipt are not modified or fabricated.
     delete from public.spc_fixtures where id = fixture_row.id returning * into fixture_row;
     if not found or fixture_row.id is distinct from p_fixture_id then
-      raise exception using errcode = '40001', message = 'The fixture was not deleted. Refresh and review the latest fixture.';
+      raise exception using errcode = 'P0001', message = 'The fixture was not deleted. Refresh and review the latest fixture.', detail = 'SPC_FIXTURE_UNCONFIRMED';
     end if;
     return jsonb_build_object('id',fixture_row.id);
   end if;
@@ -6474,7 +6474,7 @@ begin
     updated_at = now_at
     where id = fixture_row.id returning * into fixture_row;
   if not found or fixture_row.id is distinct from p_fixture_id or fixture_row.enquiry_id is distinct from source_id then
-    raise exception using errcode = '40001', message = 'The fixture was not saved. Refresh and review the latest fixture.';
+    raise exception using errcode = 'P0001', message = 'The fixture was not saved. Refresh and review the latest fixture.', detail = 'SPC_FIXTURE_UNCONFIRMED';
   end if;
 
   -- Preserve the existing rule: a nonblank primary supplier updates the source
@@ -6483,7 +6483,7 @@ begin
     update public.spc_enquiries set supplier_name = btrim(p_primary_supplier), updated_at = now_at
       where id = source_row.id returning * into source_row;
     if not found or source_row.id is distinct from source_id then
-      raise exception using errcode = '40001', message = 'The fixture supplier could not be synchronized. Your draft was not saved. Refresh and try again.';
+      raise exception using errcode = 'P0001', message = 'The fixture supplier could not be synchronized. Your draft was not saved. Refresh and try again.', detail = 'SPC_FIXTURE_UNCONFIRMED';
     end if;
   end if;
   return to_jsonb(fixture_row) || jsonb_build_object('enquiry',jsonb_build_object(

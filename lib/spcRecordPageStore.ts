@@ -97,7 +97,13 @@ export async function readSpcRecordPage(session: SpcSession, request: Request, k
         .abortSignal(controller.signal)
       if (controller.signal.aborted) throw unavailable()
       if (result.error) {
-        if (result.error.code === "40001") throw new SpcRecordPageError("The record list changed. Refresh after saving or discarding your drafts.", 409)
+        if (
+          (result.error.code === "P0001" && result.error.message === "SPC_RECORD_PAGE_REFRESH_REQUIRED") ||
+          (result.error.code === "40001" && (
+            result.error.message === "The record list changed. Refresh before browsing another page." ||
+            result.error.message === "The complete record page could not be verified."
+          ))
+        ) throw new SpcRecordPageError("The record list changed. Refresh after saving or discarding your drafts.", 409)
         if (result.error.code === "22023") throw new SpcRecordPageError("Invalid record page cursor. Refresh before browsing another page.", 400)
         throw unavailable()
       }

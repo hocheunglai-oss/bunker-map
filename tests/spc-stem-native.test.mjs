@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto"
 import { setupNativeCcinfo, literal, waitForBlock } from "./fixtures/native-postgres-ccinfo.mjs"
 import { spcStemFixtureSql } from "./fixtures/spc-stem-sql.mjs"
 import { createSpcStemRoute, enquiry, expectedVersion, stemPayload, session, users } from "./fixtures/spc-stem-api.mjs"
+import { nativeSpcPostgrestError } from "./fixtures/spc-write-conflicts-sql.mjs"
 
 const state = f => f.owner.one(`select jsonb_build_object(
   'enquiries',(select coalesce(jsonb_agg(to_jsonb(t) order by id),'[]') from public.spc_enquiries t),
@@ -82,7 +83,7 @@ function nativeApp(f, options = {}) {
           await client.query("commit;")
           if (options.loseResponse) throw new Error("Injected response lost after commit")
           return { data, error: null }
-        } catch (error) { return { data: null, error: { code: error.code, message: error.message } } }
+        } catch (error) { return { data: null, error: nativeSpcPostgrestError(error) } }
       },
     }),
   })
@@ -130,7 +131,7 @@ test("native PostgreSQL 17.6 and actual STEM API maintain enquiry/fixture atomic
       const before = await state(f), app = nativeApp(f)
       const response = await app.patch(stemPayload({ id }))
       assert.equal(response.status, 500)
-      assert.match(response.body.message, /Injected late fixture failure/)
+      assert.equal(response.body.message, "Failed to update SPC enquiry.")
       assert.equal(app.rpcCalls(), 1)
       assert.deepEqual(await state(f), before)
       await f.owner.query("drop trigger fail_stem_fixture on public.spc_fixtures;")
@@ -321,7 +322,7 @@ test("native PostgreSQL 17.6 and actual STEM API maintain enquiry/fixture atomic
       const result = await app.patch({ id, mode: "fixture", expectedUpdatedAt: expectedVersion,
         fixture: { supplier: "SYNTHETIC SUPPLIER", vlsfo: "500", price: "700" } })
       assert.equal(result.status, 500)
-      assert.match(result.body.message, /Injected fixture-note failure/)
+      assert.equal(result.body.message, "Failed to update SPC enquiry.")
       assert.deepEqual(await state(f), before)
       await f.owner.query("drop trigger fail_fixture_note_edit on public.spc_enquiries;")
     })

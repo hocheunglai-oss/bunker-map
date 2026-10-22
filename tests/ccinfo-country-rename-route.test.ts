@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import test from "node:test"
 import { transformSync } from "esbuild"
 import * as ccinfoSave from "../lib/ccinfoSave"
+import * as operationErrors from "../lib/ccinfoOperationErrors"
 
 const id = "11111111-1111-4111-8111-111111111111"
 const before = "2026-10-12T00:00:00.123456Z"
@@ -13,6 +14,7 @@ function fixture(options: { permission?: string; error?: { code?: string; messag
   const modules: Record<string, unknown> = {
     "next/server": { NextResponse: Object.assign(Response, { json: Response.json }) },
     "@/lib/ccinfoSave": ccinfoSave,
+    "@/lib/ccinfoOperationErrors": operationErrors,
     "@/lib/adminAuth": { requireAdminPagePermission: async (...permission: string[]) => {
       calls.push(permission)
       if (options.permission === "anonymous") throw Error("Unauthorized")
@@ -79,7 +81,7 @@ test("rename route normalizes uppercase UUIDs before RPC and acknowledgement com
 })
 
 test("rename route maps conflict/validation errors and does not expose internal failure details", async () => {
-  for (const [code, status] of [["40001", 409], ["40P01", 409], ["55P03", 409], ["23514", 409], ["23505", 400], ["22023", 400], ["XX000", 500]] as const) {
+  for (const [code, status] of [["40001", 500], ["40P01", 409], ["55P03", 409], ["23514", 409], ["23505", 400], ["22023", 400], ["XX000", 500]] as const) {
     const app = fixture({ error: { code, message: "synthetic secret database error" } })
     const response = await app.request()
     assert.equal(response.status, status)

@@ -13,14 +13,16 @@ import {
 } from "@/lib/ccinfoDrivePaths"
 import { loadGoogleApis } from "@/lib/googleApis"
 import { buildGoogleDriveFolderLookupQuery } from "@/lib/queryEscaping"
+import { isCcinfoFileConflict, isCcinfoFolderConflict } from "@/lib/ccinfoOperationErrors"
 
 const TOKEN_PATH = path.join(process.cwd(), ".google-drive-oauth-token.json")
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-function folderMutationError(error: { code?: string }, operation: string) {
-  const status = ["40001", "23505", "23514", "40P01", "55P03"].includes(error.code || "") ? 409 : error.code === "22023" ? 400 : 500
+function folderMutationError(error: { code?: string; message?: string; details?: string }, operation: string) {
+  const conflict = operation === "file move" ? isCcinfoFileConflict(error) : isCcinfoFolderConflict(error)
+  const status = conflict || ["23505", "23514", "40P01", "55P03"].includes(error.code || "") ? 409 : error.code === "22023" ? 400 : 500
   const message = error.code === "23505" ? "Another folder already uses this name. No changes were saved."
-    : error.code === "40001" ? "This folder or its destination changed. Reopen the entry before trying again."
+    : conflict ? "This folder or its destination changed. Reopen the entry before trying again."
       : error.code === "23514" ? "Move or delete files and subfolders inside this folder first."
         : ["40P01", "55P03"].includes(error.code || "") ? "Another change is being saved. Please try again shortly."
           : `The ${operation} could not be confirmed. Reopen the entry to check its saved folder before retrying.`

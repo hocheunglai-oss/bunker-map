@@ -62,7 +62,7 @@ test("fixture API prepares existing business fields and sends one audited atomic
   assert.equal(app.headers[0]["x-bunker-audit-action"],"save-fixture");assert.equal(app.headers[0]["x-bunker-audit-actor-user-id"],actor.userId)
 })
 test("fixture API preserves real PostgREST conflict/permission/validation messages and statuses",async()=>{
-  for(const [code,status] of [["40001",409],["42501",403],["22023",400]] as const){const app=harness({error:{code,message:"Synthetic refusal; refresh and review."}});const response=await app.patch(payload);assert.equal(response.status,status);assert.equal(response.body.message,"Synthetic refusal; refresh and review.");assert.equal(app.calls.length,1)}
+  for(const [code,status] of [["40001",500],["42501",403],["22023",400]] as const){const app=harness({error:{code,message:"Synthetic refusal; refresh and review."}});const response=await app.patch(payload);assert.equal(response.status,status);assert.equal(response.body.message,code==="40001"?"Failed to save SPC fixture.":"Synthetic refusal; refresh and review.");assert.equal(app.calls.length,1)}
   const unavailable=harness({userLookupError:new Error("Synthetic directory unavailable")});assert.equal((await unavailable.patch(payload)).status,500);assert.equal(unavailable.calls.length,0)
   const removed=harness({readError:{code:"PGRST116",message:"Singular response required"}}),response=await removed.patch(payload);assert.equal(response.status,409);assert.match(response.body.message,/no longer available.*Refresh/);assert.equal(removed.calls.length,0)
 })

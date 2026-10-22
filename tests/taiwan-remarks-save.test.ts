@@ -42,7 +42,7 @@ test("actual Taiwan save route pins Edit permission/audit client, rejects old mi
   assert.deepEqual(f.permissions, [{ page: "taiwan-remarks", access: "edit" }]); assert.deepEqual(f.calls, [{ name: "save_taiwan_remarks", args: { p_changes: [change()] } }])
   for (const [auth, status] of [["Unauthorized", 401], ["Forbidden", 403]] as const) { const denied = harness(); denied.controls.auth = auth; assert.equal((await denied.send()).status, status); assert.deepEqual(denied.calls, []) }
   for (const payload of [{ changes: [{ id: 2, content: "NEW" }] }, { id: 2, content: "NEW" }]) { const old = harness(); assert.equal((await old.send(payload)).status, 409); assert.deepEqual(old.calls, []) }
-  for (const code of ["40001", "P0002", "55P03", "40P01"]) { const failed = harness(); failed.controls.error = { code, message: "PRIVATE" }; const res = await failed.send(); assert.equal(res.status, 409); assert.doesNotMatch(await res.text(), /PRIVATE/) }
+  for (const [code, status] of [["40001", 503], ["P0002", 503], ["55P03", 409], ["40P01", 409]] as const) { const failed = harness(); failed.controls.error = { code, message: "PRIVATE" }; const res = await failed.send(); assert.equal(res.status, status); assert.doesNotMatch(await res.text(), /PRIVATE/) }
   for (const data of [null, {}, { rows: [{ id: 2, content: "WRONG" }], replayed: false }]) { const bad = harness(); bad.controls.data = data; assert.equal((await bad.send()).status, 503) }
   const lost = harness(); lost.controls.throw = true; assert.equal((await lost.send()).status, 503)
 })

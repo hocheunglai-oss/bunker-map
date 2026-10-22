@@ -2,12 +2,15 @@ import { readFileSync } from "node:fs"
 
 export const gapMigration = "supabase/migrations/20261015102256_durable_backup_protection_gaps.sql"
 export const gapMigrationSql = () => readFileSync(new URL(`../../${gapMigration}`, import.meta.url), "utf8")
-export const gapFixtureSql = () => `
+export const gapCorrectionMigration = "supabase/migrations/20261022111651_nonretryable_backup_observation_guards.sql"
+export const gapCorrectionSql = () => readFileSync(new URL(`../../${gapCorrectionMigration}`, import.meta.url), "utf8")
+export const gapFixtureSql = ({ corrected = true } = {}) => `
   set time zone 'UTC';
   create role anon; create role authenticated; create role service_role bypassrls;
   create schema private;
   grant usage on schema public to anon,authenticated,service_role;
   ${gapMigrationSql()}
+  ${corrected ? gapCorrectionSql() : ""}
 `
 export const observation = "2026-10-14T00:00:00.000000Z"
 export const due = "2026-10-13T18:00:00.000000Z"

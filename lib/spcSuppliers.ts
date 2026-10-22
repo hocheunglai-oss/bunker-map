@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js"
 import { createHash } from "node:crypto"
+import { isSpcSupplierCasContention, SpcLocalWriteConflict } from "@/lib/spcWriteErrors"
 import type * as XLSX from "xlsx"
 import { createSpcAuditHeaders, type SpcAuditContext } from "@/lib/spcAudit"
 import {
@@ -1285,7 +1286,7 @@ function invalidSupplier() {
 }
 
 function supplierConflict(message = "This supplier changed while you were editing. Your draft is kept. Close and refresh, then review the latest details.") {
-  return Object.assign(new Error(message), { code: "40001" })
+  return new SpcLocalWriteConflict(message)
 }
 
 function requireObject(value: unknown): asserts value is Record<string, unknown> {
@@ -1352,7 +1353,7 @@ async function mutateSupplierStore(action: string, input: SpcSupplierMutation, i
       p_expected_exists: storeRow !== null,
       p_actor_username: context.username, p_request_id: requestId, p_action: action,
     })
-    if (error?.code === "40001" && error.details === "supplier-store-cas-contention") continue
+    if (isSpcSupplierCasContention(error)) continue
     if (error) throw error
     if (!data || data.schema !== "fcuno.supplier-store-cas/v1" || data.requestId !== requestId
       || version(data.payload) !== version(payload)) throw new Error("Supplier save could not be verified. Your draft is kept. Retry the same save to check its result.")

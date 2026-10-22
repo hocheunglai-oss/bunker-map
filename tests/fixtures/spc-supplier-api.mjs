@@ -77,7 +77,7 @@ export function supplierMemoryDb({ initial = null, auditFailure = false, loseRes
       },
       async rpc(name, args) {
         assert.equal(name, "compare_and_swap_spc_supplier_store"); rpcCalls += 1
-        if (Boolean(stored) !== args.p_expected_exists || JSON.stringify(stored?.payload ?? null) !== JSON.stringify(args.p_expected_payload)) return { error: { code: "40001", message: "CAS contention", details: "supplier-store-cas-contention" } }
+        if (Boolean(stored) !== args.p_expected_exists || JSON.stringify(stored?.payload ?? null) !== JSON.stringify(args.p_expected_payload)) return { error: { code: "40001", message: "Supplier data changed. Reload and retry the save.", details: "supplier-store-cas-contention" } }
         if (auditFailure) return { error: { code: "P0001", message: "Injected atomic audit failure" } }
         stored = { key: "spc-supplier-overrides", payload: structuredClone(args.p_payload), updated_at: new Date().toISOString() }; audits += 1
         if (loseResponse) { loseResponse = false; return { error: { message: "Injected response loss after commit" } } }

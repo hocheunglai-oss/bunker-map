@@ -1,4 +1,5 @@
 import type { SpcSession } from "@/lib/spcAuth"
+import { SpcLocalWriteConflict } from "@/lib/spcWriteErrors"
 import { createSpcAuditContext, createSpcAuditedSupabaseClient } from "@/lib/spcAudit"
 import {
   formatSpcEnquiry,
@@ -510,7 +511,7 @@ export async function updateSpcEnquiryOutcome(
 
   // A delayed LOST/POSTPONE/CANCEL must never overwrite a STEM committed by
   // another tab. Both the state and the browser's source version are guarded.
-  const conflict = () => Object.assign(new Error("This enquiry changed while you were editing. Refresh and try again."), { code: "40001" })
+  const conflict = () => new SpcLocalWriteConflict("This enquiry changed while you were editing. Refresh and try again.")
   if (existing.status !== "sent") throw conflict()
   if (outcome === "cancel") {
     const { data, error } = await supabase
@@ -672,7 +673,7 @@ export async function updateSpcEnquiryFixture(
   })
   const supabase = createSpcAuditedSupabaseClient(context)
   const existing = await loadSpcEnquiryRow(supabase, enquiryId)
-  const conflict = () => Object.assign(new Error("This enquiry changed while you were editing. Refresh and use the Fixtures page for an existing STEM."), { code: "40001" })
+  const conflict = () => new SpcLocalWriteConflict("This enquiry changed while you were editing. Refresh and use the Fixtures page for an existing STEM.")
   // This legacy operation annotates a sent enquiry before STEM. Once STEM has
   // committed, its fixture editor is authoritative; this path may not replace
   // outcome metadata or reinterpret an already committed operation receipt.

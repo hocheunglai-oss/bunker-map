@@ -23,7 +23,14 @@ export async function POST(request: Request) {
     const client = createAdminAuditedSupabaseClient(createAdminAuditContext(session, undefined, "taiwan-remarks"), { useServiceRole: true })
     const { data, error } = await client.rpc("save_taiwan_remarks", { p_changes: changes })
     if (error) {
-      if (["40001", "P0002"].includes(error.code || "")) return reply({ code: "REMARKS_CONFLICT", message: TAIWAN_REMARKS_CONFLICT }, 409)
+      if (
+        error.message === "The saved remarks changed. Keep the draft and reload." &&
+        ((error.code === "P0001" && error.details === "TAIWAN_REMARKS_CONFLICT") || error.code === "40001")
+      ) return reply({ code: "REMARKS_CONFLICT", message: TAIWAN_REMARKS_CONFLICT }, 409)
+      if (
+        ["The remark save could not be confirmed.", "The remark audit could not be confirmed. No changes were saved."].includes(error.message) &&
+        ((error.code === "P0001" && error.details === "TAIWAN_REMARKS_UNCONFIRMED") || error.code === "40001")
+      ) return reply({ code: "REMARKS_UNCONFIRMED", message: "No changes were saved. Your draft is still here; try again." }, 409)
       if (["40P01", "55P03"].includes(error.code || "")) return reply({ message: "Another save or backup is in progress. Your draft is still here; try again shortly." }, 409)
       if (error.code === "22023") return reply({ message: "Check the notice wording and reload its saved version. Your draft is still here." }, 400)
       throw Error("Remarks save unconfirmed")

@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto"
 import { setupNativeCcinfo, literal, waitForBlock } from "./fixtures/native-postgres-ccinfo.mjs"
 import { spcStemFixtureSql } from "./fixtures/spc-stem-sql.mjs"
 import { createSpcStemRoute, enquiry, session, users, expectedVersion } from "./fixtures/spc-stem-api.mjs"
+import { currentSpcWriteDefinition, nativeSpcPostgrestError } from "./fixtures/spc-write-conflicts-sql.mjs"
 
 const supplierSession = { ...session, username: users[1].username, displayName: users[1].displayName, role: "SUPPLIER TRADER", userId: users[1].id }
 const state = f => f.owner.one(`select jsonb_build_object(
@@ -47,7 +48,7 @@ function app(f, options = {}) {
           await client.query("commit;")
           if(options.loseResponse)throw new Error("Injected lost response after fixture commit")
           return {data,error:null}
-        } catch(error){return{data:null,error:{code:error.code,message:error.message}}}
+        } catch(error){return{data:null,error:nativeSpcPostgrestError(error)}}
       },
     }),
   })
@@ -104,7 +105,7 @@ test("native actual fixture API atomically saves, completes and version-protects
       await f.owner.query(`create or replace function public.fail_fixture_source() returns trigger language plpgsql as $$ begin if new.id='${payload.enquiryId}'::uuid then raise exception 'Injected source synchronization failure'; end if;return new;end $$;
         create trigger fail_fixture_source before update on public.spc_enquiries for each row execute function public.fail_fixture_source();`)
       const before=await state(f),response=await app(f).patch({...payload,action:"complete"})
-      assert.equal(response.status,500,JSON.stringify(response));assert.match(response.body.message,/Injected source synchronization failure/)
+      assert.equal(response.status,500,JSON.stringify(response));assert.equal(response.body.message,"Failed to save SPC fixture.")
       assert.deepEqual(await state(f),before)
       await f.owner.query("drop trigger fail_fixture_source on public.spc_enquiries;")
     })
@@ -203,6 +204,5 @@ test("native actual fixture API atomically saves, completes and version-protects
   } finally {await f.close()}
 })
 test("fresh schema includes the exact additive fixture migration",()=>{
-  const migration=fs.readFileSync(new URL("../supabase/migrations/20261015073258_atomic_spc_fixture_edits.sql",import.meta.url),"utf8")
-  assert.ok(fs.readFileSync(new URL("../supabase/spc_schema.sql",import.meta.url),"utf8").includes(migration.trim()))
+  assert.ok(fs.readFileSync(new URL("../supabase/spc_schema.sql",import.meta.url),"utf8").includes(currentSpcWriteDefinition("update_spc_fixture_with_enquiry")))
 })

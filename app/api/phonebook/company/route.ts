@@ -19,7 +19,10 @@ export async function POST(request: Request) {
       p_id: input.id, p_expected_updated_at: input.expectedUpdatedAt, p_patch: input.patch,
     })
     if (error) {
-      if (error.code === "40001") return reply(PHONEBOOK_COMPANY_CONFLICT, 409)
+      if (
+        error.message === "The company changed or was removed. Reopen it." &&
+        ((error.code === "P0001" && error.details === "PHONEBOOK_COMPANY_CONFLICT") || error.code === "40001")
+      ) return reply(PHONEBOOK_COMPANY_CONFLICT, 409)
       if (["40P01", "55P03"].includes(error.code || "")) return reply("Another change is being saved. Please try again shortly.", 409)
       if (error.code === "23505") return reply("Another company already uses this name. Choose a different name.", 409)
       if (error.code === "23514") return reply("Some contacts have conflicting company links. No changes were saved; ask an administrator to check them.", 409)

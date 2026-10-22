@@ -9,16 +9,20 @@ import {
 import { listSpcUserReferenceOptions } from "@/lib/spcUsers"
 import { loadSpcSupplierOptions } from "@/lib/spcSuppliers"
 import { timedJson } from "@/lib/serverTiming"
+import { isUnclassifiedSpcDatabaseError, spcWriteRefusalMessage } from "@/lib/spcWriteErrors"
 
 export const dynamic = "force-dynamic"
 
 function errorResponse(error: unknown, fallback: string) {
+  const refusal = spcWriteRefusalMessage(error, "fixture")
+  if (refusal) return NextResponse.json({ message: refusal }, { status: 409 })
+  if (isUnclassifiedSpcDatabaseError(error)) return NextResponse.json({ message: fallback }, { status: 500 })
   const message = error instanceof Error ? error.message
     : typeof error === "object" && error !== null && "message" in error && typeof error.message === "string"
       ? error.message : fallback
   const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : ""
   const status =
-    code === "40001" ? 409 : code === "42501" ? 403 : code === "22023" ? 400 : message === "Unauthorized"
+    code === "42501" ? 403 : code === "22023" ? 400 : message === "Unauthorized"
       ? 401
       : message === "Forbidden"
         ? 403

@@ -28,13 +28,22 @@ test("library revision is stable across row ordering and matches the database en
   )
 })
 
-test("Postgres serialization and uniqueness failures are exposed as write conflicts", () => {
-  assert.equal(isEmailTemplateConflict({ code: "40001", message: "serialization" }), true)
+test("only the exact canonical business marker or independent uniqueness path is a write conflict", () => {
+  assert.equal(isEmailTemplateConflict({ code: "P0001", message: "EMAIL_TEMPLATE_CONFLICT" }), true)
+  assert.equal(isEmailTemplateConflict({ code: "40001", message: "EMAIL_TEMPLATE_CONFLICT" }), true)
   assert.equal(isEmailTemplateConflict({ code: "23505", message: "duplicate slug" }), true)
-  assert.equal(
-    isEmailTemplateConflict({ code: "P0001", details: "EMAIL_TEMPLATE_CONFLICT" }),
-    true,
-  )
+  for (const error of [
+    { code: "40001", message: "serialization" },
+    { code: "P0001", details: "EMAIL_TEMPLATE_CONFLICT" },
+    { code: "P0001", message: "email_template_conflict" },
+    { code: "P0001", message: "EMAIL_TEMPLATE_CONFLICT: private-id" },
+    { code: "P0001", message: "OTHER_EMAIL_TEMPLATE_CONFLICT" },
+    { code: "22023", message: "EMAIL_TEMPLATE_CONFLICT" },
+    { code: "P0001", message: "OUTLOOK_TEMPLATE_SOURCE_SYNC_PENDING" },
+    { code: "P0001", message: "OUTLOOK_TEMPLATE_RECIPIENT_EVIDENCE_STALE" },
+    { code: "P0001", message: "OTHER_ERROR", details: "EMAIL_TEMPLATE_CONFLICT" },
+    null,
+  ]) assert.equal(isEmailTemplateConflict(error), false, JSON.stringify(error))
   assert.equal(isEmailTemplateConflict({ code: "22023", message: "invalid input" }), false)
 
   const conflict = new EmailTemplateConflictError()
