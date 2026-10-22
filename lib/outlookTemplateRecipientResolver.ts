@@ -140,7 +140,11 @@ export function splitOutlookRecipientText(value: string) {
 
   for (let index = 0; index < text.length; index += 1) {
     const char = text.charAt(index)
-    if (char === "\"" && text.charAt(index - 1) !== "\\") inQuote = !inQuote
+    if (char === "\"") {
+      let slashes = 0
+      for (let before = index - 1; before >= 0 && text.charAt(before) === "\\"; before -= 1) slashes += 1
+      if (slashes % 2 === 0) inQuote = !inQuote
+    }
     if (!inQuote && char === "<") angleDepth += 1
     if (!inQuote && char === ">" && angleDepth > 0) angleDepth -= 1
     if (!inQuote && angleDepth === 0 && (char === "," || char === ";")) {
@@ -157,17 +161,20 @@ export function splitOutlookRecipientText(value: string) {
 
 function parseRecipientLiteral(literal: string) {
   const trimmed = cleanText(literal)
+  const unquote = (value: string) => value.startsWith('"') && value.endsWith('"')
+    ? value.slice(1, -1).replace(/\\(["\\])/g, "$1")
+    : value
   const angleMatch = trimmed.match(/^(.*?)\s*<([^<>]+)>\s*$/)
   if (!angleMatch) {
     return {
-      displayName: trimmed.includes("@") ? "" : trimmed.replace(/^"+|"+$/g, ""),
-      sourceValue: trimmed.replace(/^"+|"+$/g, ""),
+      displayName: trimmed.includes("@") ? "" : unquote(trimmed),
+      sourceValue: unquote(trimmed),
     }
   }
 
   return {
-    displayName: cleanText(angleMatch[1]).replace(/^"+|"+$/g, ""),
-    sourceValue: cleanText(angleMatch[2]).replace(/^"+|"+$/g, ""),
+    displayName: unquote(cleanText(angleMatch[1])),
+    sourceValue: unquote(cleanText(angleMatch[2])),
   }
 }
 
@@ -279,16 +286,27 @@ function resolveField(
   value: string,
   lookups: ReturnType<typeof buildResolverLookups>,
   previousRefs: OutlookTemplateRecipientRef[] = [],
+  sameCertification = false,
 ) {
   return splitOutlookRecipientText(value).map<OutlookTemplateRecipientRef>((literal, position) => {
     const { displayName, sourceValue } = parseRecipientLiteral(literal)
-    const previousRef = previousRefs[position]
+    const sameLiteral = previousRefs.filter((ref) =>
+      ref.literal === literal &&
+      ["contact", "group"].includes(ref.kind) && ["resolved", "missing"].includes(ref.status),
+    )
+    const samePosition = previousRefs.find((ref) => ref.field === field && ref.position === position)
+    // An unchanged token keeps its identity when moved. Never use a display
+    // name/email lookup to replace a previously bound source with another ID.
+    const uniqueSourceKeys = new Set(sameLiteral.map((ref) => `${ref.kind}:${ref.sourceId}`))
+    const previousRef = samePosition?.literal === literal
+      ? samePosition
+      : uniqueSourceKeys.size === 1 ? sameLiteral[0] : undefined
+    if (!previousRef && uniqueSourceKeys.size > 1) {
+      throw new Error("Existing recipient identities are ambiguous after reordering. Review the recipient fields before saving.")
+    }
     const previousStableSourceId =
       previousRef &&
-      previousRef.field === field &&
-      previousRef.position === position &&
       previousRef.literal === literal &&
-      previousRef.sourceValue === sourceValue &&
       ["contact", "group"].includes(previousRef.kind) &&
       ["resolved", "missing"].includes(previousRef.status)
         ? cleanText(previousRef.sourceId)
@@ -298,7 +316,9 @@ function resolveField(
       const stableCandidate = lookups.bySourceKey.get(
         `${previousRef.kind}:${previousStableSourceId}`,
       )
-      if (stableCandidate) {
+      // A source UPDATE/membership change marks its bound ref missing in the
+      // same transaction. The old certification must not revive it on Save.
+      if (stableCandidate && !(sameCertification && previousRef.status === "missing")) {
         return {
           field,
           position,
@@ -440,24 +460,31 @@ export async function loadOutlookTemplateRecipientResolver(): Promise<OutlookTem
     certifiedAt,
     sourceFingerprint,
     resolve(fields, previousResolution = null) {
+      const previousRefs = previousResolution
+        ? [...previousResolution.refs.to, ...previousResolution.refs.cc, ...previousResolution.refs.bcc]
+        : []
+      const sameCertification = previousResolution?.certificationRunId === certificationRunId
       const refs = {
         to: resolveField(
           "to",
           fields.to,
           lookups,
-          previousResolution?.refs.to,
+          previousRefs,
+          sameCertification,
         ),
         cc: resolveField(
           "cc",
           fields.cc,
           lookups,
-          previousResolution?.refs.cc,
+          previousRefs,
+          sameCertification,
         ),
         bcc: resolveField(
           "bcc",
           fields.bcc,
           lookups,
-          previousResolution?.refs.bcc,
+          previousRefs,
+          sameCertification,
         ),
       }
       const allRefs = [...refs.to, ...refs.cc, ...refs.bcc]

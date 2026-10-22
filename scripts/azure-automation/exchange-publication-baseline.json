@@ -1,9 +1,9 @@
 {
   "schema": "fcuno.exchange-publication-baseline/v1",
-  "verifiedAt": "2026-10-14T11:32:46Z",
-  "retrievedAt": "2026-10-14T11:21:47.594Z",
-  "workerVersion": "fcuno-exchange-runbook/2026-10-09.1",
-  "sourceSha256": "7fbbff302cc843e231ca6b53a5490a9781839f7a84919117773ad4b2eeb030a4",
+  "verifiedAt": "2026-10-22T09:37:32Z",
+  "retrievedAt": "2026-10-22T09:36:55Z",
+  "workerVersion": "fcuno-exchange-runbook/2026-10-22.2",
+  "sourceSha256": "2ce967e49af37e6513efa00c054793328888a5b031d06c66fd0b3fa0243c43ae",
   "sourcePath": "scripts/azure-automation/sync-fcuno-outlook-addressbook.ps1",
   "productionOrigin": "https://fcuno.com",
   "supabaseProject": "gglyugbrnyvyfktgwert",
@@ -17,6 +17,33 @@
     "runtimeVersion": "7.6",
     "exchangeModuleVersion": "3.10.1"
   },
+  "publicationEvidence": {
+    "method": "Signed-in Azure Portal publication followed by independent published-source Export and exact binary comparison",
+    "sourceBytes": 337484,
+    "libraryOnlyDraftTest": "Completed on FCUNO-PowerShell-7-6; LibraryOnly=true returns before configuration, Exchange connection and synchronization",
+    "runtimePackageReadback": "PowerShell 7.6; ExchangeOnlineManagement 3.10.1 Available",
+    "oldJobReadback": "Last pre-publication hourly job completed at 17:32 HKT; no live database lease at 09:37:22 UTC; the old 06:10 HKT full job was already stopped at 09:11 HKT",
+    "previousWorkerVersion": "fcuno-exchange-runbook/2026-10-09.1",
+    "previousSourceSha256": "7fbbff302cc843e231ca6b53a5490a9781839f7a84919117773ad4b2eeb030a4",
+    "scope": "Published bytes/runtime and additive prerequisites verified; this record does not itself assert a subsequent live full Exchange verification"
+  },
+  "prerequisiteMigrations": [
+    {
+      "sourcePath": "supabase/migrations/20261022040757_propagate_outlook_source_recipient_changes.sql",
+      "sourceSha256": "e30b8960221f1efe56d9db55c447979bfdad6012a0c758c13843cf541e2a012a",
+      "installedVersion": "20261022092059"
+    },
+    {
+      "sourcePath": "supabase/migrations/20261022080348_verify_hourly_outlook_recipient_projection.sql",
+      "sourceSha256": "6f0e6dd8afe542f3e765ee056ab99818809c4d04df3696369d4da289e40599a2",
+      "installedVersion": "20261022092121"
+    },
+    {
+      "sourcePath": "supabase/migrations/20261022092342_fix_atomic_outlook_full_rpc_name.sql",
+      "sourceSha256": "ca88b12f2b04960be26f2c7d11382034d919c765974c71fb62124e90b451d4c5",
+      "installedVersion": "20261022092940"
+    }
+  ],
   "migration": {
     "version": "20261007065554",
     "name": "outlook_exchange_alert_delivery",

@@ -213,6 +213,35 @@ export async function POST(request: Request) {
       )
     }
 
+    const sourceSyncError = error as { code?: unknown; message?: unknown } | null
+    if (
+      sourceSyncError?.code === "P0001" &&
+      typeof sourceSyncError.message === "string" &&
+      /^OUTLOOK_TEMPLATE_SOURCE_SYNC_PENDING(?::|$)/.test(sourceSyncError.message)
+    ) {
+      return NextResponse.json(
+        {
+          code: "OUTLOOK_TEMPLATE_SOURCE_SYNC_PENDING",
+          message: "A template recipient is waiting for address-book synchronization. Try again after synchronization finishes.",
+        },
+        { status: 409 }
+      )
+    }
+
+    if (
+      sourceSyncError?.code === "P0001" &&
+      typeof sourceSyncError.message === "string" &&
+      /^OUTLOOK_TEMPLATE_RECIPIENT_EVIDENCE_STALE(?::|$)/.test(sourceSyncError.message)
+    ) {
+      return NextResponse.json(
+        {
+          code: "OUTLOOK_TEMPLATE_RECIPIENT_EVIDENCE_STALE",
+          message: "Address-book verification changed while this template was being saved. Reload Outlook Templates and try again.",
+        },
+        { status: 409 }
+      )
+    }
+
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
       return NextResponse.json(
         { message: error.message },
