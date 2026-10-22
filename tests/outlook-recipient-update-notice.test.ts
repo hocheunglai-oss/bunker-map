@@ -2,8 +2,30 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 import { transformSync } from "esbuild"
+import { parse, type DefaultTreeAdapterMap } from "parse5"
 
 const source = (file: string) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8")
+
+function inlineScript(html: string): string {
+  const visit = (node: DefaultTreeAdapterMap["node"]): string | undefined => {
+    if ("tagName" in node && node.tagName === "script" && !node.attrs.some((attr) => attr.name === "src")) {
+      return node.childNodes.map((child) => "value" in child ? child.value : "").join("")
+    }
+    if ("childNodes" in node) {
+      for (const child of node.childNodes) {
+        const script = visit(child)
+        if (script !== undefined) return script
+      }
+    }
+  }
+  const script = visit(parse(html))
+  assert.ok(script, "the actual taskpane must include its inline script")
+  return script
+}
+
+test("the fixture parses HTML script tags rather than filtering markup with a regexp", () => {
+  assert.equal(inlineScript('<script src="office.js"></script><SCRIPT data-test="x">const ready = true;</SCRIPT >'), "const ready = true;")
+})
 
 function taskpaneResolver() {
   const htmlTemplate = source("app/api/outlook-addin/taskpane/route.ts").match(
@@ -12,8 +34,7 @@ function taskpaneResolver() {
   assert.ok(htmlTemplate)
   const templateBody = htmlTemplate[1].replace(/\$\{JSON\.stringify\([^)]+\)\}/g, '"https://fcuno.test/api"')
   const html = Function(`return \`${templateBody}\`;`)() as string
-  const script = html.match(/<script>\s*([\s\S]*?)\s*<\/script>/)?.[1]
-  assert.ok(script)
+  const script = inlineScript(html)
   const functions = ["splitRecipientText", "addParsedRecipient", "resolveStoredRecipientRefs"].map((name) => {
     const match = script.match(new RegExp(`function ${name}\\([\\s\\S]*?\\) \\{[\\s\\S]*?\\n        \\}`))
     assert.ok(match, `${name} must come from the actual taskpane`)
