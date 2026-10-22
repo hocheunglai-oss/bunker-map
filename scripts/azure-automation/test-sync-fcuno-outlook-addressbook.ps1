@@ -1046,6 +1046,9 @@ $atomicVerificationSummary = [ordered]@{
   sourceFenceStable = $true
   queueFence = "42@2026-07-22T07:15:00Z"
   sourceFingerprint = $atomicProjectionFingerprint
+  verificationScope = "full"
+  executionMode = "full"
+  readOnlyVerification = $false
 }
 Set-Item Function:Start-Sleep -Value { param($Seconds) }
 Set-Item Function:Invoke-SupabaseRest -Value {
@@ -1179,7 +1182,10 @@ Set-Item Function:Invoke-SupabaseRest -Value {
       }
     }
   }
-  if ($Path -eq "rpc/certify_staged_full_outlook_exchange_truth") {
+  if ($Path -eq "rpc/certify_staged_full_outlook_truth_and_activate_templates") {
+    Assert-Equal "full" $Body.p_verification_summary.verificationScope "Daily full certification must identify a full proof"
+    Assert-Equal "full" $Body.p_verification_summary.executionMode "Daily full certification must retain full execution mode"
+    Assert-True ($Body.p_verification_summary.readOnlyVerification -is [bool] -and -not $Body.p_verification_summary.readOnlyVerification) "Daily full certification may not be mislabeled read-only"
     $script:certificationRpcCalls += 1
     $script:certificationRpcBodies += [pscustomobject]@{
       run = $Body.p_run_id
@@ -1195,6 +1201,10 @@ Set-Item Function:Invoke-SupabaseRest -Value {
     if ($script:certificationRpcCalls -eq 1) { throw "The HTTP response was lost after full certification committed." }
     return [pscustomobject]@{
       certified = $true
+      atomicTemplateActivation = $true
+      verificationScope = "full"
+      executionMode = "full"
+      readOnlyVerification = $false
       idempotent = $true
       reason = "This full certification run was already committed; returning its durable result."
       runId = $script:CurrentQueueRunId
@@ -1206,6 +1216,26 @@ Set-Item Function:Invoke-SupabaseRest -Value {
       sourceSnapshotHash = $atomicProjectionFingerprint
       rawSourceSnapshotHash = ("b" * 64)
       workerVersion = $ExchangeTruthWorkerVersion
+      templateReconciliation = [pscustomobject]@{
+        reconciled = $true
+        idempotent = $false
+        runId = $script:CurrentQueueRunId
+        sourceFingerprint = $atomicProjectionFingerprint
+        certifiedAt = "2026-07-22T07:21:00Z"
+        updatedTemplates = 556
+        verification = [pscustomobject]@{
+          schema = "fcuno.outlook-template-recipient-truth/v2"
+          valid = $true
+          sourceTruthValid = $true
+          certificationRunId = $script:CurrentQueueRunId
+          sourceFingerprint = $atomicProjectionFingerprint
+          certifiedAt = "2026-07-22T07:21:00Z"
+          templates = [pscustomobject]@{
+            total = 556; unresolved = 0; stale = 0; invalidShape = 0
+            withMissingRecipients = 51; withAmbiguousRecipients = 1; sendable = 504
+          }
+        }
+      }
       queueFence = [pscustomobject]@{ expectedSequence = 42; expectedUpdatedAt = "2026-07-22T07:15:00Z"; currentSequence = 42; currentUpdatedAt = "2026-07-22T07:15:00Z" }
       supersededCount = 1
       supersededRows = @([pscustomobject]@{
@@ -1473,13 +1503,16 @@ try {
   Assert-Equal $atomicProjectionFingerprint $fullResolvedStats.sourceSnapshotHash "An eligible full run must retain the exact canonical projection snapshot hash"
   Assert-Equal ("b" * 64) $fullResolvedStats.rawSourceSnapshotHash "An eligible full run must retain the raw FCUNO source snapshot hash"
   Assert-Equal $ExchangeTruthWorkerVersion $fullResolvedStats.truthWorkerVersion "An eligible full run must retain the evidence worker version"
-  Assert-Equal 3 $script:templateReconciliationRpcCalls "An ambiguous Outlook-template batch response must retry and then continue until every stale template is reconciled"
+  Assert-Equal 0 $script:templateReconciliationRpcCalls "New daily full certification must atomically activate templates without later batches"
+  $historicalReconciliation = Commit-OutlookTemplateRecipientReconciliation $certificationResult $atomicProjectionFingerprint
+  Assert-True $historicalReconciliation.reconciled "Historical partial-state recovery must retain its separate existing-certificate path"
+  Assert-Equal 3 $script:templateReconciliationRpcCalls "An ambiguous historical Outlook-template batch response must retry and then continue until every stale template is reconciled"
   Assert-Equal $script:templateReconciliationRpcBodies[0].run $script:templateReconciliationRpcBodies[1].run "Outlook-template reconciliation retry must reuse the exact certification run UUID"
   Assert-Equal $script:templateReconciliationRpcBodies[0].fingerprint $script:templateReconciliationRpcBodies[1].fingerprint "Outlook-template reconciliation retry must reuse the exact certified projection fingerprint"
   Assert-Equal 25 $script:templateReconciliationRpcBodies[0].batchLimit "Outlook-template reconciliation must keep every database transaction to a bounded batch"
   Assert-True ([bool]$fullResolvedStats.templateRecipientTruthReconciled) "A full run is not successful until Outlook-template recipient truth is reconciled"
   Assert-True (-not [bool]$fullResolvedStats.templateRecipientTruthIdempotent) "A completing Outlook-template batch that updates evidence must not be labeled idempotent"
-  Assert-Equal 556 $fullResolvedStats.templateRecipientTruthUpdatedTemplates "The final batch receipt must report every template on current certified evidence"
+  Assert-Equal 556 $fullResolvedStats.templateRecipientTruthUpdatedTemplates "The atomic activation receipt must report the updated templates on current certified evidence"
   Assert-Equal 556 $fullResolvedStats.templateRecipientTruthTotalTemplates "The full run must retain the total Outlook-template verification count"
   Assert-Equal 504 $fullResolvedStats.templateRecipientTruthSendableTemplates "The full run must retain the currently sendable Outlook-template count"
   Assert-Equal 51 $fullResolvedStats.templateRecipientTruthMissingTemplates "Missing Outlook-template recipients must remain visible as safe send blocks"

@@ -1186,12 +1186,14 @@ export async function GET(request: Request) {
           var current = "";
           var inQuote = false;
           var angleDepth = 0;
+          var backslashRun = 0;
 
           for (var i = 0; i < text.length; i += 1) {
             var char = text.charAt(i);
-            if (char === '"' && text.charAt(i - 1) !== "\\\\") inQuote = !inQuote;
+            if (char === '"' && backslashRun % 2 === 0) inQuote = !inQuote;
             if (!inQuote && char === "<") angleDepth += 1;
             if (!inQuote && char === ">" && angleDepth > 0) angleDepth -= 1;
+            backslashRun = char === "\\\\" ? backslashRun + 1 : 0;
             if (!inQuote && angleDepth === 0 && (char === "," || char === ";")) {
               if (current.trim()) parts.push(current.trim());
               current = "";
@@ -1745,7 +1747,7 @@ export async function GET(request: Request) {
               Number(counts.total) !==
                 resolution.refs.to.length + resolution.refs.cc.length + resolution.refs.bcc.length ||
               Number(counts.total) !== Number(counts.resolved) + Number(counts.external)) {
-            throw new Error("This template is not resolved against the current certified address book. Re-save it in FC Uno before inserting.");
+            throw new Error("A template recipient needs verification. Wait for the address-book sync, or review the template in FC Uno before inserting.");
           }
 
           var sourceText = String(template[field] || "");
@@ -1771,7 +1773,7 @@ export async function GET(request: Request) {
                   current.kind !== ref.kind ||
                   String(current.sourceId) !== String(ref.sourceId) ||
                   !current.emailAddress) {
-                throw new Error("A certified recipient is no longer present in the current Exchange projection.");
+                throw new Error("A template recipient cannot be verified against the current address book. Wait for synchronization or review the template in FC Uno.");
               }
               addParsedRecipient(recipients, seen, {
                 displayName: current.displayName || current.emailAddress,
@@ -1787,7 +1789,7 @@ export async function GET(request: Request) {
               });
               return;
             }
-            throw new Error("This template contains an unresolved, ambiguous or missing recipient.");
+            throw new Error("A template recipient needs verification. Wait for the address-book sync, or review the template in FC Uno before inserting.");
           });
           return recipients;
         }

@@ -1,0 +1,59 @@
+{
+  "schema": "fcuno.exchange-publication-candidate/v1",
+  "preparedAt": "2026-10-22T09:23:37Z",
+  "reviewState": "independently-reviewed-and-tested",
+  "publicationState": "published-byte-verified",
+  "publicationVerifiedAt": "2026-10-22T09:37:32Z",
+  "baseCommit": "463d365696df348720cd35b294a1f729d18f7406",
+  "sourcePath": "scripts/azure-automation/sync-fcuno-outlook-addressbook.ps1",
+  "workerVersion": "fcuno-exchange-runbook/2026-10-22.2",
+  "sourceSha256": "2ce967e49af37e6513efa00c054793328888a5b031d06c66fd0b3fa0243c43ae",
+  "supersedesUnpublishedTimeoutOnlyCandidateSha256": "7e4987b2b3ea4d0f2baeea4d2d6191cd16667f4526294b4e3a477df4bd0acacc",
+  "liveBaselinePath": "scripts/azure-automation/exchange-publication-baseline.json",
+  "priorLiveBaselineSha256": "8aeee5e163c3fa17bdbd40ace1d77c804102391224f655a64e719a949cd82657",
+  "supersedesPublishedWorkerVersion": "fcuno-exchange-runbook/2026-10-09.1",
+  "supersedesPublishedSourceSha256": "7fbbff302cc843e231ca6b53a5490a9781839f7a84919117773ad4b2eeb030a4",
+  "targetIdentitySource": "The exact Azure, Supabase and production-origin identities in the unchanged hash-pinned live baseline and config/fcunoConnections.ts",
+  "changeScope": [
+    "60-second connection/pending timeout and60-second idle-read timeout on existing Supabase REST requests",
+    "One monotonic600-second derived-template reconciliation decision budget shared across existing batches, retries and backoff",
+    "Shrink each derived request timeout to the remaining budget; reject a result that arrives or finishes validation after budget expiry",
+    "After settled hourly delivery or server-identified retry work, perform genuine full read-only Exchange contact, profile, group and membership verification under the existing incremental run and renewable lease",
+    "Certify hourly read-only and daily full proof through their separate same-nine-argument atomic wrappers and require exact nested activation receipts; neither publishes a certificate before later batches",
+    "Recover historical derived-only work against its existing certificate with no Exchange reads, new certificate or TTL reset; skip full reads when the server reports no work",
+    "One monotonic20-minute full-verification decision budget prevents new read attempts and late success acknowledgement; no forced cancellation of an active Exchange cmdlet",
+    "Narrow typed/prefixed hourly read-only delay errors preserve transient provider/SQL lock causes, ordinary source/queue races and budget expiry for the unchanged persistence-gated alert policy; real mismatch, malformed proof and access failures remain immediately actionable"
+  ],
+  "unchangedContracts": [
+    "Authentication headers, origin/path construction and JSON serialization",
+    "Exchange connection, contact/group ownership and mutation rules",
+    "All existing full-proof staging, raw-source, canonical projection, source/queue fence, identity, fingerprint, count and immutable-ledger guards",
+    "Daily full retains full execution mode, its existing full lease, provider mutation rules and terminal-row supersession guards; it does not claim read-only execution",
+    "Historical derived-only recovery retains its existing25-template batch flow against an existing certificate",
+    "Existing maximum3 idempotent atomic attempts and100-batch ceiling",
+    "Lease policy, recipient validation, permissions and notification policy"
+  ],
+  "newServerPrerequisite": {
+    "refreshStateRpc": "get_outlook_template_recipient_refresh_state(uuid)",
+    "atomicCertificationRpc": "certify_staged_read_only_outlook_exchange_truth(uuid,bigint,timestamptz,text,text,jsonb,jsonb,jsonb,text)",
+    "dailyAtomicCertificationRpc": "certify_staged_full_outlook_truth_and_activate_templates(uuid,bigint,timestamptz,text,text,jsonb,jsonb,jsonb,text)",
+    "apiIdentifierRequirement": "Every literal worker RPC HTTP path segment must be at most63 UTF8 bytes and the daily endpoint must exactly equal the PostgreSQL catalog name after the append-only corrective rename migration",
+    "activationRequirement": "Native atomicTemplateActivation true plus exact immutable nested templateReconciliation truth-v2 receipt in the same transaction as the full-scope certificate",
+    "deploymentState": "installed-and-exact-short-RPC-name-verified-before-worker-publication"
+  },
+  "testRuntime": {
+    "version": "7.6.0",
+    "officialRelease": "https://github.com/PowerShell/PowerShell/releases/tag/v7.6.0",
+    "officialOsxArm64ArchiveSha256": "bb52db90e964ee0b91e93f559b350878c6b27c12fd51830d8eca1793712b9639"
+  },
+  "timeoutSemantics": "OperationTimeoutSeconds limits gaps between body reads, not an active stream as a whole. Monotonic budgets prevent new batches/read retries/backoff and late success acknowledgement; they cannot forcibly interrupt a continuously streaming REST response, an active Exchange cmdlet or a lock-renewal call in progress.",
+  "providerReadEstimate": "4+2G Exchange cmdlet invocations per full verification,722 for the last observed359 canonical groups; cmdlet pagination means this is not a measured HTTP request count or live duration.",
+  "officialTimeoutDocumentation": "https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/invoke-restmethod?view=powershell-7.6",
+  "requiredBeforeUpdatingLiveBaseline": [
+    "Independent review and actual local regression receipts for these exact source bytes",
+    "Apply and verify the independently reviewed server-side refresh-state and atomic-activation prerequisite without weakening existing full-proof checks",
+    "Root verifies the exact authorized Azure account, subscription, tenant, Automation account, runbook and runtime",
+    "Root publishes only the reviewed candidate and independently reads back exact bytes/version/hash",
+    "Only then replace the live baseline with actual publication evidence; never change historical verifiedAt to claim an unpublished candidate is live"
+  ]
+}

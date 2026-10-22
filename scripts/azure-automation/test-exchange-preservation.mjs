@@ -29,6 +29,9 @@ for (const file of [
   "test-exchange-email-content.ps1",
   "test-exchange-alert-policy.ps1",
   "test-sync-fcuno-outlook-addressbook.ps1",
+  "test-exchange-supabase-timeouts.ps1",
+  "test-exchange-reconciliation-budget.ps1",
+  "test-exchange-hourly-recipient-refresh.ps1",
 ]) {
   const result = spawnSync(executable, ["-NoLogo", "-NoProfile", "-NonInteractive", "-OutputFormat", "Text", "-EncodedCommand", Buffer.from(guardedFixture, "utf16le").toString("base64")], {
     stdio: "inherit",
@@ -37,3 +40,12 @@ for (const file of [
   })
   if (result.error || result.status !== 0) throw new Error(`Exchange regression fixture failed: ${file}`, { cause: result.error })
 }
+
+// This separate fixture permits only its own127.0.0.1 HTTP server. It imports
+// -LibraryOnly with synthetic settings, clean child environments and no SMTP
+// or Exchange connection, and proves the actual PowerShell timeout behavior.
+const localHttp = spawnSync(process.execPath, ["--test", fileURLToPath(new URL("../../tests/exchange-supabase-timeouts-local.test.mjs", import.meta.url))], {
+  stdio: "inherit", timeout: 30000,
+  env: { ...process.env, FCUNO_PWSH_PATH: executable },
+})
+if (localHttp.error || localHttp.status !== 0) throw new Error("Exchange loopback REST timeout regression failed", { cause: localHttp.error })

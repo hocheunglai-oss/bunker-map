@@ -18,7 +18,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-10-09.1"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-10-22.2"
 # Generated from config/fcunoConnections.ts; validate before Azure publication.
 $ExchangeNotificationAddressBookUrl = "https://fcuno.com/admin/outlookaddressbook"
 $script:ExchangeNotificationRunReceipts = @{}
@@ -139,7 +139,13 @@ function Connect-ExchangeOnlineWithRetry(
   }
 }
 
-function Invoke-SupabaseRest($Method, $Path, $Body = $null) {
+function Invoke-SupabaseRest(
+  $Method,
+  $Path,
+  $Body = $null,
+  [ValidateRange(1, 60)][int]$ConnectionTimeoutSeconds = 60,
+  [ValidateRange(1, 60)][int]$OperationTimeoutSeconds = 60
+) {
   $supabaseUrl = Get-NormalizedAutomationUrl "NEXT_PUBLIC_SUPABASE_URL"
   $serviceRoleKey = Get-AutomationSetting "SUPABASE_SERVICE_ROLE_KEY"
   $headers = @{
@@ -157,9 +163,9 @@ function Invoke-SupabaseRest($Method, $Path, $Body = $null) {
     } elseif ($Method -eq "PATCH") {
       $headers["Prefer"] = "return=representation"
     }
-    return Invoke-RestMethod -Method $Method -Uri $uri -Headers $headers -Body ($Body | ConvertTo-Json -Depth 20)
+    return Invoke-RestMethod -Method $Method -Uri $uri -Headers $headers -Body ($Body | ConvertTo-Json -Depth 20) -ConnectionTimeoutSeconds $ConnectionTimeoutSeconds -OperationTimeoutSeconds $OperationTimeoutSeconds
   }
-  return Invoke-RestMethod -Method $Method -Uri $uri -Headers $headers
+  return Invoke-RestMethod -Method $Method -Uri $uri -Headers $headers -ConnectionTimeoutSeconds $ConnectionTimeoutSeconds -OperationTimeoutSeconds $OperationTimeoutSeconds
 }
 
 function Clean-Text($Value) {
@@ -2414,20 +2420,125 @@ function Get-OutlookTemplateRecipientBatchContractError(
   return ""
 }
 
+function Get-AtomicExchangeTemplateActivationContractError(
+  $Result,
+  $ExpectedRunId,
+  $ExpectedFingerprint,
+  [bool]$ReadOnlyVerification = $true
+) {
+  foreach ($fieldName in @("certified", "atomicTemplateActivation")) {
+    $value = Get-MapValue $Result $fieldName
+    if ($value -isnot [bool] -or -not $value) {
+      return "the atomic full-verification receipt has no native true '$fieldName' confirmation"
+    }
+  }
+  $actualReadOnlyVerification = Get-MapValue $Result "readOnlyVerification"
+  $expectedExecutionMode = if ($ReadOnlyVerification) { "incremental" } else { "full" }
+  if ((Clean-Text (Get-MapValue $Result "verificationScope")) -cne "full" -or
+      (Clean-Text (Get-MapValue $Result "executionMode")) -cne $expectedExecutionMode -or
+      $actualReadOnlyVerification -isnot [bool] -or $actualReadOnlyVerification -ne $ReadOnlyVerification) {
+    return "the atomic full-verification receipt has an invalid scope, execution mode or native read-only flag"
+  }
+  $activation = Get-MapValue $Result "templateReconciliation"
+  if (-not $activation) { return "the atomic template-activation receipt is missing" }
+  $reconciled = Get-MapValue $activation "reconciled"
+  if ($reconciled -isnot [bool] -or -not $reconciled) {
+    return "the atomic template-activation receipt did not confirm reconciliation"
+  }
+  if ((Get-MapValue $activation "idempotent") -isnot [bool]) {
+    return "the atomic template-activation receipt has no native idempotency flag"
+  }
+  $fingerprint = Clean-Text $ExpectedFingerprint
+  if (-not (Clean-Text (Get-MapValue $activation "runId")).Equals(
+      (Clean-Text $ExpectedRunId), [StringComparison]::OrdinalIgnoreCase) -or
+      (Clean-Text (Get-MapValue $activation "sourceFingerprint")) -cne $fingerprint) {
+    return "the atomic template-activation receipt does not match the certified run and projection"
+  }
+  [DateTimeOffset]$certifiedAt = [DateTimeOffset]::MinValue
+  if (-not [DateTimeOffset]::TryParse(
+      (Clean-Text (Get-MapValue $Result "certifiedAt")),
+      [Globalization.CultureInfo]::InvariantCulture,
+      [Globalization.DateTimeStyles]::AllowWhiteSpaces, [ref]$certifiedAt)) {
+    return "the atomic full-verification receipt has an invalid certification time"
+  }
+  if (-not (Test-ExchangeQueueFenceTimestampMatch (Get-MapValue $activation "certifiedAt") $certifiedAt)) {
+    return "the atomic template-activation receipt does not match the certification time"
+  }
+  $updatedTemplates = Get-MapValue $activation "updatedTemplates"
+  if (-not (Test-NativeNonnegativeInt64 $updatedTemplates)) {
+    return "the atomic template-activation receipt has an invalid native updated-template count"
+  }
+  $verification = Get-MapValue $activation "verification"
+  if ((Clean-Text (Get-MapValue $verification "schema")) -cne "fcuno.outlook-template-recipient-truth/v2") {
+    return "the atomic template-activation truth verification schema is invalid"
+  }
+  foreach ($fieldName in @("valid", "sourceTruthValid")) {
+    $value = Get-MapValue $verification $fieldName
+    if ($value -isnot [bool] -or -not $value) {
+      return "the atomic template-activation truth verification did not confirm '$fieldName'"
+    }
+  }
+  if (-not (Clean-Text (Get-MapValue $verification "certificationRunId")).Equals(
+      (Clean-Text $ExpectedRunId), [StringComparison]::OrdinalIgnoreCase) -or
+      (Clean-Text (Get-MapValue $verification "sourceFingerprint")) -cne $fingerprint -or
+      -not (Test-ExchangeQueueFenceTimestampMatch (Get-MapValue $verification "certifiedAt") $certifiedAt)) {
+    return "the atomic template-activation truth verification does not match the exact certification"
+  }
+  $counts = Get-MapValue $verification "templates"
+  foreach ($fieldName in @("total", "unresolved", "stale", "invalidShape", "withMissingRecipients", "withAmbiguousRecipients", "sendable")) {
+    if (-not (Test-NativeNonnegativeInt64 (Get-MapValue $counts $fieldName))) {
+      return "the atomic template-activation truth verification has an invalid native '$fieldName' count"
+    }
+  }
+  foreach ($fieldName in @("unresolved", "stale", "invalidShape")) {
+    if ([long](Get-MapValue $counts $fieldName) -ne 0) {
+      return "the atomic template-activation truth verification still has '$fieldName' template evidence"
+    }
+  }
+  foreach ($fieldName in @("withMissingRecipients", "withAmbiguousRecipients", "sendable")) {
+    if ([long](Get-MapValue $counts $fieldName) -gt [long](Get-MapValue $counts "total")) {
+      return "the atomic template-activation truth verification has more '$fieldName' templates than total templates"
+    }
+  }
+  if ([long]$updatedTemplates -gt [long](Get-MapValue $counts "total")) {
+    return "the atomic template-activation receipt updated more templates than the verified total"
+  }
+  return ""
+}
+
+function Get-ExchangeMonotonicMilliseconds {
+  return ([double][System.Diagnostics.Stopwatch]::GetTimestamp() / [System.Diagnostics.Stopwatch]::Frequency) * 1000
+}
+
+function Get-ExchangeReconciliationRequestTimeouts($DeadlineMilliseconds) {
+  if ($null -eq $DeadlineMilliseconds) { return @{} }
+  $remainingMilliseconds = [double]$DeadlineMilliseconds - (Get-ExchangeMonotonicMilliseconds)
+  if ($remainingMilliseconds -lt 1000) {
+    throw [System.TimeoutException]::new('OUTLOOK_TEMPLATE_RECONCILIATION_BUDGET_EXHAUSTED: derived recipient reconciliation did not finish within its10minute budget; no further batch was started.')
+  }
+  $requestSeconds = [int][Math]::Min(60, [Math]::Floor($remainingMilliseconds / 1000))
+  return @{ ConnectionTimeoutSeconds = $requestSeconds; OperationTimeoutSeconds = $requestSeconds }
+}
+
 function Invoke-ExchangeAtomicRpcWithRetry(
   $Path,
   [hashtable]$Body,
   $SuccessProperty,
   $RequiredSuccessObjectProperty,
   $OperationLabel,
-  $AdditionalContractValidator = $null
+  $AdditionalContractValidator = $null,
+  $ReconciliationDeadlineMilliseconds = $null
 ) {
   $lastAmbiguousError = ""
   for ($attempt = 1; $attempt -le 3; $attempt += 1) {
     try {
+      Get-ExchangeReconciliationRequestTimeouts $ReconciliationDeadlineMilliseconds | Out-Null
       Renew-ExchangeSyncLockIfDue
-      $result = Invoke-SupabaseRest -Method "POST" -Path $Path -Body $Body
+      $requestTimeouts = Get-ExchangeReconciliationRequestTimeouts $ReconciliationDeadlineMilliseconds
+      $result = Invoke-SupabaseRest -Method "POST" -Path $Path -Body $Body @requestTimeouts
+      Get-ExchangeReconciliationRequestTimeouts $ReconciliationDeadlineMilliseconds | Out-Null
       Renew-ExchangeSyncLockIfDue
+      Get-ExchangeReconciliationRequestTimeouts $ReconciliationDeadlineMilliseconds | Out-Null
       $contractError = Get-ExchangeAtomicRpcContractError $result $SuccessProperty $RequiredSuccessObjectProperty
       if (-not $contractError -and $AdditionalContractValidator) {
         $contractError = Clean-Text (& $AdditionalContractValidator $result)
@@ -2438,11 +2549,17 @@ function Invoke-ExchangeAtomicRpcWithRetry(
       if (-not [bool](Get-MapValue $result $SuccessProperty)) {
         throw "$OperationLabel was not accepted: $(Clean-Text (Get-MapValue $result 'reason'))"
       }
+      Get-ExchangeReconciliationRequestTimeouts $ReconciliationDeadlineMilliseconds | Out-Null
       return $result
     } catch {
       $lastAmbiguousError = Clean-Text $_.Exception.Message
+      if ($lastAmbiguousError -like 'OUTLOOK_TEMPLATE_RECONCILIATION_BUDGET_EXHAUSTED:*') { throw }
       $isConfirmedRejection = $lastAmbiguousError -like "$OperationLabel was not accepted:*"
       if ($isConfirmedRejection -or $attempt -ge 3) { throw }
+      if ($null -ne $ReconciliationDeadlineMilliseconds) {
+        # Leave room for the existing2s delay and at least one finite request.
+        Get-ExchangeReconciliationRequestTimeouts ([double]$ReconciliationDeadlineMilliseconds - 2000) | Out-Null
+      }
       Start-Sleep -Seconds 2
     }
   }
@@ -2472,7 +2589,8 @@ function Commit-FullExchangeQueueCertification(
   $SourceFingerprint,
   $ProjectionCanonicalJson = $null,
   $ProjectionCounts = $null,
-  $VerificationSummary = $null
+  $VerificationSummary = $null,
+  [bool]$ReadOnlyVerification = $false
 ) {
   if (-not (Test-GuidText $script:CurrentQueueRunId)) { throw "A valid active run UUID is required for full Exchange queue certification." }
   $fingerprint = Clean-Text $SourceFingerprint
@@ -2529,15 +2647,23 @@ function Commit-FullExchangeQueueCertification(
   $rawSourceCounts = Get-MapValue $rawStageResult "rawSourceCounts"
   $truthContractValidator = {
     param($response)
-    return Get-FullExchangeTruthCertificationContractError `
+    $contractError = Get-FullExchangeTruthCertificationContractError `
       $response `
       $activeRunId `
       $fingerprint `
       $fence.Sequence `
       $fence.UpdatedAt
+    if ($contractError) { return $contractError }
+    if ([bool](Get-MapValue $response "certified")) {
+      return Get-AtomicExchangeTemplateActivationContractError $response $activeRunId $fingerprint $ReadOnlyVerification
+    }
+    return ""
   }.GetNewClosure()
+  $certificationPath = if ($ReadOnlyVerification) {
+    "rpc/certify_staged_read_only_outlook_exchange_truth"
+  } else { "rpc/certify_staged_full_outlook_truth_and_activate_templates" }
   $result = Invoke-ExchangeAtomicRpcWithRetry `
-    "rpc/certify_staged_full_outlook_exchange_truth" `
+    $certificationPath `
     @{
       p_run_id = $script:CurrentQueueRunId
       p_queue_high_water_sequence = [long]$fence.Sequence
@@ -2575,6 +2701,10 @@ function Commit-OutlookTemplateRecipientReconciliation(
       $runId `
       $fingerprint
   }.GetNewClosure()
+  # One monotonic budget covers all batches and their idempotent retries.
+  # Connection and idle-read timeouts bound stalled calls; they are not a
+  # strict whole-stream cancellation for a response that keeps sending data.
+  $reconciliationDeadlineMilliseconds = (Get-ExchangeMonotonicMilliseconds) + 600000
   for ($batchNumber = 1; $batchNumber -le 100; $batchNumber += 1) {
     $batchResult = Invoke-ExchangeAtomicRpcWithRetry `
       "rpc/reconcile_outlook_templates_with_certification_batch" `
@@ -2586,7 +2716,8 @@ function Commit-OutlookTemplateRecipientReconciliation(
       "processed" `
       "batch" `
       "Outlook-template recipient reconciliation batch" `
-      $batchContractValidator
+      $batchContractValidator `
+      $reconciliationDeadlineMilliseconds
     if ([bool](Get-MapValue $batchResult "complete")) {
       return [pscustomobject]@{
         reconciled = $true
@@ -5892,7 +6023,8 @@ function Complete-FullExchangeQueueCertificationIfEligible(
   $InitialProjectionFingerprint,
   $InitialProjectionCanonicalJson,
   $InitialProjectionCounts,
-  $SourceDrift
+  $SourceDrift,
+  [bool]$ReadOnlyVerification = $false
 ) {
   if ([int]$Stats.failedQueueRows -gt 0 -or @($SourceDrift).Count -gt 0) { return $null }
   try {
@@ -5908,12 +6040,22 @@ function Complete-FullExchangeQueueCertificationIfEligible(
       queueFence = Clean-Text $InitialQueueHighWater
       sourceFingerprint = Clean-Text $InitialProjectionFingerprint
     }
+    $verificationSummary["verificationScope"] = "full"
+    $verificationSummary["executionMode"] = if ($ReadOnlyVerification) { "incremental" } else { "full" }
+    $verificationSummary["readOnlyVerification"] = $ReadOnlyVerification
     $certificationResult = Commit-FullExchangeQueueCertification `
       $InitialQueueHighWater `
       $InitialProjectionFingerprint `
       $InitialProjectionCanonicalJson `
       $InitialProjectionCounts `
-      $verificationSummary
+      $verificationSummary `
+      $ReadOnlyVerification
+    $activationError = Get-AtomicExchangeTemplateActivationContractError `
+      $certificationResult $script:CurrentQueueRunId $InitialProjectionFingerprint $ReadOnlyVerification
+    if ($activationError) { throw "Atomic template activation was not confirmed: $activationError." }
+    # Both full-scope paths commit this receipt with the certificate in one
+    # transaction. Later batches are only for historical derived-only recovery.
+    $templateReconciliationResult = Get-MapValue $certificationResult "templateReconciliation"
     $Stats["fullCertificationCommitted"] = $true
     $Stats["fullCertificationIdempotent"] = [bool](Get-MapValue $certificationResult "idempotent")
     $Stats["fullCertificationAt"] = Clean-Text (Get-MapValue $certificationResult "certifiedAt")
@@ -5923,10 +6065,6 @@ function Complete-FullExchangeQueueCertificationIfEligible(
     $Stats["sourceSnapshotHash"] = Clean-Text (Get-MapValue $certificationResult "sourceSnapshotHash")
     $Stats["rawSourceSnapshotHash"] = Clean-Text (Get-MapValue $certificationResult "rawSourceSnapshotHash")
     $Stats["truthWorkerVersion"] = Clean-Text (Get-MapValue $certificationResult "workerVersion")
-    $templateReconciliationResult =
-      Commit-OutlookTemplateRecipientReconciliation `
-        $certificationResult `
-        $InitialProjectionFingerprint
     $templateVerification =
       Get-MapValue $templateReconciliationResult "verification"
     $templateCounts = Get-MapValue $templateVerification "templates"
@@ -5947,6 +6085,15 @@ function Complete-FullExchangeQueueCertificationIfEligible(
     Add-ExchangeResolvedTerminalQueueDetails $Stats $certificationResult "full"
     return $certificationResult
   } catch {
+    if ($ReadOnlyVerification) {
+      # Preserve the real hourly staging/activation error. Converting it to a
+      # generic null result loses temporary transport/lock/fence evidence and
+      # incorrectly makes ordinary retry work an immediate verification alert.
+      if (Test-ExchangeReadOnlyVerificationRetryableError $_) {
+        throw (New-ExchangeReadOnlyVerificationDelay "The hourly verification could not commit its source-fenced proof; the next run can retry." $_)
+      }
+      throw
+    }
     Add-FullSyncFailure `
       $Stats `
       "Full address book" `
@@ -6116,7 +6263,7 @@ function Confirm-FinalExchangeProjection($ExchangeRows, $MailContacts, $ContactP
   }
 }
 
-function Confirm-FinalExchangeGroupMemberships($ExchangeRows, [hashtable]$Stats) {
+function Confirm-FinalExchangeGroupMemberships($ExchangeRows, [hashtable]$Stats, $ReadOnlyVerificationDeadlineMilliseconds = $null) {
   $membersByGroupId = @{}
   foreach ($member in @($ExchangeRows.Members)) {
     $groupId = Clean-Text $member.SourceGroupId
@@ -6129,26 +6276,202 @@ function Confirm-FinalExchangeGroupMemberships($ExchangeRows, [hashtable]$Stats)
     $groupPosition += 1
     Renew-ExchangeSyncLockIfDue
     try {
-      Invoke-ExchangeOperationWithTemporaryRetry `
-        "Final membership certification for $($group.GroupName)" `
-        {
+      $membershipOperation = {
           $sourceKey = Clean-Text $group.SourceKey
           if (-not $sourceKey) { throw "The FCUNO group source key is missing." }
           $resolvedGroups = @(Get-DistributionGroup -Filter "CustomAttribute2 -eq '$(Escape-ExchangeFilterValue $sourceKey)'" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $null -ne $_ })
+          if ($null -ne $ReadOnlyVerificationDeadlineMilliseconds) { Assert-ExchangeReadOnlyVerificationBudget $ReadOnlyVerificationDeadlineMilliseconds }
           if ($resolvedGroups.Count -ne 1) { throw "Source key $sourceKey resolved to $($resolvedGroups.Count) Exchange groups." }
           $groupIdentity = Get-ExchangeStrongCommandIdentity $resolvedGroups[0]
           if (-not $groupIdentity) { throw "Source key $sourceKey has no immutable Exchange group identity." }
           $actualMembers = @(Get-DistributionGroupMember -Identity $groupIdentity -ResultSize Unlimited -ErrorAction Stop)
+          if ($null -ne $ReadOnlyVerificationDeadlineMilliseconds) { Assert-ExchangeReadOnlyVerificationBudget $ReadOnlyVerificationDeadlineMilliseconds }
           Renew-ExchangeSyncLockIfDue
           $desiredMembers = if (Has-MapKey $membersByGroupId (Clean-Text $group.SourceGroupId)) { @($membersByGroupId[(Clean-Text $group.SourceGroupId)]) } else { @() }
           $mismatches = @(Get-ExchangeGroupMembershipMismatches $desiredMembers $actualMembers)
           if ($mismatches.Count -gt 0) {
             Add-FullSyncFailure $Stats "Group membership" $group.GroupName $group.Alias ("Final Exchange membership differs: " + ($mismatches -join "; ") + ".")
           }
-        } | Out-Null
+        }
+      if ($null -ne $ReadOnlyVerificationDeadlineMilliseconds) {
+        Invoke-ExchangeReadOnlyVerificationOperation "Final membership certification" $membershipOperation $ReadOnlyVerificationDeadlineMilliseconds | Out-Null
+      } else {
+        Invoke-ExchangeOperationWithTemporaryRetry "Final membership certification for $($group.GroupName)" $membershipOperation | Out-Null
+      }
     } catch {
+      if ($null -ne $ReadOnlyVerificationDeadlineMilliseconds -and
+          ($_.Exception.Message -like 'OUTLOOK_FULL_READ_VERIFICATION_BUDGET_EXHAUSTED:*' -or
+           $_.Exception.Message -like 'OUTLOOK_FULL_READ_TEMPORARY:*')) { throw }
       Add-FullSyncFailure $Stats "Group membership" $group.GroupName $group.Alias ("Final Exchange membership certification failed: " + $_.Exception.Message)
     }
+  }
+}
+
+function Get-OutlookTemplateRecipientRefreshState {
+  if (-not (Test-GuidText $script:CurrentQueueRunId) -or $script:CurrentSyncMode -cne "incremental") { throw "Recipient refresh requires the active incremental run." }
+  $state = Invoke-SupabaseRest -Method "GET" -Path "rpc/get_outlook_template_recipient_refresh_state?p_run_id=$(Encode-QueryValue $script:CurrentQueueRunId)"
+  foreach ($field in @("schema","runId","executionMode","verificationScope","mode","queueSettled","reasons","certificationRunId","sourceFingerprint","certifiedAt")) {
+    if (-not (Has-MapKey $state $field)) { throw "Recipient refresh state has an incomplete confirmation." }
+  }
+  if ((Get-MapValue $state "schema") -cne "fcuno.outlook-template-recipient-refresh-state/v1" -or
+      (Get-MapValue $state "runId") -cne $script:CurrentQueueRunId -or
+      (Get-MapValue $state "executionMode") -cne "incremental" -or
+      (Get-MapValue $state "verificationScope") -cne "full" -or
+      (Get-MapValue $state "mode") -cnotin @("none","full","reconcile") -or
+      (Get-MapValue $state "queueSettled") -isnot [bool] -or
+      $state.reasons -isnot [array]) { throw "Recipient refresh state is not a valid active-run confirmation." }
+  foreach ($reason in @($state.reasons)) {
+    if ($reason -isnot [string] -or $reason.Length -lt 1 -or $reason.Length -gt 128) { throw "Recipient refresh reasons are malformed." }
+  }
+  if (-not (Get-MapValue $state "queueSettled") -and (Get-MapValue $state "mode") -cne "none") { throw "Unsettled queue changes cannot authorize recipient verification." }
+  $certificationRunId = Get-MapValue $state "certificationRunId"
+  $fingerprint = Get-MapValue $state "sourceFingerprint"
+  $certifiedAt = Get-MapValue $state "certifiedAt"
+  [DateTimeOffset]$parsedCertifiedAt = [DateTimeOffset]::MinValue
+  if (($null -ne $certificationRunId -and ($certificationRunId -isnot [string] -or -not (Test-GuidText $certificationRunId))) -or
+      ($null -ne $fingerprint -and ($fingerprint -isnot [string] -or $fingerprint -cnotmatch '^[0-9a-f]{64}$')) -or
+      ($null -ne $certifiedAt -and ($certifiedAt -isnot [string] -or -not [DateTimeOffset]::TryParse($certifiedAt, [ref]$parsedCertifiedAt)))) { throw "Recipient refresh certification identity is malformed." }
+  if ((Get-MapValue $state "mode") -ceq "reconcile" -and
+      (-not $certificationRunId -or -not $fingerprint -or -not $certifiedAt -or
+       $parsedCertifiedAt -gt [DateTimeOffset]::UtcNow.AddMinutes(5) -or
+       $parsedCertifiedAt -lt [DateTimeOffset]::UtcNow.AddHours(-36))) { throw "Derived recipient refresh requires the existing current certification within36hours." }
+  return $state
+}
+
+function Assert-ExchangeReadOnlyVerificationBudget($DeadlineMilliseconds) {
+  if ((Get-ExchangeMonotonicMilliseconds) -ge [double]$DeadlineMilliseconds) {
+    throw [System.TimeoutException]::new("OUTLOOK_FULL_READ_VERIFICATION_BUDGET_EXHAUSTED: Temporary hourly verification delay after its20minute budget. No new certification was acknowledged.")
+  }
+}
+
+function Test-ExchangeReadOnlyVerificationRetryableError($ErrorRecord) {
+  if (Test-ExchangeTemporaryServerError $ErrorRecord) { return $true }
+  foreach ($statusCode in @($ErrorRecord.Exception.StatusCode, $ErrorRecord.Exception.Response.StatusCode)) {
+    try {
+      if ($null -ne $statusCode -and [Convert]::ToInt32($statusCode) -in @(408,429,500,502,503,504)) { return $true }
+    } catch { }
+  }
+  $message = Clean-Text $ErrorRecord.Exception.Message
+  if ($message -match '^OUTLOOK_FULL_READ_TEMPORARY:' -or
+      $message -match '(?i)^canceling statement due to (?:lock|statement) timeout' -or
+      $message -match '^(?:Raw FCUNO source evidence staging|Atomic full Exchange queue certification) was not accepted: Queue high-water changed') { return $true }
+  # Invoke-RestMethod keeps PostgREST's typed SQL error in ErrorDetails. Read
+  # only its narrow retry identity, never downgrade a malformed proof or a
+  # real contact/membership mismatch based on arbitrary diagnostic substrings.
+  $errorDetails = Clean-Text $ErrorRecord.ErrorDetails.Message
+  if ($errorDetails -and $errorDetails.Length -le 16384) {
+    try {
+      $sqlError = $errorDetails | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+      if ($sqlError.code -in @('55P03','57014') -or
+          ($sqlError.code -ceq 'P0001' -and $sqlError.message -match '^OUTLOOK_REFRESH_QUEUE_NOT_SETTLED:')) { return $true }
+    } catch { }
+  }
+  return $false
+}
+
+function New-ExchangeReadOnlyVerificationDelay($Reason, $ErrorRecord = $null) {
+  $message = "OUTLOOK_FULL_READ_TEMPORARY: Temporary hourly verification delay. " + $Reason
+  if ($ErrorRecord -and $ErrorRecord.Exception) {
+    # Preserve the actual cause in the job/admin failure record. Minimalist
+    # team emails render only the existing durable incident category.
+    $cause = Clean-Text $ErrorRecord.Exception.Message
+    if ($cause.Length -gt 1024) { $cause = $cause.Substring(0,1024) }
+    if ($cause) { $message += " Cause: $cause" }
+    return [System.InvalidOperationException]::new($message, $ErrorRecord.Exception)
+  }
+  return [System.InvalidOperationException]::new($message)
+}
+
+function Invoke-ExchangeReadOnlyVerificationOperation($Label, [scriptblock]$Operation, $DeadlineMilliseconds) {
+  for ($attempt = 1; $attempt -le $ExchangeTemporaryErrorMaxAttempts; $attempt++) {
+    try {
+      Assert-ExchangeReadOnlyVerificationBudget $DeadlineMilliseconds
+      Renew-ExchangeSyncLockIfDue
+      Assert-ExchangeReadOnlyVerificationBudget $DeadlineMilliseconds
+      $values = @(& $Operation)
+      Assert-ExchangeReadOnlyVerificationBudget $DeadlineMilliseconds
+      return $values
+    } catch {
+      if ($_.Exception.Message -like 'OUTLOOK_FULL_READ_VERIFICATION_BUDGET_EXHAUSTED:*' -or
+          -not (Test-ExchangeReadOnlyVerificationRetryableError $_)) { throw }
+      if ($attempt -ge $ExchangeTemporaryErrorMaxAttempts) {
+        throw (New-ExchangeReadOnlyVerificationDelay "$Label exhausted its bounded read attempts; no new proof was accepted." $_)
+      }
+      Assert-ExchangeReadOnlyVerificationBudget ([double]$DeadlineMilliseconds - $ExchangeTemporaryErrorRetryDelaySeconds * 1000)
+      Start-Sleep -Seconds $ExchangeTemporaryErrorRetryDelaySeconds
+    }
+  }
+}
+
+function Invoke-ReadOnlyFullExchangeVerification {
+  # This phase never calls an upsert, cleanup or membership-mutation helper.
+  # The budget stops new work and rejects late proof, not an in-flight cmdlet.
+  $started = Get-ExchangeMonotonicMilliseconds
+  $deadline = $started + 1200000
+  $stats = @{ syncMode="incremental"; verificationScope="full"; readOnlyVerification=$true; failedQueueRows=0; changeDetails=@(); fullCertificationCommitted=$false; templateRecipientTruthReconciled=$false }
+  Renew-ExchangeSyncLockIfDue -Force
+  Assert-ExchangeReadOnlyVerificationBudget $deadline
+  $initialFence = Get-ExchangeQueueHighWater
+  $script:CanonicalExchangeRows = $null
+  $rows = Get-CanonicalExchangeRows
+  $json = Get-CanonicalExchangeProjectionJson $rows
+  $fingerprint = Get-Sha256Hex $json
+  $counts = Get-CanonicalExchangeProjectionCounts $rows
+  $stats.contacts = [int]$counts.contacts; $stats.groups = [int]$counts.groups; $stats.groupMembers = [int]$counts.members
+  $stats.expectedReadCmdlets = 4 + 2 * [int]$counts.groups
+  if ([int]$counts.invalidContacts -gt 0) { throw "The address book contains invalid contact details; full verification cannot be certified." }
+  $mail = @(Invoke-ExchangeReadOnlyVerificationOperation "Full contact inventory" { Get-MailContact -ResultSize Unlimited -ErrorAction Stop } $deadline)
+  $profiles = @(Invoke-ExchangeReadOnlyVerificationOperation "Full contact profiles" { Get-Contact -ResultSize Unlimited -ErrorAction Stop } $deadline)
+  $groups = @(Invoke-ExchangeReadOnlyVerificationOperation "Full group inventory" { Get-DistributionGroup -ResultSize Unlimited -ErrorAction Stop } $deadline)
+  $groupProfiles = @(Invoke-ExchangeReadOnlyVerificationOperation "Full group profiles" { Get-Group -ResultSize Unlimited -ErrorAction Stop } $deadline)
+  Confirm-FinalExchangeProjection $rows $mail $profiles $groups $groupProfiles $stats
+  Assert-ExchangeReadOnlyVerificationBudget $deadline
+  if ($stats.failedQueueRows -gt 0) { throw "Read-only Exchange contact or group verification did not match. No new certification was created." }
+  $mail=$null; $profiles=$null; $groups=$null; $groupProfiles=$null
+  [System.GC]::Collect()
+  Confirm-FinalExchangeGroupMemberships $rows $stats $deadline
+  Assert-ExchangeReadOnlyVerificationBudget $deadline
+  $rows=$null; $script:CanonicalExchangeRows=$null
+  Renew-ExchangeSyncLockIfDue -Force
+  $latestRows=Get-CanonicalExchangeRows
+  $latestFingerprint=Get-CanonicalExchangeProjectionFingerprint $latestRows
+  $latestFence=Get-ExchangeQueueHighWater
+  $drift=@(Get-ExchangeSourceCertificationDrift $fingerprint $initialFence $latestFingerprint $latestFence)
+  $latestRows=$null; $script:CanonicalExchangeRows=$null
+  Assert-ExchangeReadOnlyVerificationBudget $deadline
+  if ($stats.failedQueueRows -gt 0) { throw "Read-only Exchange membership verification did not match. No new certification was created." }
+  if ($drift.Count -gt 0) { throw (New-ExchangeReadOnlyVerificationDelay "The source or queue changed during the read-only check. Delivered changes remain recorded and a fresh check will retry next run.") }
+  $stats.verificationElapsedMilliseconds = (Get-ExchangeMonotonicMilliseconds) - $started
+  $result=Complete-FullExchangeQueueCertificationIfEligible $stats $initialFence $fingerprint $json $counts $drift $true
+  Assert-ExchangeReadOnlyVerificationBudget $deadline
+  if (-not $result -or -not $stats.fullCertificationCommitted -or -not $stats.templateRecipientTruthReconciled -or $stats.failedQueueRows -gt 0) { throw "Address-book verification or template refresh was not confirmed. Delivered changes remain recorded and the next hourly run can retry." }
+  return $stats
+}
+
+function Complete-IncrementalRecipientRefresh([hashtable]$Details) {
+  Add-ExchangeTruthLedgerEvidence $Details $false | Out-Null
+  Set-IncrementalBacklogFromTruthCheckpoint $Details
+  if ((Get-IncrementalSyncOutcome $Details).Status -cne "completed") { return }
+  $state=Get-OutlookTemplateRecipientRefreshState
+  $mode=Get-MapValue $state "mode"
+  $Details.recipientRefreshMode=$mode
+  $Details.recipientRefreshStatus="not-required"
+  if ($mode -ceq "none") { return }
+  $Details.recipientRefreshStatus="running"
+  try {
+    if ($mode -ceq "full") {
+      $Details.recipientRefresh=Invoke-ReadOnlyFullExchangeVerification
+    } else {
+      # Reuse existing full proof: no Exchange reads, new cert or TTL reset.
+      $Details.recipientRefresh=Commit-OutlookTemplateRecipientReconciliation `
+        @{runId=(Get-MapValue $state "certificationRunId")} `
+        (Get-MapValue $state "sourceFingerprint")
+      if (-not (Get-MapValue $Details.recipientRefresh "reconciled")) { throw "Template recipient refresh was not confirmed." }
+    }
+    $Details.recipientRefreshStatus="completed"
+  } catch {
+    $Details.recipientRefreshStatus="failed"
+    throw
   }
 }
 
@@ -6598,6 +6921,7 @@ try {
     $script:ExchangeSyncStage = "synchronization"
     $details = Get-StatsObject (Invoke-IncrementalExchangeSync)
     $script:ExchangeSyncStage = "verification"
+    Complete-IncrementalRecipientRefresh $details
     $outcome = Complete-IncrementalSyncOutcomeWithCheckpoint $details
     $notificationDelivery = Invoke-ExchangeSyncNotificationPolicy `
       $outcome.Status $outcome.Message $details $webhookPayload
