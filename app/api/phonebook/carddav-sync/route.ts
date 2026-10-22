@@ -4,7 +4,7 @@ import { createClient } from "@supabase/supabase-js"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 import { observePhonebookCarddavSemanticShadow } from "@/lib/phonebookCarddavSemanticShadow"
 
-import { SYNC_BATCH_SIZE, SyncError, safeSyncError, httpSyncError, logSyncFailure, logVerifiedContacts, requireEnv, getCardDavConfig, readSavedContactIds, cardDavRequest, countAddressBookCards, inspectOtherCards, validateSyncRequest, deleteCard, fetchContacts, putContact, type SyncStage, acquireCardDavWriteLease, readCardDavQueueVersions, acknowledgeCardDavQueue } from "@/lib/phonebookCarddav"
+import { SYNC_BATCH_SIZE, SyncError, safeSyncError, logSyncFailure, logVerifiedContacts, requireEnv, getCardDavConfig, readSavedContactIds, readCardDavInventoryXml, countAddressBookCards, inspectOtherCards, validateSyncRequest, deleteCard, fetchContacts, putContact, type SyncStage, acquireCardDavWriteLease, readCardDavQueueVersions, acknowledgeCardDavQueue } from "@/lib/phonebookCarddav"
 
 export const maxDuration = 300
 
@@ -74,17 +74,10 @@ export async function GET(request: Request) {
     }
     const supabase = createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), requireEnv("SUPABASE_SERVICE_ROLE_KEY"))
     const { addressBookUrl } = getCardDavConfig()
-    const [saved, remote] = await Promise.all([
+    const [saved, xml] = await Promise.all([
       readSavedContactIds(supabase),
-      cardDavRequest("", {
-        method: "PROPFIND",
-        headers: { Depth: "1", "Content-Type": "application/xml; charset=utf-8" },
-        body: '<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:getetag/><d:resourcetype/></d:prop></d:propfind>',
-        cache: "no-store",
-      }),
+      readCardDavInventoryXml(request.signal),
     ])
-    if (remote.status !== 207) throw httpSyncError("verification", remote.status)
-    const xml = await remote.text()
     if (!/<(?:[\w-]+:)?multistatus\b/i.test(xml) || !/<\/(?:[\w-]+:)?multistatus\s*>\s*$/i.test(xml)) {
       throw new SyncError("Invalid CardDAV count response.", "verification")
     }

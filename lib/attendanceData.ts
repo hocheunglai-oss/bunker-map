@@ -2605,7 +2605,7 @@ export function buildAttendanceMonthEndReviewEmail(input: {
         <p style="margin:0 0 10px">Hello ${escapeHtml(input.displayName)},</p>
         <p style="margin:0 0 10px">Today is the last Hong Kong working day of <strong>${escapeHtml(monthLabel)}</strong>. Please review your current sign-in, sign-out, leave and work-mode record.</p>
         <p style="margin:0 0 10px">The month is still in progress. Please confirm the monthly record after the month has closed and the final punches have synchronized.</p>
-        <p style="margin:0 0 10px"><strong>Workflow:</strong> A second reminder will be sent on the first Hong Kong working day of the next month. If the record remains unconfirmed, it will be marked <strong>SYSTEM CONFIRMED</strong> at 18:00 HKT on the third Hong Kong working day.</p>
+        <p style="margin:0 0 10px"><strong>Workflow:</strong> A second reminder will be sent on the first Hong Kong working day of the next month. If the record remains unconfirmed, it will be marked <strong>SYSTEM CONFIRMED</strong> after the 18:00 HKT deadline on the third Hong Kong working day of that month, once attendance synchronization has been verified.</p>
         <p style="margin:0 0 10px">System confirmation does not remove your right to dispute the record. After system confirmation, please contact an administrator directly if any correction is required.</p>
         <p style="margin:14px 0 0"><a href="https://fcuno.com/admin/attendancerecord" style="color:#0a73c9">Open Attendance Record</a></p>
       </div>
@@ -2626,7 +2626,7 @@ export function buildAttendanceSecondReminderEmail(input: {
         <p style="margin:0 0 10px">Hello ${escapeHtml(input.displayName)},</p>
         <p style="margin:0 0 10px">Please review and confirm your attendance record for <strong>${escapeHtml(monthLabel)}</strong>.</p>
         <p style="margin:0 0 10px"><strong>Instruction:</strong> Open Attendance Record using the link below, select <strong>MONTHLY STATEMENT</strong>, review the month and click <strong>CONFIRM</strong>.</p>
-        <p style="margin:0 0 10px">If the record remains unconfirmed, the system will mark it <strong>SYSTEM CONFIRMED</strong> at 18:00 HKT on the third Hong Kong working day of this month. No further reminder will be sent.</p>
+        <p style="margin:0 0 10px">If the record remains unconfirmed, the system will mark it <strong>SYSTEM CONFIRMED</strong> after the 18:00 HKT deadline on the third Hong Kong working day of this month, once attendance synchronization has been verified. No further reminder will be sent.</p>
         <p style="margin:0 0 10px">System confirmation does not mean that you personally approved every entry and does not remove your right to dispute the record. After system confirmation, please contact an administrator directly if any correction is required.</p>
         <p style="margin:14px 0 0"><a href="https://fcuno.com/admin/attendancerecord" style="color:#0a73c9">Open Attendance Record</a></p>
       </div>

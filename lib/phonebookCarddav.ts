@@ -391,6 +391,107 @@ export async function cardDavRequest(pathOrUrl: string, init: RequestInit = {}) 
   return response
 }
 
+// Only the non-mutating count endpoint uses this retry policy. In particular,
+// do not multiply the writer's existing PUT/DELETE/readback retry attempts.
+export async function readCardDavInventoryXml(signal?: AbortSignal): Promise<string> {
+  getCardDavConfig()
+  const deadline = performance.now() + 25_000
+  const lifetime = new AbortController()
+  const incomplete = () => new SyncError("CardDAV count unavailable. Please retry.", "verification", undefined, true)
+  const abortLifetime = () => lifetime.abort()
+  const lifetimeTimer = setTimeout(abortLifetime, 25_000)
+  signal?.addEventListener("abort", abortLifetime, { once: true })
+  if (signal?.aborted) lifetime.abort()
+  let lastError = incomplete()
+
+  const pause = (delay: number) => new Promise<void>((resolve, reject) => {
+    if (lifetime.signal.aborted) { reject(incomplete()); return }
+    const abort = () => { clearTimeout(timer); lifetime.signal.removeEventListener("abort", abort); reject(incomplete()) }
+    const timer = setTimeout(() => { lifetime.signal.removeEventListener("abort", abort); resolve() }, delay)
+    lifetime.signal.addEventListener("abort", abort, { once: true })
+  })
+  const retryAfter = (response: Response): number | null => {
+    const value = response.headers.get("retry-after")?.trim()
+    if (!value) return null
+    if (value.length > 128) return Infinity
+    if (/^\d+$/.test(value)) return Number(value) * 1000
+    const date = Date.parse(value)
+    return Number.isFinite(date) ? Math.max(0, date - Date.now()) : null
+  }
+
+  try {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const remaining = deadline - performance.now()
+      if (lifetime.signal.aborted || remaining <= 0) throw lastError
+      const controller = new AbortController()
+      const abortRequest = () => controller.abort()
+      lifetime.signal.addEventListener("abort", abortRequest, { once: true })
+      const requestTimer = setTimeout(abortRequest, Math.min(15_000, remaining))
+      let response: Response | undefined
+      let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+      let delayHint: number | null = null
+      const discard = () => { void (reader ? reader.cancel() : response?.body?.cancel())?.catch(() => {}) }
+      let rejectAbort: (() => void) | undefined
+      const aborted = new Promise<never>((_resolve, reject) => {
+        rejectAbort = () => { discard(); reject(incomplete()) }
+        controller.signal.addEventListener("abort", rejectAbort, { once: true })
+      })
+      const operation = (async () => {
+        response = await cardDavRequest("", {
+          method: "PROPFIND", cache: "no-store", signal: controller.signal,
+          headers: { Depth: "1", "Content-Type": "application/xml; charset=utf-8" },
+          body: '<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:getetag/><d:resourcetype/></d:prop></d:propfind>',
+        })
+        if (controller.signal.aborted) { discard(); throw incomplete() }
+        if (response.status !== 207) {
+          delayHint = retryAfter(response)
+          throw httpSyncError("verification", response.status)
+        }
+        if (Number(response.headers.get("content-length")) > 15_000_000) throw new SyncError("Incomplete CardDAV inventory response.", "verification")
+        reader = response.body?.getReader()
+        if (!reader) throw new SyncError("Incomplete CardDAV inventory response.", "verification")
+        const chunks: Uint8Array[] = []
+        let size = 0
+        try {
+          while (true) {
+            const chunk = await reader.read()
+            if (controller.signal.aborted) throw incomplete()
+            if (chunk.done) break
+            size += chunk.value.byteLength
+            if (size > 15_000_000) { discard(); throw new SyncError("Incomplete CardDAV inventory response.", "verification") }
+            chunks.push(chunk.value)
+          }
+        } finally { reader.releaseLock(); reader = undefined }
+        // Match Response.text() decoding; malformed XML is rejected by the
+        // existing parser outside this retry loop, never retried as an outage.
+        return new TextDecoder().decode(Buffer.concat(chunks))
+      })()
+      try {
+        return await Promise.race([operation, aborted])
+      } catch (error) {
+        lastError = safeSyncError(error, "verification")
+      } finally {
+        clearTimeout(requestTimer)
+        lifetime.signal.removeEventListener("abort", abortRequest)
+        controller.abort()
+        if (rejectAbort) controller.signal.removeEventListener("abort", rejectAbort)
+      }
+      const transientStatus = lastError.status === undefined || [408, 429, 500, 502, 503, 504].includes(lastError.status)
+      if (lifetime.signal.aborted || !lastError.retryable || !transientStatus || attempt === 3) throw lastError
+      const delay = Math.max(300 * 2 ** (attempt - 1), delayHint ?? 0)
+      // A long Retry-After is a reason to stop, not to retry earlier than the
+      // upstream asked. The caller may try again later; no count is fabricated.
+      if (!Number.isFinite(delay) || delay >= deadline - performance.now()) throw lastError
+      await pause(delay)
+    }
+    throw lastError
+  } finally {
+    clearTimeout(lifetimeTimer)
+    signal?.removeEventListener("abort", abortLifetime)
+    lifetime.abort()
+  }
+}
+
 
 export async function assertContactAbsent(supabase: SupabaseClient, contactId: string) {
   try {

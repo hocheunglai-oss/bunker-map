@@ -1362,6 +1362,8 @@ language plpgsql
 volatile
 security invoker
 set search_path = pg_catalog, pg_temp
+set statement_timeout = '20s'
+set lock_timeout = '2s'
 as $$
 declare
   normalized_template_id text := pg_catalog.btrim(p_template_id);
@@ -1544,11 +1546,15 @@ begin
   then
     raise exception
       'OUTLOOK_INSERTION_TEMPLATE_CHANGED: template revision or recipient evidence is no longer insertable.'
-      using errcode = '40001';
+      -- This is a business rejection, not a serialization failure. PostgREST
+      -- retries SQLSTATE 40001 transactions, which cannot repair this evidence.
+      using errcode = 'P0001';
   end if;
 
   template_truth := public.verify_outlook_template_recipient_truth();
-  exchange_truth := public.verify_outlook_exchange_truth_ledger();
+  -- This exact proof was computed above inside the same locked transaction.
+  -- Missing/invalid proof still fails every unchanged explicit gate below.
+  exchange_truth := template_truth -> 'exchangeTruth';
   queue_state := coalesce(exchange_truth -> 'queue', '{}'::jsonb);
   event_time := pg_catalog.clock_timestamp();
 
@@ -1695,6 +1701,11 @@ begin
     'auditLogId', inserted_audit_log_id,
     'eventAt', event_time
   );
+exception
+  when lock_not_available then
+    raise exception
+      'OUTLOOK_INSERTION_STATE_BUSY: recipient or template state is changing; retry this reservation.'
+      using errcode = '55P03';
 end;
 $$;
 

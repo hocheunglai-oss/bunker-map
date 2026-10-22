@@ -132,7 +132,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/spc-supplier-api.test.ts tests/outlook-edit-recovery.test.ts tests/outlook-exchange-health-alerts.test.ts 2>&1 | tee supplier-outlook-reliability-tests.tap
+          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/spc-supplier-api.test.ts tests/outlook-edit-recovery.test.ts tests/outlook-exchange-health-alerts.test.ts tests/outlook-insertion-transport-deadlines.test.ts 2>&1 | tee supplier-outlook-reliability-tests.tap
 
       - name: Verify revision ownership remarks saves and audit visibility
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -668,7 +668,7 @@ jobs:
             clusters.push({path,wasRunningAfterTest:wasRunning,stopped:stopped?{code:stopped.status,signal:stopped.signal,stdout:stopped.stdout,stderr:stopped.stderr}:null,postmasterPidAbsent:closed,sockets})
           }
           writeFileSync(join(evidence,"cleanup.json"),JSON.stringify({clusters,complete,observedAt:new Date().toISOString()},null,2)+"\n",{flag:"wx",mode:0o600})
-          assert.equal(clusters.length,1,"Exactly one owned native test cluster must execute")
+          assert.equal(clusters.length,7,"The record-state fixture and six insertion fixtures must each execute one owned native test cluster")
           assert.equal(complete,true,"The test must close its owned sessions and cluster itself")
           NODE
             cleanup_status=$?
@@ -681,13 +681,13 @@ jobs:
           git rev-parse HEAD HEAD^{tree} | tee "$NATIVE_PG_EVIDENCE/source.log"
           timeout --signal=TERM --kill-after=5s 180s env -i PATH="$PATH" LANG=C LC_ALL=C \
             TMPDIR="$NATIVE_PG_TMP_ROOT" NATIVE_PG_BIN="$NATIVE_PG_BIN" NATIVE_PG_TMP_ROOT="$NATIVE_PG_TMP_ROOT" \
-            node --conditions=react-server --import tsx --test --test-reporter=tap tests/spc-record-state-native.test.mjs \
+            node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=tap tests/spc-record-state-native.test.mjs tests/outlook-insertion-reservation-native.test.mjs \
             2>&1 | tee "$NATIVE_PG_EVIDENCE/native-record-state.tap"
           node --input-type=module <<'NODE'
           import assert from "node:assert/strict"
           import {readFileSync} from "node:fs"
           const text=readFileSync(process.env.NATIVE_PG_EVIDENCE+"/native-record-state.tap","utf8")
-          for(const [name,expected] of [["tests",10],["pass",10],["fail",0],["cancelled",0],["skipped",0]]){
+          for(const [name,expected] of [["tests",16],["pass",16],["fail",0],["cancelled",0],["skipped",0]]){
             const values=[...text.matchAll(new RegExp("^# "+name+" (\\d+)","gm"))]
             assert.equal(Number(values.at(-1)?.[1]),expected,name)
           }

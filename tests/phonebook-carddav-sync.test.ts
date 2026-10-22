@@ -126,7 +126,8 @@ function fixture(options: FixtureOptions = {}) {
   }
   const metadata = options.diagnosticMetadata || { environment: "production", commit: "1".repeat(40) }
   const context = {
-    exports, Error, URL, Buffer, AbortSignal, setTimeout: (callback: () => void) => setTimeout(callback, 0),
+    exports, Error, URL, Buffer, AbortSignal, AbortController, TextDecoder, performance,
+    setTimeout: (callback: () => void, delay: number) => setTimeout(callback, delay <= 600 ? 0 : delay), clearTimeout,
     console: { error: (...values: unknown[]) => logs.push(values), info: (...values: unknown[]) => logs.push(values) },
     process: { env: {
       VERCEL_ENV: metadata.environment, VERCEL_GIT_COMMIT_SHA: metadata.commit,
@@ -162,7 +163,7 @@ function fixture(options: FixtureOptions = {}) {
   const post = (body: unknown) => exports.POST!(new Request("https://app-fixture.invalid/api/phonebook/carddav-sync", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
   }))
-  const get = (details = false) => exports.GET!(new Request(`https://app-fixture.invalid/api/phonebook/carddav-sync${details ? "?details=1" : ""}`))
+  const get = (details = false, signal?: AbortSignal) => exports.GET!(new Request(`https://app-fixture.invalid/api/phonebook/carddav-sync${details ? "?details=1" : ""}`, { signal }))
   const diagnostic = (query: Record<string, string> = {}, rawQuery?: string) => exports.GET!(new Request(`https://app-fixture.invalid/api/phonebook/carddav-sync?${rawQuery ?? new URLSearchParams({ verifyContent: "1", ...query })}`))
   return { post, get, diagnostic, calls, queries, logs, permissions, observations, rpcCalls, clientCreations: () => clientCreations, remote, rows, queue }
 }
@@ -181,6 +182,71 @@ test("read-only count reports saved contacts and distinct managed CardDAV cards"
   assert.deepEqual(f.permissions, [["phonebook", "view"]])
   assert.deepEqual(f.calls.map((call) => call.method), ["PROPFIND"])
   assert.equal(f.observations.length, 0)
+})
+
+test("ordinary inventory recovers from transient upstream 503 without a write or synchronization ACK", async () => {
+  let attempts = 0
+  const f = fixture({ onFetch: (call) => call.method === "PROPFIND" && ++attempts === 1
+    ? new Response("PRIVATE PROVIDER BODY", { status: 503 }) : undefined })
+  f.remote.set(id(1), "synthetic")
+  f.remote.set(id(2), "synthetic")
+  const response = await f.get()
+  assert.equal(response.status, 200)
+  const payload = await response.json()
+  assert.equal(payload.carddavMatchedCount, 2)
+  assert.equal(payload.carddavMissingCount, 0)
+  assert.equal(payload.carddavOrphanCount, 0)
+  assert.deepEqual(f.calls.map((call) => call.method), ["PROPFIND", "PROPFIND"])
+  assert.deepEqual(f.rpcCalls, [])
+  assert.equal(f.observations.length, 0)
+  assert.ok(!JSON.stringify({ payload, logs: f.logs }).includes("PRIVATE"))
+})
+
+test("ordinary inventory retries a transient connection error and a rate limit without inventing counts", async () => {
+  for (const failure of ["connection", "rate-limit"]) {
+    let attempts = 0
+    const f = fixture({ onFetch: (call) => {
+      if (call.method !== "PROPFIND" || ++attempts !== 1) return undefined
+      if (failure === "connection") throw new Error("PRIVATE UPSTREAM ACCOUNT AND PASSWORD")
+      return new Response("PRIVATE PROVIDER BODY", { status: 429, headers: { "Retry-After": "0" } })
+    } })
+    const response = await f.get()
+    assert.equal(response.status, 200)
+    assert.equal((await response.json()).carddavMissingCount, 2)
+    assert.deepEqual(f.calls.map((call) => call.method), ["PROPFIND", "PROPFIND"])
+    assert.deepEqual(f.rpcCalls, [])
+    assert.ok(!JSON.stringify(f.logs).includes("PRIVATE"))
+  }
+})
+
+test("ordinary inventory stops after three persistent upstream failures and keeps the count unavailable", async () => {
+  const f = fixture({ onFetch: () => new Response("PRIVATE PROVIDER BODY", { status: 503 }) })
+  const response = await f.get()
+  assert.equal(response.status, 503)
+  const payload = await response.json()
+  assert.deepEqual(payload, { message: "CardDAV count unavailable. Please retry." })
+  assert.deepEqual(f.calls.map((call) => call.method), ["PROPFIND", "PROPFIND", "PROPFIND"])
+  assert.deepEqual(f.rpcCalls, [])
+  assert.ok(!JSON.stringify({ payload, logs: f.logs }).includes("PRIVATE"))
+})
+
+test("ordinary inventory does not retry permanent authorization errors or malformed successful XML", async () => {
+  for (const status of [401, 403, 404, 501, 505, 207]) {
+    const f = fixture({ onFetch: () => new Response(status === 207 ? "not XML" : "PRIVATE PROVIDER BODY", { status }) })
+    assert.equal((await f.get()).status, 503)
+    assert.deepEqual(f.calls.map((call) => call.method), ["PROPFIND"])
+    assert.deepEqual(f.rpcCalls, [])
+    assert.ok(!JSON.stringify(f.logs).includes("PRIVATE"))
+  }
+})
+
+test("an aborted count request does not contact CardDAV or change saved synchronization work", async () => {
+  const controller = new AbortController()
+  controller.abort()
+  const f = fixture()
+  assert.equal((await f.get(false, controller.signal)).status, 503)
+  assert.equal(f.calls.length, 0)
+  assert.deepEqual(f.rpcCalls, [])
 })
 
 test("inventory includes phone-created cards without a vcf suffix and excludes collections", async () => {
