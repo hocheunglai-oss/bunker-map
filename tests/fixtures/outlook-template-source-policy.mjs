@@ -18,7 +18,7 @@ const between = (value, from, to) => {
 // SHA-256 for the same byte digest; no provider or business data is involved.
 // The expensive hosted Exchange projection verifier alone is supplied as
 // explicit synthetic truth. This is not a database recovery rehearsal.
-export async function setupSourcePolicy({ repaired = true } = {}) {
+export async function setupSourcePolicy({ repaired = true, sourcePendingOptimized = true } = {}) {
   const ledger = source("supabase/migrations/20260723080326_exchange_truth_ledger.sql")
   const state = source("supabase/migrations/20260723141044_outlook_insertion_audit_state_machine.sql")
   const canonical = source("supabase/migrations/20260723120428_outlook_template_canonical_writes.sql")
@@ -88,7 +88,12 @@ export async function setupSourcePolicy({ repaired = true } = {}) {
         await fixture.owner.query(`insert into public.email_templates(id,title,subject,folder,body_html,body_text,slug,is_active,to_recipients,cc_recipients,bcc_recipients,revision,recipient_resolution) values (${literal(id)},'Synthetic template','Unchanged subject','Synthetic','<p>Unchanged body</p>','Unchanged body',${literal(id)},true,${literal(template.to ?? refs.to.map(r => r.literal).join('; '))},${literal(template.cc ?? refs.cc.map(r => r.literal).join('; '))},${literal(template.bcc ?? refs.bcc.map(r => r.literal).join('; '))},1,${json(evidence)});`)
       }
     }
-    fixture.apply = () => fixture.owner.query(`begin; ${source(migrationPath)} commit;`)
+    fixture.apply = async () => {
+      await fixture.owner.query(`begin; ${source(migrationPath)} commit;`)
+      if (sourcePendingOptimized) {
+        await fixture.owner.query(`begin; ${source("supabase/migrations/20261023042232_bound_outlook_pending_source_audit_scan.sql")} commit;`)
+      }
+    }
     if (repaired) await fixture.apply()
     return fixture
   } catch (error) { await fixture.close(); throw error }

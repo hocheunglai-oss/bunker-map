@@ -95,6 +95,10 @@ function Invoke-SupabaseRest($Method, $Path, $Body) {
 }
 $state = Get-OutlookTemplateRecipientRefreshState
 Assert-True ($state.mode -ceq 'none' -and $state.queueSettled -is [bool]) 'The genuine typed state response must be accepted'
+$script:RefreshState = New-RefreshState 'full'
+$script:RefreshState.reasons = @('certification-refresh-due')
+$state = Get-OutlookTemplateRecipientRefreshState
+Assert-True ($state.mode -ceq 'full' -and $state.reasons.Count -eq 1 -and $state.reasons[0] -ceq 'certification-refresh-due') 'Proactive renewal reason must be accepted by the actual bounded state contract'
 foreach ($field in @('schema','runId','executionMode','verificationScope','mode','queueSettled','reasons','certificationRunId','sourceFingerprint','certifiedAt')) {
   $script:RefreshState = New-RefreshState 'reconcile'; $script:RefreshState.Remove($field)
   Assert-Throws { Get-OutlookTemplateRecipientRefreshState } "Missing $field must fail closed"
@@ -129,6 +133,7 @@ Set-Item Function:Commit-OutlookTemplateRecipientReconciliation -Value {
 function New-DeliveryStats { return @{ queuedRows=0; completedQueueRows=0; failedQueueRows=0; backlogRows=0; skippedQueueRows=0; supersededQueueRows=0; resolvedTerminalQueueRows=0 } }
 foreach ($mode in @('none','full','reconcile')) {
   $script:FullCalls=0; $script:ReconcileCalls=0; $script:RefreshState=New-RefreshState $mode
+  if ($mode -ceq 'full') { $script:RefreshState.reasons=@('certification-refresh-due') }
   $stats=New-DeliveryStats
   Complete-IncrementalRecipientRefresh $stats
   Assert-True ($script:FullCalls -eq $(if ($mode -eq 'full') {1} else {0})) 'Zero-queue recovery must full-verify only when server requires it'
