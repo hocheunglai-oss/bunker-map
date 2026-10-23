@@ -127,4 +127,3 @@ export function createAdminGroupSave({ storage = "table", users = [groupTestUser
     post: (role = "BT", permissions = { "user-management": "edit", attendancerecord: "none" }) => request({ action: "save-role-default", roleDefault: { role, permissions, expectedVersion: currentVersion(role) } }),
   }
 }
-

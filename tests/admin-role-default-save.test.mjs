@@ -90,4 +90,3 @@ test("the signed identity contracts remain exact and contain no group-policy fie
   assert.equal(sync.properties.identity.properties.permissions, undefined)
   assert.equal(sync.properties.identity.properties.role, undefined)
 })
-
