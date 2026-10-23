@@ -47,8 +47,11 @@ This was **a one-time private logical database rehearsal**, not a recurring
 PostgreSQL backup, a Supabase-managed physical backup/PITR restore, or a recovery
 of the whole hosted Supabase platform. No production restore or engine upgrade
 was performed. It did not restore Storage object bytes, Google Drive files,
-external services, role passwords, or historical file versions. Database-to-file
-byte matching and historical file-version recovery remain unproved. The
+external services, role passwords, or historical file versions. At this
+rehearsal's completion, database-to-file correspondence had not yet been tested;
+the separate dated metadata-only comparison below was completed later, not as
+part of a Storage-byte restore. Historical file-version recovery remains
+unproved. The
 separate 2026-10-21 media snapshot is still one-time and is not monitored by
 System Health. The recurring Drive JSON export still retains only its latest
 two verified artifacts; this rehearsal changed no schedule, retention, budget,
@@ -276,6 +279,20 @@ scheduled, and System Health does not monitor this media snapshot. This was
 not a whole-database restore or a timed recovery rehearsal. See the
 [dated rollout evidence and limits](storage-media-backup-source-implementation.md#verified-one-time-rollout--2026-10-21)
 before relying on this snapshot.
+
+**2026-10-23 correspondence follow-up:** at 08:16:09.402 UTC (16:16:09.402 HKT),
+an offline comparison of the accepted V9 logical database archive confirmed
+that all 15 recorded file identities, versions and sizes (224,309,367 bytes)
+exactly matched the inventory of the immutable copies whose SHA-256 and CRC32C
+were verified on 2026-10-21. One `storage.objects` archive entry was read;
+no new export, database start, cloud request, credential or file-byte download
+was needed. The aggregate result and private acceptance-receipt digest are in
+the [redacted dated evidence](private-logical-recovery-rehearsal-2026-10-23.json).
+This establishes only the exact versions recorded by that V9 snapshot. It is
+not a new cloud-availability check, Storage-byte restoration, proof for older
+database snapshots or uploads after V9, recurring media backup, managed
+physical/PITR recovery or a recovery-time guarantee. The historical evidence
+above and the one-time snapshot's scheduling/monitoring limits are unchanged.
 
 Google Calendar and Google Contacts remain their own live systems, although a
 current API export is included for investigation. Google Drive remains the live
