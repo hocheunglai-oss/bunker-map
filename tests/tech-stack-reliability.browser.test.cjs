@@ -87,6 +87,7 @@ async function main() {
             })
             await page.waitForFunction(() => window.__techStackHarness.routes.includes("/admin"))
             assert.equal(await page.getByRole("heading", { name: "CURRENT DEPLOYMENT", exact: true }).count(), 0)
+            await page.screenshot({ path: path.join(output, label + "-signed-out.png") })
             await page.evaluate(() => {
               const h = window.__techStackHarness
               h.mode = "ok"; h.auth = { ...h.auth, authenticated: true }; h.render()
@@ -114,12 +115,18 @@ async function main() {
               assert.equal(await page.getByText("admin_role_defaults (optional; office_calendar_store fallback)", { exact: true }).count(), 1)
               const ssl = page.getByText(/^DATABASE SSL — DASHBOARD SETTING ENABLED/)
               assert.match(await ssl.innerText(), /2026-10-22 AT 20:03:56 HKT \(12:03:56 UTC\)[\s\S]*NOT CERTIFIED BY THIS SETTING CHECK/)
+              const rehearsal = page.getByText(/^PRIVATE LOGICAL DATABASE REHEARSAL — COMPLETED/)
+              assert.match(await rehearsal.innerText(), /2026-10-23[\s\S]*126 FULL-TABLE FINGERPRINTS, ORIGINAL METADATA AND EIGHT SEQUENCE STATES MATCHED[\s\S]*NATIVE TLS ON BOTH SOURCE CONNECTION HOPS[\s\S]*NOLOGIN[\s\S]*NOT A PRODUCTION UPGRADE[\s\S]*NOT A RECURRING POSTGRESQL BACKUP, MANAGED PHYSICAL\/PITR RESTORE, WHOLE HOSTED SUPABASE RECOVERY OR STORAGE-FILE RECOVERY/)
+              assert.match(await page.getByText(/^PRESENTATION MEDIA — VERIFIED/).innerText(), /DATABASE-TO-FILE BYTE MATCHING AND HISTORICAL FILE-VERSION RECOVERY REMAIN UNPROVED/)
+              assert.match(await page.getByText(/^EXCHANGE RENEWAL —/).innerText(), /24 HOURS[\s\S]*UNCHANGED 36-HOUR ACCEPTANCE LIMIT[\s\S]*NOT A TIMESTAMP-ONLY RENEWAL/)
               await media.scrollIntoViewIfNeeded()
               await page.screenshot({ path: path.join(output, label + "-" + permission + "-media.png") })
               await media.getByRole("cell").last().scrollIntoViewIfNeeded()
               await page.screenshot({ path: path.join(output, label + "-" + permission + "-media-scope.png") })
               await ssl.scrollIntoViewIfNeeded()
               await page.screenshot({ path: path.join(output, label + "-" + permission + "-ssl.png") })
+              await rehearsal.scrollIntoViewIfNeeded()
+              await page.screenshot({ path: path.join(output, label + "-" + permission + "-private-rehearsal.png") })
             }
             const dimensions = await page.evaluate(() => ({ width: innerWidth, scroll: document.documentElement.scrollWidth }))
             assert.ok(dimensions.scroll <= dimensions.width + 1, JSON.stringify(dimensions))

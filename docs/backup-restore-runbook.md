@@ -6,6 +6,54 @@ Verification and coverage wording reviewed: 2026-09-24. This documentation
 review did not perform a restore rehearsal; see the
 [dated backup assessment](backup-evaluation-2026-09-24.md).
 
+## One-time private logical database rehearsal — 2026-10-23
+
+A private full PostgreSQL logical export was restored into an isolated local
+database. Final offline verification completed at **2026-10-23 05:07:13.579 UTC
+(13:07:13.579 HKT)**. The
+[redacted dated evidence](private-logical-recovery-rehearsal-2026-10-23.json)
+records aggregate checks and receipt digests, not private archive locations,
+credentials, database rows, or account details.
+
+The 2,895,330,862-byte archive was rehashed before verification. All 126
+full-table row-count and order-independent SHA-256 limb-sum fingerprints
+matched the original same-snapshot source fingerprints. These are regression
+fingerprints, not a cryptographic multiset proof. The original comparison
+covered twelve metadata sections, the original database metadata, all seventeen
+source-role copies with `NOLOGIN`, and all eight archived sequence states.
+All 2,155 archive entries were accounted for with zero unaccounted entries.
+The original selected lists covered 2,151 entries; the four additional
+create-aware entries were two automatically applied database/property entries
+and two exact offline ACL/comment restorations from the saved metadata.
+Missing local ACLs and typed role settings were restored exactly before the
+unchanged equality checks passed; no source metadata difference was waived.
+
+The actual native source connection used certificate-verified client TLS, and
+TLS on the source backend connection hop was also verified. Production remained
+on managed PostgreSQL **17.6**. The isolated **17.11** runtime was not a production
+upgrade. Original role copies remained `NOLOGIN`; the separate local
+verification owner and local preload configuration were intentional environment
+differences, not restored production sign-in credentials or hosted services.
+All owned clients and the local database server were closed, and the temporary
+password file was absent after verification.
+
+The measured export took 192.782 seconds and the full local restore took 46.706
+seconds. The final offline correction/verification took 13.119 seconds after
+that restore; it was not a new export or another restore. These separate stage
+durations are not a production recovery-time guarantee and do not include a
+production cutover or external-system recovery.
+
+This was **a one-time private logical database rehearsal**, not a recurring
+PostgreSQL backup, a Supabase-managed physical backup/PITR restore, or a recovery
+of the whole hosted Supabase platform. No production restore or engine upgrade
+was performed. It did not restore Storage object bytes, Google Drive files,
+external services, role passwords, or historical file versions. Database-to-file
+byte matching and historical file-version recovery remain unproved. The
+separate 2026-10-21 media snapshot is still one-time and is not monitored by
+System Health. The recurring Drive JSON export still retains only its latest
+two verified artifacts; this rehearsal changed no schedule, retention, budget,
+cost control, or backup-health policy.
+
 ## Recovery contract
 
 FCUNO is the source of truth for the shared address book. The authoritative
