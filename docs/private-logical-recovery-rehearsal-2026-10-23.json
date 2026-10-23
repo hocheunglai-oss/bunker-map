@@ -1,0 +1,66 @@
+{
+  "schema": "fcuno.private-logical-recovery-public-evidence/v1",
+  "result": "passed",
+  "completedAt": "2026-10-23T05:07:13.579Z",
+  "description": "One-time private full logical PostgreSQL export, isolated local restore and offline verification. This redacted summary contains no archive location, source connection details, credentials or database rows.",
+  "archive": {
+    "bytes": 2895330862,
+    "sha256": "d9fc47f312926a10638c656369c4482fade3a5b74038918750814c7c983111bf"
+  },
+  "verified": {
+    "fullTableFingerprints": 126,
+    "originalMetadataSections": 12,
+    "originalRoleCopiesNoLogin": 17,
+    "archivedSequenceStates": 8,
+    "archiveTocEntries": 2155,
+    "unaccountedTocEntries": 0,
+    "sourceClientVerifyFullTls": true,
+    "sourceBackendTls": true,
+    "ownedClientsAndServerClosed": true,
+    "passwordFileAbsent": true
+  },
+  "fingerprintMethod": "Original same-snapshot full-table row counts and order-independent SHA-256 limb-sum fingerprints matched the restored tables; regression fingerprints, not a cryptographic multiset proof.",
+  "metadataScope": "Original twelve comparison sections and database metadata matched after exact offline ACL, typed role-setting and database-comment restoration. Original role copies remained NOLOGIN; the separate local verification owner and preload configuration intentionally differed from the managed source.",
+  "archiveTocAccounting": {
+    "originalSelectedEntries": 2151,
+    "automaticDatabaseAndProperties": 2,
+    "exactOfflineAclAndComment": 2,
+    "total": 2155,
+    "unaccounted": 0
+  },
+  "engines": {
+    "source": "17.6 managed Supabase",
+    "restored": "17.11 isolated local",
+    "productionChanged": false
+  },
+  "measuredStageDurationsMs": {
+    "sourceExport": 192782,
+    "localFullRestore": 46706,
+    "finalOfflineCorrectionAndVerification": 13119
+  },
+  "scope": {
+    "oneTimePrivateLogicalDatabaseRehearsal": true,
+    "recurringPostgresqlBackup": false,
+    "managedPhysicalOrPitrRecovery": false,
+    "wholeHostedSupabaseRecovery": false,
+    "storageFileRecovery": false,
+    "historicalFileVersionRecovery": false,
+    "productionEngineUpgrade": false,
+    "productionRecoveryTimeGuarantee": false
+  },
+  "unchangedPolicies": [
+    "Recurring application JSON export to Drive retains the latest two verified artifacts; it is not a full PostgreSQL restore image.",
+    "The separate fifteen-file uploaded-media snapshot remains one-time, with no recurring media schedule or System Health monitoring.",
+    "No backup schedule, retention, budget, cost-control or notification policy was changed by this rehearsal."
+  ],
+  "remainingLimits": [
+    "No managed physical/PITR restore, production cutover or whole hosted Supabase service recovery was tested.",
+    "Storage object bytes, Google Drive file bytes, external services and role passwords were not restored by this database rehearsal.",
+    "Database-to-file byte matching and historical file-version recovery remain unproved.",
+    "Separate measured stages do not establish a production recovery-time guarantee."
+  ],
+  "privateEvidenceReceiptSha256": {
+    "sourceExport": "bcadda0b41d989f58bc2286cf3b6621e79455171893cbef6f99b5b58766cd287",
+    "offlineCompletion": "848caa2928e191f0beec928145141ec25be9b561d34efa1f9cde1e3b9cef8a8b"
+  }
+}

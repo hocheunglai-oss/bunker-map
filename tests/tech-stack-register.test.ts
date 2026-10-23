@@ -118,6 +118,10 @@ test("Tech Stack documents recovery limits and separates dated external checks f
   assert.match(pageSource, /exchangePublicationBaseline\.workerVersion\.toUpperCase\(\)/)
   assert.match(pageSource, /EXCHANGE DATED LIVE CHECK — \{exchangePublicationBaseline\.verifiedAt\}/)
   assert.match(pageSource, /NOT A SUBSEQUENT LIVE FULL EXCHANGE VERIFICATION/)
+  assert.match(pageSource, /HOURLY INCREMENTAL RUNS REQUEST GENUINE FULL READ-ONLY VERIFICATION AT 24 HOURS, BEFORE THE UNCHANGED 36-HOUR ACCEPTANCE LIMIT/)
+  const renewalSql = readFileSync(new URL("../supabase/migrations/20261023041904_refresh_outlook_certification_before_expiry.sql", import.meta.url), "utf8")
+  assert.match(renewalSql, /certification\.certified_at <= clock_timestamp\(\) - interval '24 hours'/)
+  assert.match(renewalSql, /certification\.certified_at >= clock_timestamp\(\) - interval '36 hours'/)
   assert.match(pageSource, /DAILY 06:10 HKT \+ ON DEMAND/)
   assert.match(pageSource, /THIS PAGE DOES NOT RECHECK AZURE AT LOAD TIME/)
   assert.match(pageSource, /HEALTHY RUNS, INCLUDING SUCCESSFUL CHANGES, AND VERIFIED RECOVERY ARE SILENT/)
@@ -158,7 +162,8 @@ test("Tech Stack and recovery docs distinguish the verified one-time media snaps
   assert.match(pageSource, /ONE-TIME PRIVATE GOOGLE CLOUD STORAGE COPY OF ALL 15 FILES \(224,309,367 BYTES\)/)
   assert.match(pageSource, /TWO READ-BACK CHECKS MATCHED THE COPIED BYTES/)
   assert.match(pageSource, /TEMPORARY SOURCE ACCESS IS OFF; NO RECURRING MEDIA BACKUP IS SCHEDULED/)
-  assert.match(pageSource, /WHOLE-DATABASE RESTORE AND HISTORICAL FILE-VERSION MATCHING REMAIN UNPROVED/)
+  assert.match(pageSource, /DATABASE-TO-FILE BYTE MATCHING AND HISTORICAL FILE-VERSION RECOVERY REMAIN UNPROVED/)
+  assert.doesNotMatch(pageSource, /WHOLE-DATABASE RESTORE AND HISTORICAL FILE-VERSION MATCHING REMAIN UNPROVED/)
   assert.match(pageSource, /SYSTEM HEALTH DOES NOT MONITOR THIS MEDIA SNAPSHOT/)
   assert.doesNotMatch(pageSource, /INDEPENDENT RECOVERY COVERAGE HAS NOT BEEN ESTABLISHED/)
   assert.match(implementation, /## Verified one-time rollout — 2026-10-21/)
@@ -169,6 +174,38 @@ test("Tech Stack and recovery docs distinguish the verified one-time media snaps
   assert.match(restoreRunbook, /\*\*2026-10-21 follow-up:\*\*/)
   assert.match(restoreRunbook, /no recurring media backup is\nscheduled/)
   assert.match(restoreRunbook, /not a whole-database restore or a timed recovery rehearsal/)
+  assert.match(pageSource, /PRIVATE LOGICAL DATABASE REHEARSAL — COMPLETED 2026-10-23/)
+  assert.match(pageSource, /126 FULL-TABLE FINGERPRINTS, ORIGINAL METADATA AND EIGHT SEQUENCE STATES MATCHED/)
+  assert.match(pageSource, /NATIVE TLS ON BOTH SOURCE CONNECTION HOPS WAS VERIFIED/)
+  assert.match(pageSource, /SOURCE ROLE COPIES REMAINED NOLOGIN; LOCAL POSTGRESQL 17\.11 WAS NOT A PRODUCTION UPGRADE/)
+  assert.match(pageSource, /NOT A RECURRING POSTGRESQL BACKUP, MANAGED PHYSICAL\/PITR RESTORE, WHOLE HOSTED SUPABASE RECOVERY OR STORAGE-FILE RECOVERY/)
+  assert.match(restoreRunbook, /## One-time private logical database rehearsal — 2026-10-23/)
+  assert.match(restoreRunbook, /not a recurring\s+PostgreSQL backup/)
+  assert.match(restoreRunbook, /not a production recovery-time guarantee/)
+  const evidenceText = readFileSync(new URL("../docs/private-logical-recovery-rehearsal-2026-10-23.json", import.meta.url), "utf8")
+  const evidence = JSON.parse(evidenceText)
+  assert.equal(evidence.schema, "fcuno.private-logical-recovery-public-evidence/v1")
+  assert.equal(evidence.result, "passed")
+  assert.equal(evidence.completedAt, "2026-10-23T05:07:13.579Z")
+  assert.equal(evidence.archive.bytes, 2_895_330_862)
+  assert.equal(evidence.archive.sha256, "d9fc47f312926a10638c656369c4482fade3a5b74038918750814c7c983111bf")
+  assert.deepEqual(evidence.verified, {
+    fullTableFingerprints: 126, originalMetadataSections: 12, originalRoleCopiesNoLogin: 17,
+    archivedSequenceStates: 8, archiveTocEntries: 2155, unaccountedTocEntries: 0,
+    sourceClientVerifyFullTls: true, sourceBackendTls: true, ownedClientsAndServerClosed: true, passwordFileAbsent: true,
+  })
+  assert.equal(evidence.scope.oneTimePrivateLogicalDatabaseRehearsal, true)
+  for (const field of ["recurringPostgresqlBackup", "managedPhysicalOrPitrRecovery", "wholeHostedSupabaseRecovery", "storageFileRecovery", "historicalFileVersionRecovery", "productionEngineUpgrade", "productionRecoveryTimeGuarantee"]) {
+    assert.equal(evidence.scope[field], false, field)
+  }
+  assert.equal(evidence.engines.source, "17.6 managed Supabase")
+  assert.equal(evidence.engines.restored, "17.11 isolated local")
+  assert.match(evidence.fingerprintMethod, /not a cryptographic multiset proof/)
+  assert.doesNotMatch(evidenceText, /\/private\/|\/Users\/|postgres(?:ql)?:\/\/|password\s*[:=]|snapshotId|\b(?:\d{1,3}\.){3}\d{1,3}\b/i)
+  assert.deepEqual(evidence.privateEvidenceReceiptSha256, {
+    sourceExport: "bcadda0b41d989f58bc2286cf3b6621e79455171893cbef6f99b5b58766cd287",
+    offlineCompletion: "848caa2928e191f0beec928145141ec25be9b561d34efa1f9cde1e3b9cef8a8b",
+  })
 })
 
 test("Tech Stack dates the Oct22 database setting check without claiming native TLS or completed recovery", () => {
