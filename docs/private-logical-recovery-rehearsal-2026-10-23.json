@@ -48,6 +48,26 @@
     "productionEngineUpgrade": false,
     "productionRecoveryTimeGuarantee": false
   },
+  "followUpFileVersionCorrespondence": {
+    "completedAt": "2026-10-23T08:16:09.402Z",
+    "result": "exact-recorded-file-version-correspondence-verified",
+    "databaseArchiveSha256": "d9fc47f312926a10638c656369c4482fade3a5b74038918750814c7c983111bf",
+    "recordedObjects": 15,
+    "recordedTotalBytes": 224309367,
+    "recordedIdentitiesVersionsAndSizesMatch": true,
+    "copyBytesVerifiedOn": "2026-10-21",
+    "copyByteChecks": ["SHA-256", "CRC32C"],
+    "method": "Offline comparison of one storage.objects entry from the accepted V9 archive against the inventory of the existing immutable byte-verified copies; no new export, database start, cloud request, credential or file-byte download.",
+    "stateAtLogicalRehearsalCompletion": "At 05:07:13.579 UTC, database-to-file correspondence and historical file-version recovery had not yet been verified; this metadata-only follow-up completed later.",
+    "newCloudAvailabilityCheck": false,
+    "storageBytesRestored": false,
+    "olderDatabaseSnapshotsVerified": false,
+    "uploadsAfterV9Verified": false,
+    "recurringMediaBackupEnabled": false,
+    "managedPhysicalOrPitrRecovery": false,
+    "productionRecoveryTimeGuarantee": false,
+    "privateAcceptanceReceiptSha256": "e74270590e6785c47869872f95aec9c368a5b898113a48d9d1ac0ed6bc0efad1"
+  },
   "unchangedPolicies": [
     "Recurring application JSON export to Drive retains the latest two verified artifacts; it is not a full PostgreSQL restore image.",
     "The separate fifteen-file uploaded-media snapshot remains one-time, with no recurring media schedule or System Health monitoring.",
@@ -56,7 +76,7 @@
   "remainingLimits": [
     "No managed physical/PITR restore, production cutover or whole hosted Supabase service recovery was tested.",
     "Storage object bytes, Google Drive file bytes, external services and role passwords were not restored by this database rehearsal.",
-    "Database-to-file byte matching and historical file-version recovery remain unproved.",
+    "Historical file-version recovery, older database snapshots and uploads after V9 remain unproved; the separate dated follow-up establishes only exact V9-recorded identities, versions and sizes.",
     "Separate measured stages do not establish a production recovery-time guarantee."
   ],
   "privateEvidenceReceiptSha256": {
