@@ -60,22 +60,23 @@ class Session {
     this.process.stdin.on("error", failed)
   }
 
-  query(sql) {
+  query(sql, { timeoutMs = 20000 } = {}) {
     assert.equal(this.closed, false, `${this.label} is closed`)
     assert.equal(this.pending == null, true, `${this.label} already has a query in flight`)
+    assert.ok(timeoutMs === 20000 || timeoutMs === 30000, "Only default20s or explicitly requested30s isolated-test ceilings are supported")
     return new Promise((resolve, reject) => {
       const marker = `FCUNO_CCINFO_DONE_${randomUUID()}`
       const timer = setTimeout(() => {
         this.process.kill("SIGTERM")
-        reject(new Error(`${this.label}: native query exceeded the 20-second fixture limit`))
-      }, 20000)
+        reject(new Error(`${this.label}: native query exceeded the ${timeoutMs / 1000}-second fixture limit`))
+      }, timeoutMs)
       this.pending = { marker, timer, resolve, reject, lines: [] }
       this.process.stdin.write(`\\set VERBOSITY verbose\n${sql}\n\\echo ${marker}\n`)
     })
   }
 
-  async one(sql) {
-    const rows = await this.query(sql)
+  async one(sql, options) {
+    const rows = await this.query(sql, options)
     assert.equal(rows.length, 1, `${this.label}: expected one JSON result, got ${JSON.stringify(rows)}`)
     return JSON.parse(rows[0])
   }
