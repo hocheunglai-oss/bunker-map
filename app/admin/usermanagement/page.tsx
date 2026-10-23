@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ADMIN_PAGE_GROUP_LABELS,
   canAccessAdminPage,
@@ -40,6 +40,7 @@ type ManagedAdminRoleDefault = {
   hasMixedPermissions: boolean
   persisted: boolean
   isBuiltIn: boolean
+  version: string | null
 }
 
 type UsersResponse = {
@@ -203,6 +204,8 @@ export default function UserManagementPage() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
   const [messageIsError, setMessageIsError] = useState(false)
+  const [groupConflict, setGroupConflict] = useState(false)
+  const groupMessageRef = useRef<HTMLDivElement>(null)
 
   const canEdit = isAdminRole(role) || canAccessAdminPage(permissions, "user-management", "edit")
   const selectedGroup = useMemo(
@@ -230,7 +233,7 @@ export default function UserManagementPage() {
   }, [])
 
   const loadUsers = useCallback(async () => {
-    if (!authenticated) return
+    if (!authenticated) return false
 
     setLoading(true)
     try {
@@ -239,20 +242,23 @@ export default function UserManagementPage() {
 
       if (!response.ok) {
         showMessage(data.message || "Failed to load users.", true)
-        return
+        return false
       }
 
       const nextGroups = data.roleDefaults || []
       setUsers(data.users || [])
       setPages(data.pages || [])
       setRoleDefaults(nextGroups)
+      setGroupConflict(false)
       setSelectedRole((current) =>
         nextGroups.some((group) => group.role === current)
           ? current
           : nextGroups.find((group) => group.role === "AC")?.role || nextGroups[0]?.role || "AC"
       )
+      return true
     } catch {
       showMessage("Failed to load users.", true)
+      return false
     } finally {
       setLoading(false)
     }
@@ -265,6 +271,10 @@ export default function UserManagementPage() {
   useEffect(() => {
     loadUsers()
   }, [loadUsers])
+
+  useEffect(() => {
+    if (groupConflict) groupMessageRef.current?.scrollIntoView({ block: "nearest" })
+  }, [groupConflict])
 
   useEffect(() => {
     if (!modal) return
@@ -412,6 +422,7 @@ export default function UserManagementPage() {
           roleDefault: {
             role: selectedGroup.role,
             permissions: selectedPermissions,
+            expectedVersion: selectedGroup.version,
           },
         }),
       })
@@ -419,6 +430,7 @@ export default function UserManagementPage() {
 
       if (!response.ok) {
         showMessage(getErrorMessage(data, "Failed to save permission group."), true)
+        if (response.status === 409) setGroupConflict(true)
         return
       }
 
@@ -454,6 +466,7 @@ export default function UserManagementPage() {
           roleDefault: {
             role: requestedName,
             permissions: normaliseAdminPagePermissions(null, "view", pages),
+            expectedVersion: null,
           },
         }),
       })
@@ -461,6 +474,7 @@ export default function UserManagementPage() {
 
       if (!response.ok) {
         showMessage(getErrorMessage(data, "Failed to create permission group."), true)
+        if (response.status === 409) setGroupConflict(true)
         return
       }
 
@@ -486,13 +500,14 @@ export default function UserManagementPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "delete-role-default",
-          roleDefault: { role: selectedGroup.role },
+          roleDefault: { role: selectedGroup.role, expectedVersion: selectedGroup.version },
         }),
       })
       const data = await response.json()
 
       if (!response.ok) {
         showMessage(getErrorMessage(data, "Failed to delete permission group."), true)
+        if (response.status === 409) setGroupConflict(true)
         return
       }
 
@@ -523,7 +538,8 @@ export default function UserManagementPage() {
       <div style={{ display: "grid", gap: "16px", maxWidth: "1500px", margin: "0 auto" }}>
         {message ? (
           <div
-            role="status"
+            ref={groupMessageRef}
+            role={groupConflict ? "alert" : "status"}
             style={{
               border: `1px solid ${messageIsError ? "var(--fc-admin-danger-border)" : "#1473e655"}`,
               borderRadius: "12px",
@@ -535,6 +551,23 @@ export default function UserManagementPage() {
             }}
           >
             {message}
+            {groupConflict ? (
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px", marginTop: "10px" }}>
+                <span>Your unsaved choices are still here.</span>
+                <button
+                  type="button"
+                  disabled={loading || saving}
+                  onClick={async () => {
+                    if (window.confirm("Reload groups and discard unsaved permission changes?") && await loadUsers()) {
+                      showMessage("Groups reloaded. Review the latest settings before making changes.")
+                    }
+                  }}
+                  style={{ ...buttonStyle, whiteSpace: "normal" }}
+                >
+                  Reload groups
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -836,6 +869,8 @@ export default function UserManagementPage() {
                           return (
                             <div
                               key={page.id}
+                              role="group"
+                              aria-label={`${page.label} permission`}
                               style={{
                                 display: "grid",
                                 gridTemplateColumns: isMobile ? "minmax(0, 1fr)" : "minmax(190px, 1fr) auto",
@@ -910,7 +945,7 @@ export default function UserManagementPage() {
                     }}
                   >
                     <span style={{ color: "var(--fc-admin-muted)", fontSize: "11px" }}>
-                      Saving updates every member of this group.
+                      Saving changes this group&apos;s access for every member.
                     </span>
                     <button
                       type="button"

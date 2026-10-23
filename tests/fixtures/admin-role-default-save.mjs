@@ -5,6 +5,7 @@ import { dirname, resolve, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { transformSync } from "esbuild"
 import { createClient } from "@supabase/supabase-js"
+import { createHash } from "node:crypto"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const require = createRequire(import.meta.url)
@@ -24,13 +25,17 @@ const initialGroups = () => ["ADMIN", "AC", "BT", "VN", "CUSTOM GROUP"].map(role
 
 // Real route, store, normalization and Supabase SDK. Only the session and
 // transport are isolated synthetic state; no credentials/provider calls.
-export function createAdminGroupSave({ storage = "table", users = [groupTestUser], groups = initialGroups(), afterUsersRead, permission = "edit", authenticated = true, failGroupWrite = false, failUsersRead = false, transport } = {}) {
+export function createAdminGroupSave({ storage = "table", users = [groupTestUser], groups = initialGroups(), afterUsersRead, permission = "edit", authenticated = true, failGroupWrite = false, failUsersRead = false, transport, adminUsersSource } = {}) {
   const state = { users: structuredClone(users), groups: structuredClone(groups), store: { groups: groups.map(g => ({ role: g.role, permissions: structuredClone(g.permissions), updatedAt: g.updated_at })) } }
   const requests = [], cache = new Map()
+  let sequence = 0
   let usersReadHookFired = false
   const session = { authenticated, username: "operator@example.invalid", displayName: "Synthetic operator", role: "ADMIN" }
   const json = (value, status = 200) => Response.json(value, { status })
   const missingTable = () => json({ code: "PGRST205", message: "Could not find the table 'public.admin_role_defaults' in the schema cache" }, 404)
+  const rows = () => storage === "table" ? structuredClone(state.groups) : state.store.groups.map(g => ({ role: g.role, permissions: structuredClone(g.permissions), updated_at: g.updatedAt }))
+  const version = row => row ? createHash("sha256").update(JSON.stringify(row)).digest("hex") : null
+  const currentVersion = role => version(rows().find(g => g.role === role))
   async function fetchImpl(input, init = {}) {
     const url = new URL(input), table = url.pathname.split("/").at(-1), method = init.method || "GET"
     assert.equal(url.origin, "https://group-save.synthetic.invalid")
@@ -38,6 +43,21 @@ export function createAdminGroupSave({ storage = "table", users = [groupTestUser
     const entry = { table, method, body, headers: Object.fromEntries(new Headers(init.headers)), url: url.href }
     requests.push(entry)
     if (transport) return transport(entry)
+    if (table === "read_admin_permission_groups") return json({ schema: "fcuno.admin-permission-groups/v1", storage, groups: rows().map(row => ({ ...row, version: version(row) })) })
+    if (table === "write_admin_permission_group") {
+      if (failGroupWrite) return json({ code: "08006", message: "Synthetic group write unavailable" }, 503)
+      if (body.p_expected_version !== currentVersion(body.p_role)) return json({ code: "P0001", message: "ADMIN_PERMISSION_GROUP_CONFLICT" }, 400)
+      const count = state.users.filter(u => load("@/lib/adminPages").normaliseAdminRole(u.permissions?.__adminRole ?? u.role) === body.p_role).length
+      if (body.p_action === "delete" && count) return json({ code: "P0001", message: "ADMIN_PERMISSION_GROUP_IN_USE" }, 400)
+      const row = { role: body.p_role, permissions: body.p_permissions, updated_at: new Date(Date.parse("2026-10-22T03:00:00Z") + ++sequence).toISOString() }
+      const next = rows().filter(g => g.role !== body.p_role)
+      if (body.p_action === "save") next.push(row)
+      if (storage === "table") state.groups = next
+      else state.store = { ...state.store, groups: next.map(g => ({ role: g.role, permissions: g.permissions, updatedAt: g.updated_at })) }
+      if (afterUsersRead && !usersReadHookFired) { usersReadHookFired = true; await afterUsersRead(state) }
+      return json({ saved: true, role: body.p_role, deleted: body.p_action === "delete", memberCount: count,
+        row: body.p_action === "save" ? { ...row, version: version(row) } : null, version: body.p_action === "save" ? version(row) : null })
+    }
     if (table === "admin_users") {
       if (method === "GET") {
         if (failUsersRead) return json({ code: "08006", message: "Synthetic users read unavailable" }, 503)
@@ -93,15 +113,18 @@ export function createAdminGroupSave({ storage = "table", users = [groupTestUser
     if (file.endsWith(".json")) return JSON.parse(readFileSync(file, "utf8"))
     if (cache.has(file)) return cache.get(file).exports
     const mod = { exports: {} }; cache.set(file, mod)
-    const code = transformSync(readFileSync(file, "utf8"), { loader: "ts", format: "cjs", target: "node24" }).code
+    const code = transformSync(file === join(root, "lib/adminUsers.ts") && adminUsersSource !== undefined ? adminUsersSource : readFileSync(file, "utf8"), { loader: "ts", format: "cjs", target: "node24" }).code
     const contextProcess = { env: { NEXT_PUBLIC_SUPABASE_URL: "https://group-save.synthetic.invalid", SUPABASE_SERVICE_ROLE_KEY: "synthetic-no-provider-credential" } }
     new Function("require", "module", "exports", "process", code)(request => load(request, dirname(file)), mod, mod.exports, contextProcess)
     return mod.exports
   }
-  return { state, requests, session, load, save: (role = "BT", permissions = { "user-management": "edit", attendancerecord: "none" }) => load("@/lib/adminUsers").saveManagedAdminRoleDefault({ role, permissions }, session, groupTestPages),
-    async post(role = "BT", permissions = { "user-management": "edit", attendancerecord: "none" }) {
-      const response = await load("@/app/api/admin/users/route").POST(new Request("https://app.synthetic.invalid/api/admin/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "save-role-default", roleDefault: { role, permissions } }) }))
+  async function request(payload) {
+      const response = await load("@/app/api/admin/users/route").POST(new Request("https://app.synthetic.invalid/api/admin/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }))
       return { status: response.status, body: await response.json() }
-    },
+  }
+  return { state, requests, session, load, version: currentVersion, request,
+    save: (role = "BT", permissions = { "user-management": "edit", attendancerecord: "none" }) => load("@/lib/adminUsers").saveManagedAdminRoleDefault({ role, permissions, expectedVersion: currentVersion(role) }, session, groupTestPages),
+    post: (role = "BT", permissions = { "user-management": "edit", attendancerecord: "none" }) => request({ action: "save-role-default", roleDefault: { role, permissions, expectedVersion: currentVersion(role) } }),
   }
 }
+

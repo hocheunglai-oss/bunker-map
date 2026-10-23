@@ -18,7 +18,6 @@ import { isValidEmailAddress } from "@/lib/emailAddress"
 const scryptAsync = promisify(scrypt)
 const ADMIN_ROLE_METADATA_KEY = "__adminRole"
 export const ADMIN_ATTENDANCE_GROUP_METADATA_KEY = "__attendanceGroup"
-const ADMIN_PERMISSION_GROUPS_STORE_KEY = "admin-permission-groups"
 
 export const ADMIN_ATTENDANCE_GROUPS = ["BT", "BS", "AC"] as const
 export type AdminAttendanceGroup = (typeof ADMIN_ATTENDANCE_GROUPS)[number]
@@ -44,19 +43,12 @@ type AdminRoleDefaultRow = {
   role: string
   permissions: Record<string, unknown> | null
   updated_at: string | null
+  version: string
 }
 
 type AdminActor = {
   username: string | null
   displayName: string | null
-}
-
-type PermissionGroupStorePayload = {
-  groups?: Array<{
-    role?: unknown
-    permissions?: unknown
-    updatedAt?: unknown
-  }>
 }
 
 export type ManagedAdminUser = {
@@ -84,6 +76,7 @@ export type ManagedAdminRoleDefault = {
   hasMixedPermissions: boolean
   persisted: boolean
   isBuiltIn: boolean
+  version: string | null
 }
 
 export type AuthenticatedAdminUser = {
@@ -115,6 +108,27 @@ export type SaveAdminUserInput = {
 export type SaveAdminRoleDefaultInput = {
   role: string
   permissions?: AdminPagePermissionMap
+  expectedVersion?: string | null
+}
+
+export class AdminPermissionGroupConflictError extends Error {
+  constructor() {
+    super("This permission group changed or was removed. Your changes were not saved. Reload groups before trying again.")
+    this.name = "AdminPermissionGroupConflictError"
+  }
+}
+
+function groupStorageError(error: unknown): Error {
+  if (error && typeof error === "object" && "code" in error && "message" in error && error.code === "P0001") {
+    if (error.message === "ADMIN_PERMISSION_GROUP_CONFLICT") return new AdminPermissionGroupConflictError()
+    if (error.message === "ADMIN_PERMISSION_GROUP_IN_USE") return new Error("Move all users out of this group before deleting it.")
+    if (error.message === "ADMIN_PERMISSION_GROUP_BUILT_IN") return new Error("Built-in permission groups cannot be deleted.")
+  }
+  return new Error("Permission group storage could not be confirmed. Reload groups to check the saved state.")
+}
+
+function requireGroupVersion(value: unknown): asserts value is string | null {
+  if (value !== null && (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value))) throw new AdminPermissionGroupConflictError()
 }
 
 function requireEnv(name: string) {
@@ -166,6 +180,8 @@ function isMissingTableError(error: unknown, tableName: string) {
 }
 
 function getFriendlyUserManagementError(error: unknown) {
+  if (error && typeof error === "object" && "code" in error && "message" in error && error.code === "P0001"
+    && error.message === "ADMIN_PERMISSION_GROUP_CONFLICT") return new AdminPermissionGroupConflictError()
   const message = getErrorMessage(error)
 
   if (isMissingTableError(error, "admin_users")) {
@@ -338,175 +354,47 @@ function buildManagedRoleDefaults(
       hasMixedPermissions: permissionVariants.size > 1,
       persisted: Boolean(stored),
       isBuiltIn: ADMIN_ROLE_IDS.includes(role as (typeof ADMIN_ROLE_IDS)[number]),
+      version: stored?.version || null,
     }
   })
 }
 
-function parsePermissionGroupStore(
-  payload: unknown
-): AdminRoleDefaultRow[] {
-  if (!payload || typeof payload !== "object") return []
-
-  const groups = (payload as PermissionGroupStorePayload).groups
-  if (!Array.isArray(groups)) return []
-
-  return groups.flatMap((group) => {
-    if (!group || typeof group !== "object" || typeof group.role !== "string") {
-      return []
-    }
-
-    return [{
-      role: normaliseAdminRole(group.role),
-      permissions:
-        group.permissions && typeof group.permissions === "object"
-          ? (group.permissions as Record<string, unknown>)
-          : {},
-      updated_at: typeof group.updatedAt === "string" ? group.updatedAt : null,
-    }]
-  })
+function validStoredGroup(value: unknown): value is AdminRoleDefaultRow {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const row = value as AdminRoleDefaultRow
+  return typeof row.role === "string" && row.role === normaliseAdminRole(row.role)
+    && !!row.permissions && typeof row.permissions === "object" && !Array.isArray(row.permissions)
+    && typeof row.updated_at === "string" && Number.isFinite(Date.parse(row.updated_at))
+    && typeof row.version === "string" && /^[a-f0-9]{64}$/.test(row.version)
 }
 
-async function loadStoredRoleDefaults(
-  supabase: ReturnType<typeof getServiceClient>
-) {
-  const tableResult = await supabase
-    .from("admin_role_defaults")
-    .select("*")
-    .order("role", { ascending: true })
-
-  if (!tableResult.error) {
-    return {
-      rows: (tableResult.data || []) as unknown as AdminRoleDefaultRow[],
-      storage: "table" as const,
-    }
-  }
-
-  if (!isMissingTableError(tableResult.error, "admin_role_defaults")) {
-    throw tableResult.error
-  }
-
-  const storeResult = await supabase
-    .from("office_calendar_store")
-    .select("payload")
-    .eq("key", ADMIN_PERMISSION_GROUPS_STORE_KEY)
-    .maybeSingle()
-
-  if (storeResult.error) throw storeResult.error
-
-  return {
-    rows: parsePermissionGroupStore(storeResult.data?.payload),
-    storage: "shared-store" as const,
-  }
+async function loadStoredRoleDefaults(supabase: ReturnType<typeof getServiceClient>) {
+  const { data, error } = await supabase.rpc("read_admin_permission_groups")
+    .abortSignal(AbortSignal.timeout(15_000))
+  if (error) throw groupStorageError(error)
+  if (!data || data.schema !== "fcuno.admin-permission-groups/v1"
+    || !["table", "shared-store"].includes(data.storage) || !Array.isArray(data.groups)
+    || !data.groups.every(validStoredGroup)
+    || new Set(data.groups.map((row: AdminRoleDefaultRow) => row.role)).size !== data.groups.length) throw groupStorageError(null)
+  return { rows: data.groups as AdminRoleDefaultRow[], storage: data.storage as "table" | "shared-store" }
 }
 
-async function saveStoredRoleDefault(
+async function writeStoredRoleDefault(
   supabase: ReturnType<typeof getServiceClient>,
-  role: string,
-  permissions: AdminPagePermissionMap
+  action: "save" | "delete", role: string,
+  permissions: AdminPagePermissionMap | null, expectedVersion: unknown,
 ) {
-  const updatedAt = new Date().toISOString()
-  const tableResult = await supabase
-    .from("admin_role_defaults")
-    .upsert(
-      {
-        role,
-        permissions,
-        updated_at: updatedAt,
-      },
-      { onConflict: "role" }
-    )
-    .select("*")
-    .single()
-
-  if (!tableResult.error) {
-    return tableResult.data as unknown as AdminRoleDefaultRow
-  }
-
-  if (!isMissingTableError(tableResult.error, "admin_role_defaults")) {
-    throw tableResult.error
-  }
-
-  const existingResult = await supabase
-    .from("office_calendar_store")
-    .select("payload")
-    .eq("key", ADMIN_PERMISSION_GROUPS_STORE_KEY)
-    .maybeSingle()
-
-  if (existingResult.error) throw existingResult.error
-
-  const existingRows = parsePermissionGroupStore(existingResult.data?.payload)
-  const nextRow: AdminRoleDefaultRow = {
-    role,
-    permissions,
-    updated_at: updatedAt,
-  }
-  const nextRows = existingRows.some(
-    (row) => normaliseAdminRole(row.role) === role
-  )
-    ? existingRows.map((row) =>
-        normaliseAdminRole(row.role) === role ? nextRow : row
-      )
-    : [...existingRows, nextRow]
-
-  const storeResult = await supabase
-    .from("office_calendar_store")
-    .upsert({
-      key: ADMIN_PERMISSION_GROUPS_STORE_KEY,
-      payload: {
-        groups: nextRows.map((row) => ({
-          role: row.role,
-          permissions: row.permissions,
-          updatedAt: row.updated_at,
-        })),
-      },
-      updated_at: updatedAt,
-    })
-
-  if (storeResult.error) throw storeResult.error
-  return nextRow
-}
-
-async function deleteStoredRoleDefault(
-  supabase: ReturnType<typeof getServiceClient>,
-  role: string
-) {
-  const tableResult = await supabase
-    .from("admin_role_defaults")
-    .delete()
-    .eq("role", role)
-
-  if (!tableResult.error) return
-
-  if (!isMissingTableError(tableResult.error, "admin_role_defaults")) {
-    throw tableResult.error
-  }
-
-  const existingResult = await supabase
-    .from("office_calendar_store")
-    .select("payload")
-    .eq("key", ADMIN_PERMISSION_GROUPS_STORE_KEY)
-    .maybeSingle()
-
-  if (existingResult.error) throw existingResult.error
-
-  const nextRows = parsePermissionGroupStore(existingResult.data?.payload)
-    .filter((row) => normaliseAdminRole(row.role) !== role)
-  const updatedAt = new Date().toISOString()
-  const storeResult = await supabase
-    .from("office_calendar_store")
-    .upsert({
-      key: ADMIN_PERMISSION_GROUPS_STORE_KEY,
-      payload: {
-        groups: nextRows.map((row) => ({
-          role: row.role,
-          permissions: row.permissions,
-          updatedAt: row.updated_at,
-        })),
-      },
-      updated_at: updatedAt,
-    })
-
-  if (storeResult.error) throw storeResult.error
+  requireGroupVersion(expectedVersion)
+  const { data, error } = await supabase.rpc("write_admin_permission_group", {
+    p_action: action, p_role: role, p_permissions: permissions, p_expected_version: expectedVersion,
+  }).abortSignal(AbortSignal.timeout(15_000))
+  if (error) throw groupStorageError(error)
+  if (!data || data.saved !== true || data.role !== role || data.deleted !== (action === "delete")
+    || !Number.isSafeInteger(data.memberCount) || data.memberCount < 0
+    || (action === "save" && (!validStoredGroup(data.row) || data.row.role !== role
+      || data.version !== data.row.version))
+    || (action === "delete" && (data.row != null || data.version !== null))) throw groupStorageError(null)
+  return data as { row: AdminRoleDefaultRow; memberCount: number }
 }
 
 async function usesLegacyAdminRoleValues(
@@ -821,27 +709,18 @@ export async function saveManagedAdminRoleDefault(
 
   try {
     const supabase = getServiceClient(actor)
-    const [savedRow, usersResult] = await Promise.all([
-      saveStoredRoleDefault(supabase, role, permissions),
-      supabase.from("admin_users").select("*").order("username", { ascending: true }),
-    ])
-
-    if (usersResult.error) throw usersResult.error
-
-    const memberRows = ((usersResult.data || []) as unknown as AdminUserRow[])
-      .filter((row) => getStoredAdminRole(row) === role)
-
-    // Persisted group defaults are authoritative when authorization loads.
-    // This read is a member-count snapshot, not a plan to rewrite user metadata.
+    const saved = await writeStoredRoleDefault(supabase, "save", role, permissions, input.expectedVersion)
+    const savedRow = saved.row
 
     return {
       role,
       permissions,
       updatedAt: savedRow.updated_at,
-      memberCount: memberRows.length,
+      memberCount: saved.memberCount,
       hasMixedPermissions: false,
       persisted: true,
       isBuiltIn: ADMIN_ROLE_IDS.includes(role as (typeof ADMIN_ROLE_IDS)[number]),
+      version: savedRow.version,
     } satisfies ManagedAdminRoleDefault
   } catch (error) {
     throw getFriendlyUserManagementError(error)
@@ -850,7 +729,8 @@ export async function saveManagedAdminRoleDefault(
 
 export async function deleteManagedAdminRoleDefault(
   roleInput: string,
-  actor?: AdminActor
+  actor?: AdminActor,
+  expectedVersion?: string | null,
 ) {
   if (!roleInput.trim()) throw new Error("Group name is required.")
 
@@ -861,21 +741,7 @@ export async function deleteManagedAdminRoleDefault(
 
   try {
     const supabase = getServiceClient(actor)
-    const { data, error } = await supabase
-      .from("admin_users")
-      .select("*")
-      .order("username", { ascending: true })
-
-    if (error) throw error
-
-    const memberCount = ((data || []) as unknown as AdminUserRow[])
-      .filter((row) => getStoredAdminRole(row) === role).length
-
-    if (memberCount > 0) {
-      throw new Error("Move all users out of this group before deleting it.")
-    }
-
-    await deleteStoredRoleDefault(supabase, role)
+    await writeStoredRoleDefault(supabase, "delete", role, null, expectedVersion)
   } catch (error) {
     throw getFriendlyUserManagementError(error)
   }

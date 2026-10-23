@@ -171,6 +171,38 @@ test("Tech Stack and recovery docs distinguish the verified one-time media snaps
   assert.match(restoreRunbook, /not a whole-database restore or a timed recovery rehearsal/)
 })
 
+test("Tech Stack dates the Oct22 database setting check without claiming native TLS or completed recovery", () => {
+  assert.match(pageSource, /POSTGRESQL 17 \(17\.6\.1\.084 VERIFIED 2026-10-22\)/)
+  assert.match(pageSource, /DATABASE SSL — DASHBOARD SETTING ENABLED AND PERSISTED 2026-10-22 AT 20:03:56 HKT \(12:03:56 UTC\)/)
+  assert.match(pageSource, /PROJECT RETURNED ACTIVE_HEALTHY; 18 LIVE APPLICATION CHECKS PASSED/)
+  assert.match(pageSource, /NATIVE CLIENT TLS ON BOTH CONNECTION HOPS AND A WHOLE-DATABASE RESTORE ARE NOT CERTIFIED BY THIS SETTING CHECK/)
+  assert.match(pageSource, /ENGINE RECHECKED 2026-10-22; COMPATIBILITY INVENTORY CHECKED 2026-10-16/)
+  assert.doesNotMatch(pageSource, /17\.6\.1\.084 VERIFIED 2026-10-16|DATABASE MAINTENANCE — READ-ONLY CHECK 2026-10-16/)
+})
+
+test("Tech Stack service summary separates recurring Drive backup, one-time uploaded-media snapshot, and optional role-default storage", () => {
+  assert.match(pageSource, /\["DRIVE FILE BACKUP", "GOOGLE CLOUD STORAGE"/)
+  assert.match(pageSource, /\["UPLOADED MEDIA SNAPSHOT", "ONE-TIME SUPABASE STORAGE BYTE COPY", "GOOGLE CLOUD STORAGE", "VERIFIED 2026-10-21; 15 FILES \/ 224,309,367 BYTES; NOT RECURRING OR MONITORED BY SYSTEM HEALTH"\]/)
+  assert.match(pageSource, /admin_role_defaults \(optional; office_calendar_store fallback\)/)
+  const source = readFileSync(new URL("../lib/adminUsers.ts", import.meta.url), "utf8")
+  assert.match(source, /supabase\.rpc\("read_admin_permission_groups"\)/)
+  const groupSql = readFileSync(new URL("../supabase/migrations/20261022113511_atomic_admin_permission_groups.sql", import.meta.url), "utf8")
+  assert.match(groupSql, /if pg_catalog\.to_regclass\('public\.admin_role_defaults'\) is not null then[\s\S]*?from public\.admin_role_defaults[\s\S]*?else[\s\S]*?from public\.office_calendar_store where key='admin-permission-groups'/)
+  assert.match(groupSql, /'storage',case when pg_catalog\.to_regclass\('public\.admin_role_defaults'\) is null then 'shared-store' else 'table' end/)
+})
+
+test("Tech Stack staging codec matches the active compressor and decompression path, not just a receipt label", () => {
+  const stageSource = readFileSync(new URL("../lib/compressedBackupStage.ts", import.meta.url), "utf8")
+  const exportSource = readFileSync(new URL("../app/api/backups/bunker-map-drive/route.ts", import.meta.url), "utf8")
+  assert.match(stageSource, /const writable = createBrotliCompress\(/)
+  assert.match(stageSource, /const brotli = createBrotliDecompress\(\)/)
+  assert.match(stageSource, /return source\.pipe\(brotli\)/)
+  assert.match(exportSource, /const stage = createCompressedBackupStage\(\s*filePath,\s*MAX_COMPRESSED_STAGING_BYTES\s*\)/)
+  assert.match(exportSource, /createCompressedBackupStageReadStream\(\s*prepared\.dataPath\s*\)/)
+  assert.match(pageSource, /BROTLI-BOUNDED TEMP STAGING \/ STREAMED JSON UPLOAD/)
+  assert.doesNotMatch(pageSource, /GZIP-BOUNDED TEMP STAGING/)
+})
+
 test("Tech Stack alert guidance matches the executable backup policy rather than blanket-muting warnings", () => {
   const now = Date.parse("2026-10-16T03:00:00.000Z")
   const waiting = evaluateDatabaseBackupProtection({

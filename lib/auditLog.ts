@@ -584,6 +584,10 @@ export function approvedCountryLabelNormalizationUndoMessage(record: AuditLogRec
 }
 
 export function canUndoAuditLogRecord(record: AuditLogRecord) {
+  // Group changes require target-version and current-membership checks.
+  // Replaying a whole stored snapshot would bypass that transaction boundary.
+  if (record.tableSchema === "public" && (record.tableName === "admin_role_defaults"
+    || record.tableName === "office_calendar_store" && getOfficeCalendarStoreKey(record) === "admin-permission-groups")) return false
   // Approved label normalization must not offer an undo that canonicalizes
   // straight back to the corrected label but marks the repair as reversed.
   if (approvedCountryLabelNormalizationUndoMessage(record)) return false
