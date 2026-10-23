@@ -18,7 +18,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-10-22.3"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-10-23.1"
 # Generated from config/fcunoConnections.ts; validate before Azure publication.
 $ExchangeNotificationAddressBookUrl = "https://fcuno.com/admin/outlookaddressbook"
 $script:ExchangeNotificationRunReceipts = @{}
@@ -2532,6 +2532,23 @@ function Get-ExchangeReconciliationRequestTimeouts($DeadlineMilliseconds) {
   return @{ ConnectionTimeoutSeconds = $requestSeconds; OperationTimeoutSeconds = $requestSeconds }
 }
 
+function Test-ExchangeAtomicCertificationCancellation($Path, $ErrorRecord) {
+  if ($Path -isnot [string] -or $Path -cnotin @(
+      'rpc/certify_staged_read_only_outlook_exchange_truth',
+      'rpc/certify_staged_full_outlook_truth_and_activate_templates'
+    ) -or $ErrorRecord -isnot [System.Management.Automation.ErrorRecord]) { return $false }
+  # A received SQL cancellation is a confirmed rejection, not an ambiguous lost
+  # reply. Defer this expensive publication to the next scheduled run instead
+  # of immediately repeating it. Never infer cancellation from diagnostic text.
+  $details = $ErrorRecord.ErrorDetails.Message
+  if ([string]::IsNullOrWhiteSpace($details) -or $details.Length -gt 16384) { return $false }
+  try {
+    $sqlError = ConvertFrom-Json -InputObject $details -AsHashtable -NoEnumerate -Depth 8 -ErrorAction Stop
+    return $sqlError -is [System.Collections.IDictionary] -and
+      $sqlError['code'] -is [string] -and $sqlError['code'] -ceq '57014'
+  } catch { return $false }
+}
+
 function Invoke-ExchangeAtomicRpcWithRetry(
   $Path,
   [hashtable]$Body,
@@ -2543,11 +2560,14 @@ function Invoke-ExchangeAtomicRpcWithRetry(
 ) {
   $lastAmbiguousError = ""
   for ($attempt = 1; $attempt -le 3; $attempt += 1) {
+    $finalRpcInFlight = $false
     try {
       Get-ExchangeReconciliationRequestTimeouts $ReconciliationDeadlineMilliseconds | Out-Null
       Renew-ExchangeSyncLockIfDue
       $requestTimeouts = Get-ExchangeReconciliationRequestTimeouts $ReconciliationDeadlineMilliseconds
+      $finalRpcInFlight = $true
       $result = Invoke-SupabaseRest -Method "POST" -Path $Path -Body $Body @requestTimeouts
+      $finalRpcInFlight = $false
       Get-ExchangeReconciliationRequestTimeouts $ReconciliationDeadlineMilliseconds | Out-Null
       Renew-ExchangeSyncLockIfDue
       Get-ExchangeReconciliationRequestTimeouts $ReconciliationDeadlineMilliseconds | Out-Null
@@ -2564,6 +2584,7 @@ function Invoke-ExchangeAtomicRpcWithRetry(
       Get-ExchangeReconciliationRequestTimeouts $ReconciliationDeadlineMilliseconds | Out-Null
       return $result
     } catch {
+      if ($finalRpcInFlight -and (Test-ExchangeAtomicCertificationCancellation $Path $_)) { throw }
       $lastAmbiguousError = Clean-Text $_.Exception.Message
       if ($lastAmbiguousError -like 'OUTLOOK_TEMPLATE_RECONCILIATION_BUDGET_EXHAUSTED:*') { throw }
       $isConfirmedRejection = $lastAmbiguousError -like "$OperationLabel was not accepted:*"
