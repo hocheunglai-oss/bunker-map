@@ -98,12 +98,35 @@ async function main() {
             })
             await page.waitForTimeout(50)
             assert.equal(await page.getByText("bbbbbbb", { exact: true }).count(), 0, "Cancelled old response cannot overwrite the new session.")
+            for (const permission of ["view", "edit"]) {
+              await page.evaluate(permission => {
+                const h = window.__techStackHarness
+                h.auth = { ...h.auth, permissions: { "tech-stack": permission } }; h.render()
+              }, permission)
+              const database = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "PRIMARY DATABASE", exact: true }) })
+              assert.match(await database.innerText(), /17\.6\.1\.084 VERIFIED 2026-10-22/)
+              const archive = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "DATABASE LOGICAL ARCHIVE", exact: true }) })
+              assert.match(await archive.innerText(), /BROTLI-BOUNDED TEMP STAGING/)
+              assert.doesNotMatch(await archive.innerText(), /GZIP-BOUNDED TEMP STAGING/)
+              const media = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "UPLOADED MEDIA SNAPSHOT", exact: true }) })
+              assert.match(await media.innerText(), /ONE-TIME SUPABASE STORAGE BYTE COPY[\s\S]*15 FILES \/ 224,309,367 BYTES; NOT RECURRING OR MONITORED BY SYSTEM HEALTH/)
+              assert.equal(await page.getByRole("cell", { name: "DRIVE FILE BACKUP", exact: true }).count(), 1)
+              assert.equal(await page.getByText("admin_role_defaults (optional; office_calendar_store fallback)", { exact: true }).count(), 1)
+              const ssl = page.getByText(/^DATABASE SSL — DASHBOARD SETTING ENABLED/)
+              assert.match(await ssl.innerText(), /2026-10-22 AT 20:03:56 HKT \(12:03:56 UTC\)[\s\S]*NOT CERTIFIED BY THIS SETTING CHECK/)
+              await media.scrollIntoViewIfNeeded()
+              await page.screenshot({ path: path.join(output, label + "-" + permission + "-media.png") })
+              await media.getByRole("cell").last().scrollIntoViewIfNeeded()
+              await page.screenshot({ path: path.join(output, label + "-" + permission + "-media-scope.png") })
+              await ssl.scrollIntoViewIfNeeded()
+              await page.screenshot({ path: path.join(output, label + "-" + permission + "-ssl.png") })
+            }
             const dimensions = await page.evaluate(() => ({ width: innerWidth, scroll: document.documentElement.scrollWidth }))
             assert.ok(dimensions.scroll <= dimensions.width + 1, JSON.stringify(dimensions))
             await page.screenshot({ path: path.join(output, label + "-verified.png"), fullPage: true })
             await page.screenshot({ path: path.join(output, label + "-verified-viewport.png") })
             assert.deepEqual(errors, []); assert.deepEqual(unexpected, [])
-            results.push({ engine, width, scheme, networkRecovery: "pass", invalidResponse: "pass", staleResponse: "ignored", signedOut: "no data", dimensions })
+            results.push({ engine, width, scheme, sourceTruthCopy: "view/edit pass", networkRecovery: "pass", invalidResponse: "pass", staleResponse: "ignored", signedOut: "no data", dimensions })
           } finally { await context.close() }
         }
       } finally { await browser.close() }

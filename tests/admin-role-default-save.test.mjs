@@ -32,7 +32,7 @@ for (const storage of ["table", "shared-store"]) {
     assert.deepEqual(userWrites(h), [])
     const writes = h.requests.filter(r => r.method !== "GET" && !(storage === "shared-store" && r.table === "admin_role_defaults"))
     assert.equal(writes.length, 1)
-    assert.equal(writes[0].table, storage === "table" ? "admin_role_defaults" : "office_calendar_store")
+    assert.equal(writes[0].table, "write_admin_permission_group")
     assert.equal(writes[0].headers["x-bunker-admin-user"], "operator@example.invalid")
     const actual = await h.load("@/lib/adminUsers").getDatabaseAdminUserByIdStrict(groupTestUser.id, groupTestPages)
     assert.deepEqual(actual.permissions, changedPolicy)

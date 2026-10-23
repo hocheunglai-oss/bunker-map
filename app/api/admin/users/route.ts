@@ -6,6 +6,7 @@ import {
   loadManagedAdminRoleDefaults,
   saveManagedAdminRoleDefault,
   saveManagedAdminUser,
+  AdminPermissionGroupConflictError,
 } from "@/lib/adminUsers"
 import { requireAdminPagePermission } from "@/lib/adminAuth"
 import { getDiscoveredAdminPages } from "@/lib/adminPageDiscovery"
@@ -28,11 +29,15 @@ type UserActionPayload = {
   roleDefault?: {
     role?: string
     permissions?: Record<string, "none" | "view" | "edit">
+    expectedVersion?: string | null
   }
   id?: string
 }
 
 function errorResponse(error: unknown, fallback: string) {
+  if (error instanceof AdminPermissionGroupConflictError) {
+    return NextResponse.json({ message: error.message, code: "ADMIN_PERMISSION_GROUP_CONFLICT" }, { status: 409 })
+  }
   const message = error instanceof Error ? error.message : fallback
   const status =
     message === "Unauthorized"
@@ -143,6 +148,7 @@ export async function POST(request: Request) {
         {
           role: payload.roleDefault.role,
           permissions: payload.roleDefault.permissions,
+          expectedVersion: payload.roleDefault.expectedVersion,
         },
         session,
         pages
@@ -156,7 +162,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ message: "Role is required." }, { status: 400 })
       }
 
-      await deleteManagedAdminRoleDefault(payload.roleDefault.role, session)
+      await deleteManagedAdminRoleDefault(payload.roleDefault.role, session, payload.roleDefault.expectedVersion)
       return NextResponse.json({ success: true })
     }
 

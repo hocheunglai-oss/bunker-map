@@ -1857,7 +1857,7 @@ async function markBackupVerified(
     fileId,
     requestBody: {
       description:
-        "Verified complete FCUNO backup. Data was exported page-by-page, exact uploaded bytes were stream-downloaded and SHA-256 checked, and the immutable Exchange truth checkpoint was certified before retention pruning.",
+        "Verified complete FCUNO backup. Data was exported page-by-page, Drive confirmed the upload MD5 checksum and byte length, and the Exchange truth checkpoint was checked before retention pruning. Stored-byte SHA-256 verification is a separate System Health check.",
       appProperties: {
         backupSchema: BACKUP_FILE_SCHEMA,
         verificationContract: BACKUP_STREAM_VERIFICATION_SCHEMA,
