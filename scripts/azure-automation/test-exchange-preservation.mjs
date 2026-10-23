@@ -57,3 +57,11 @@ const localDates = spawnSync(process.execPath, ["--test", "--test-reporter=tap",
   env: { ...process.env, FCUNO_PWSH_PATH: executable },
 })
 if (localDates.error || localDates.status !== 0) throw new Error("Exchange certified timestamp transport regression failed", { cause: localDates.error })
+
+// Only received, typed SQL cancellation on the two final certification RPCs
+// defers immediate publication retry. All transport observations are loopback.
+const localCancellation = spawnSync(process.execPath, ["--test", "--test-reporter=tap", fileURLToPath(new URL("../../tests/exchange-atomic-cancellation-local.test.mjs", import.meta.url))], {
+  stdio: "inherit", timeout: 120000,
+  env: { ...process.env, FCUNO_PWSH_PATH: executable },
+})
+if (localCancellation.error || localCancellation.status !== 0) throw new Error("Exchange atomic cancellation transport regression failed", { cause: localCancellation.error })
