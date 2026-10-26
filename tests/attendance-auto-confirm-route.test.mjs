@@ -48,6 +48,7 @@ new Function("require", "module", "exports", built.outputFiles[0].text)(
 )
 const { GET } = loaded.exports
 const cy = { id: "e2cd1a9d-95c1-4292-940a-884537f35cf3", staffCode: "CY", dingTalkUserId: null }
+const jz = { id: "50988b84-4d6c-4089-9112-d6bfad1ed72d", adminUserId: "3cf2bff0-4eda-4c36-8827-a8f7be0c764d", staffCode: "JZ", dingTalkUserId: null }
 const other = { id: "other-person", staffCode: "ZZ", dingTalkUserId: "ding-other" }
 
 async function invoke(fixture) {
@@ -155,4 +156,86 @@ test("a CY confirmation guard failure does not stop ordinary staff", async () =>
   })
   assert.equal(response.status, 500)
   assert.deepEqual(confirmations, ["cyDingTalkException", "ordinary"])
+})
+
+test("actual cron sends unlinked JZ through his independent exception path, preserving CY and ordinary totals", async () => {
+  const requeries = [], confirmations = []
+  const { response, body } = await invoke({
+    people: [cy, jz, other],
+    async requery({ people }) { requeries.push(people.map(person => person.id)) },
+    async confirm(scope, expectedId) {
+      confirmations.push([scope, expectedId]); return { skipped: false, year: 2026, month: 10, systemConfirmed: 1 }
+    },
+  })
+  assert.equal(response.status, 200)
+  assert.deepEqual(requeries, [[other.id], []])
+  assert.deepEqual(confirmations, [["cyDingTalkException", null], ["jzDingTalkException", null], ["ordinary", undefined]])
+  assert.equal(body.systemConfirmed, 3); assert.equal(body.cySystemConfirmed, 1); assert.equal(body.jzSystemConfirmed, 1)
+  assert.equal(body.jzDingTalkRequery, "not-linked")
+})
+
+test("actual cron still attempts JZ when ordinary and linked-CY requeries fail", async () => {
+  const confirmations = []
+  const { response } = await invoke({
+    people: [{ ...cy, dingTalkUserId: "ding-cy" }, jz, other],
+    async requery({ people }) { if (people.length) throw new Error("synthetic other-person outage") },
+    async confirm(scope, expectedId) { confirmations.push([scope, expectedId]); return { systemConfirmed: 1 } },
+  })
+  assert.equal(response.status, 500)
+  assert.deepEqual(confirmations, [["jzDingTalkException", null]])
+})
+
+test("actual cron withholds linked JZ after his failed requery without blocking CY or ordinary staff", async () => {
+  const requeries = [], confirmations = []
+  const { response } = await invoke({
+    people: [cy, { ...jz, dingTalkUserId: "ding-jz" }, other],
+    async requery({ people }) {
+      requeries.push(people.map(person => person.id))
+      if (people.some(person => person.id === jz.id)) throw new Error("synthetic JZ partial requery")
+    },
+    async confirm(scope) { confirmations.push(scope); return { systemConfirmed: 1 } },
+  })
+  assert.equal(response.status, 500)
+  assert.deepEqual(requeries, [[other.id], [], [jz.id]])
+  assert.deepEqual(confirmations, ["cyDingTalkException", "ordinary"])
+})
+
+test("actual cron passes JZ's freshly requeried identity to his checked confirmation scope", async () => {
+  const confirmations = []
+  const { response, body } = await invoke({
+    people: [cy, { ...jz, dingTalkUserId: " ding-jz " }, other], async requery() {},
+    async confirm(scope, expectedId) { confirmations.push([scope, expectedId]); return { systemConfirmed: 1 } },
+  })
+  assert.equal(response.status, 200)
+  assert.deepEqual(confirmations, [["cyDingTalkException", null], ["jzDingTalkException", "ding-jz"], ["ordinary", undefined]])
+  assert.equal(body.jzDingTalkRequery, "fulfilled"); assert.equal(body.systemConfirmed, 3)
+})
+
+test("actual cron isolates JZ and CY confirmation guard failures from each other and ordinary staff", async () => {
+  for (const failedScope of ["jzDingTalkException", "cyDingTalkException"]) {
+    const confirmations = []
+    const { response } = await invoke({
+      people: [cy, jz, other], async requery() {},
+      async confirm(scope) {
+        confirmations.push(scope)
+        if (scope === failedScope) throw new Error("synthetic guarded exception failure")
+        return { systemConfirmed: 1 }
+      },
+    })
+    assert.equal(response.status, 500)
+    assert.deepEqual(confirmations, ["cyDingTalkException", "jzDingTalkException", "ordinary"])
+  }
+})
+
+test("actual cron does not apply JZ's policy to a mismatched account tuple", async () => {
+  const requeries = [], confirmations = []
+  const { response, body } = await invoke({
+    people: [cy, { ...jz, adminUserId: "another-admin", dingTalkUserId: "ding-other-jz" }],
+    async requery({ people }) { requeries.push(people.map(person => person.id)) },
+    async confirm(scope) { confirmations.push(scope); return { systemConfirmed: scope === "ordinary" ? 1 : 0 } },
+  })
+  assert.equal(response.status, 200)
+  assert.deepEqual(requeries, [[jz.id], []])
+  assert.deepEqual(confirmations, ["cyDingTalkException", "ordinary"])
+  assert.equal(body.jzSystemConfirmed, 0)
 })

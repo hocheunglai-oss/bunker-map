@@ -7,7 +7,7 @@ import {
 } from "@/lib/attendanceData"
 import { requeryAttendanceMonthForAutoConfirmation } from "@/lib/attendanceSync"
 import { previousMonthPeriod } from "@/lib/attendanceMonthEnd"
-import { hasCyDingTalkAutoConfirmException } from "@/lib/attendanceAutoConfirmPolicy"
+import { hasCyDingTalkAutoConfirmException, hasJzDingTalkAutoConfirmException } from "@/lib/attendanceAutoConfirmPolicy"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -27,27 +27,39 @@ export async function GET(request: Request) {
     const service = getAttendanceServiceClient()
     const now = new Date()
     const period = previousMonthPeriod(now)
-    // Keep CY's DingTalk requery separate. If a link is later added, a failed
-    // requery may have persisted only part of the month, so withhold his
-    // confirmation until a complete requery succeeds.
-    const linkedPeople = (await loadAttendancePeopleForPeriod(service, period.year, period.month))
+    // Keep each approved exception's DingTalk requery separate. A failed
+    // requery after a link is added may persist only part of the month, so
+    // withhold that person's confirmation until a complete requery succeeds.
+    const periodPeople = await loadAttendancePeopleForPeriod(service, period.year, period.month)
+    const linkedPeople = periodPeople
       .filter((person) => person.dingTalkUserId?.trim())
     const ordinaryPeople = linkedPeople
       .filter((person) => !hasCyDingTalkAutoConfirmException(person, period))
+      .filter((person) => !hasJzDingTalkAutoConfirmException(person, period))
       .map((person) => ({ id: person.id, dingtalkUserId: person.dingTalkUserId!.trim() }))
     const cyPeople = linkedPeople
       .filter((person) => hasCyDingTalkAutoConfirmException(person, period))
       .map((person) => ({ id: person.id, dingtalkUserId: person.dingTalkUserId!.trim() }))
-    const [ordinaryRequery, cyRequery] = await Promise.allSettled([
+    const jzEligible = periodPeople.some((person) => hasJzDingTalkAutoConfirmException(person, period))
+    const jzPeople = linkedPeople
+      .filter((person) => hasJzDingTalkAutoConfirmException(person, period))
+      .map((person) => ({ id: person.id, dingtalkUserId: person.dingTalkUserId!.trim() }))
+    const [ordinaryRequery, cyRequery, jzRequery] = await Promise.allSettled([
       requeryAttendanceMonthForAutoConfirmation({
         ...period, people: ordinaryPeople, now, supabase: service, signal: AbortSignal.timeout(45_000),
       }),
       requeryAttendanceMonthForAutoConfirmation({
         ...period, people: cyPeople, now, supabase: service, signal: AbortSignal.timeout(45_000),
       }),
+      jzPeople.length ? requeryAttendanceMonthForAutoConfirmation({
+        ...period, people: jzPeople, now, supabase: service, signal: AbortSignal.timeout(45_000),
+      }) : Promise.resolve(),
     ])
     if (cyRequery.status === "rejected") {
       console.error("CY attendance exception requery failed", cyRequery.reason)
+    }
+    if (jzRequery.status === "rejected") {
+      console.error("JZ attendance exception requery failed", jzRequery.reason)
     }
 
     // CY is checked independently so another employee's DingTalk failure or
@@ -66,14 +78,33 @@ export async function GET(request: Request) {
         console.error("CY attendance exception confirmation failed", error)
       }
     }
+    // A JZ failure cannot suppress CY/ordinary processing, and their failures
+    // cannot suppress JZ's independently guarded, owner-authorized path.
+    const jzRequeryFailed = jzPeople.length > 0 && jzRequery.status === "rejected"
+    let jzSystemConfirmed = 0
+    let jzConfirmationError: unknown = null
+    if (jzEligible && !jzRequeryFailed) {
+      try {
+        jzSystemConfirmed = (await autoConfirmOverdueAttendance(
+          service, now, undefined, "jzDingTalkException", jzPeople[0]?.dingtalkUserId ?? null,
+        )).systemConfirmed
+      } catch (error) {
+        jzConfirmationError = error
+        console.error("JZ attendance exception confirmation failed", error)
+      }
+    }
     if (ordinaryRequery.status === "rejected") throw ordinaryRequery.reason
     const result = await autoConfirmOverdueAttendance(service, now, undefined, "ordinary")
     if (cyRequeryFailed) throw new Error("CY DingTalk requery failed; system confirmation withheld.")
     if (cyConfirmationError !== null) throw cyConfirmationError
+    if (jzRequeryFailed) throw new Error("JZ DingTalk requery failed; system confirmation withheld.")
+    if (jzConfirmationError !== null) throw jzConfirmationError
     return NextResponse.json({
-      success: true, ...result, systemConfirmed: result.systemConfirmed + cySystemConfirmed,
+      success: true, ...result, systemConfirmed: result.systemConfirmed + cySystemConfirmed + jzSystemConfirmed,
       cySystemConfirmed,
       cyDingTalkRequery: cyPeople.length ? cyRequery.status : "not-linked",
+      jzSystemConfirmed,
+      jzDingTalkRequery: jzPeople.length ? jzRequery.status : "not-linked",
     }, { headers: { "Cache-Control": "private, no-store" } })
   } catch (error) {
     console.error("Attendance auto-confirm failed", error)

@@ -6,7 +6,11 @@ import {
   autoConfirmOverdueAttendance,
   loadAttendancePeopleForPeriod,
 } from "../lib/attendanceData"
-import { hasCyDingTalkAutoConfirmException } from "../lib/attendanceAutoConfirmPolicy"
+import {
+  CY_DINGTALK_EXCEPTION_ACTOR, CY_DINGTALK_EXCEPTION_NOTE,
+  JZ_DINGTALK_EXCEPTION_ACTOR, JZ_DINGTALK_EXCEPTION_NOTE,
+  hasCyDingTalkAutoConfirmException, hasJzDingTalkAutoConfirmException,
+} from "../lib/attendanceAutoConfirmPolicy"
 
 type Row = Record<string, unknown>
 
@@ -37,6 +41,18 @@ const cyPerson = {
 const cyAssignment = { ...assignment, person_id: cyPerson.id }
 const cyReminder = { ...reminder, person_id: cyPerson.id }
 const cyPending = { ...pending, person_id: cyPerson.id }
+const jzPerson = {
+  ...person, id: "50988b84-4d6c-4089-9112-d6bfad1ed72d",
+  admin_user_id: "3cf2bff0-4eda-4c36-8827-a8f7be0c764d", staff_code: "JZ", dingtalk_user_id: null,
+}
+const jzAssignment = { ...assignment, person_id: jzPerson.id }
+const jzReminder = { ...reminder, person_id: jzPerson.id }
+const jzPending = { ...pending, person_id: jzPerson.id }
+const jzInput = {
+  people: [{ ...jzPerson }], assignments: [{ ...jzAssignment }],
+  reminders: [{ ...jzReminder }], confirmations: [{ ...jzPending }],
+  syncHistory: [] as Row[], sync: null,
+}
 const successfulSync = {
   id: "latest", status: "succeeded", started_at: "2026-11-04T10:00:20.000Z",
   completed_at: "2026-11-04T10:00:25.000Z",
@@ -718,4 +734,134 @@ test("post-requery historical DingTalk identity changes block confirmation", asy
     app.bumpRevision()
   }), /punches from another DingTalk identity/)
   assert.deepEqual(app.writes, [])
+})
+
+test("JZ's ongoing CY-equivalent exception pins person, linked admin, staff code and October2026 start", () => {
+  const jz = { id: jzPerson.id, adminUserId: jzPerson.admin_user_id, staffCode: "JZ" }
+  assert.equal(hasJzDingTalkAutoConfirmException(jz, { year: 2026, month: 9 }), false)
+  assert.equal(hasJzDingTalkAutoConfirmException(jz, { year: 2026, month: 10 }), true)
+  assert.equal(hasJzDingTalkAutoConfirmException(jz, { year: 2027, month: 1 }), true)
+  for (const changed of [{ ...jz, id: "other" }, { ...jz, adminUserId: "other" },
+    { ...jz, adminUserId: null }, { ...jz, staffCode: "OTHER" }, { ...jz, staffCode: "jz" }]) {
+    assert.equal(hasJzDingTalkAutoConfirmException(changed, { year: 2026, month: 10 }), false)
+  }
+})
+
+test("JZ requires a sent second reminder and normal cutoff, then uses truthful JZ provenance idempotently", async () => {
+  const early = fakeClient(structuredClone(jzInput))
+  assert.equal((await autoConfirmOverdueAttendance(early.client, new Date("2026-11-04T09:59:59.000Z"))).systemConfirmed, 0)
+  assert.deepEqual(early.writes, [])
+  for (const reminders of [[], [{ ...jzReminder, status: "failed" }]]) {
+    const missing = fakeClient({ ...structuredClone(jzInput), reminders })
+    assert.equal((await autoConfirmOverdueAttendance(missing.client, now)).systemConfirmed, 0)
+    assert.deepEqual(missing.writes, [])
+  }
+  const app = fakeClient(structuredClone(jzInput)), beforePeople = structuredClone(app.tables.attendance_people)
+  assert.equal((await autoConfirmOverdueAttendance(app.client, now)).systemConfirmed, 1)
+  assert.equal(app.writes[0].confirmed_by, JZ_DINGTALK_EXCEPTION_ACTOR)
+  assert.equal(app.writes[0].note, JZ_DINGTALK_EXCEPTION_NOTE)
+  assert.match(String(app.writes[0].note), /not employee approval or independent proof of attendance; corrections may be raised/)
+  assert.doesNotMatch(String(app.writes[0].note), /CY|employee approved|verified punches/)
+  assert.equal(app.readTables.includes("attendance_sync_runs"), false)
+  assert.deepEqual(app.tables.attendance_people, beforePeople)
+  assert.deepEqual(app.tables.attendance_raw_punches, [])
+  assert.equal(app.currentRevision(), 1)
+  assert.equal((await autoConfirmOverdueAttendance(app.client, now)).systemConfirmed, 0)
+  assert.equal(app.writes.length, 1)
+})
+
+test("JZ receives no September or mismatched-identity exemption; ordinary missing-ID guard remains fail-closed", async () => {
+  const september = fakeClient({ ...structuredClone(jzInput),
+    reminders: [{ ...jzReminder, month: 9 }],
+    confirmations: [{ ...jzPending, month: 9, updated_at: "2026-10-05T09:00:00.000Z" }],
+  })
+  await assert.rejects(autoConfirmOverdueAttendance(september.client, new Date("2026-10-14T10:10:00.000Z")), /no DingTalk identity/)
+  assert.deepEqual(september.writes, [])
+  for (const changed of [{ ...jzPerson, admin_user_id: "another-admin" },
+    { ...jzPerson, admin_user_id: null }, { ...jzPerson, staff_code: "OTHER" }]) {
+    const app = fakeClient({ ...structuredClone(jzInput), people: [changed] })
+    await assert.rejects(autoConfirmOverdueAttendance(app.client, now), /no DingTalk identity/)
+    assert.deepEqual(app.writes, [])
+  }
+})
+
+test("linked JZ preserves selected-identity and historical-punch guards without requiring coverage", async () => {
+  for (const expectedId of [null, "old-ding-jz"]) {
+    const app = fakeClient({ ...structuredClone(jzInput), people: [{ ...jzPerson, dingtalk_user_id: "ding-jz" }] })
+    await assert.rejects(autoConfirmOverdueAttendance(app.client, now, undefined, "jzDingTalkException", expectedId),
+      { name: "AttendanceSourceChangedError" })
+    assert.deepEqual(app.writes, [])
+  }
+  const mismatch = fakeClient({ ...structuredClone(jzInput), people: [{ ...jzPerson, dingtalk_user_id: "ding-jz" }],
+    rawPunches: [{ id: "old-punch", person_id: jzPerson.id, dingtalk_user_id: "old-ding-jz", work_date: "2026-10-12" }],
+  })
+  await assert.rejects(autoConfirmOverdueAttendance(mismatch.client, now, undefined, "jzDingTalkException", "ding-jz"), /punches from another DingTalk identity/)
+  assert.deepEqual(mismatch.writes, [])
+  const ready = fakeClient({ ...structuredClone(jzInput), people: [{ ...jzPerson, dingtalk_user_id: "ding-jz" }] })
+  assert.equal((await autoConfirmOverdueAttendance(ready.client, now, undefined, "jzDingTalkException", "ding-jz")).systemConfirmed, 1)
+  assert.equal(ready.readTables.includes("attendance_sync_runs"), false)
+})
+
+test("JZ's exception preserves anomaly, reopened-review, checked-write and revision guards", async () => {
+  for (const openAnomalyCount of [1, null]) {
+    const app = fakeClient({ ...structuredClone(jzInput), openAnomalyCount })
+    await assert.rejects(autoConfirmOverdueAttendance(app.client, now), /punch correction requires review/)
+    assert.deepEqual(app.writes, [])
+  }
+  const reopened = fakeClient({ ...structuredClone(jzInput), confirmations: [{ ...jzPending, updated_at: "2026-11-04T10:00:01.000Z" }] })
+  assert.equal((await autoConfirmOverdueAttendance(reopened.client, now)).systemConfirmed, 0)
+  assert.deepEqual(reopened.writes, [])
+  const racing = fakeClient({ ...structuredClone(jzInput), beforeConfirmationWrite(rows) { rows[0].updated_at = "2026-11-04T10:01:00.000Z" } })
+  assert.equal((await autoConfirmOverdueAttendance(racing.client, now)).systemConfirmed, 0)
+  assert.deepEqual(racing.writes, [])
+  let changed = false
+  const revision = fakeClient({ ...structuredClone(jzInput), beforeConfirmationWrite() { if (!changed) { changed = true; revision.bumpRevision() } } })
+  await assert.rejects(autoConfirmOverdueAttendance(revision.client, now), { name: "AttendanceSourceChangedError" })
+  assert.deepEqual(revision.writes, [])
+})
+
+test("CY, JZ and an ordinary colleague use three distinct actors while CY note and actor remain exact", async () => {
+  const app = fakeClient({
+    people: [{ ...person }, { ...cyPerson }, { ...jzPerson }],
+    assignments: [{ ...assignment }, { ...cyAssignment }, { ...jzAssignment }],
+    reminders: [{ ...reminder }, { ...cyReminder }, { ...jzReminder }],
+    confirmations: [{ ...pending }, { ...cyPending }, { ...jzPending }],
+  })
+  assert.equal((await autoConfirmOverdueAttendance(app.client, now)).systemConfirmed, 3)
+  const byId = new Map(app.writes.map(row => [row.person_id, row]))
+  assert.equal(byId.get(cyPerson.id)?.confirmed_by, CY_DINGTALK_EXCEPTION_ACTOR)
+  assert.equal(byId.get(cyPerson.id)?.note, CY_DINGTALK_EXCEPTION_NOTE)
+  assert.equal(byId.get(jzPerson.id)?.confirmed_by, JZ_DINGTALK_EXCEPTION_ACTOR)
+  assert.equal(byId.get(jzPerson.id)?.note, JZ_DINGTALK_EXCEPTION_NOTE)
+  assert.equal(byId.get(person.id)?.confirmed_by, "system:attendance-auto-confirm")
+})
+
+test("JZ's isolated scope cannot exempt another missing-ID person or become CY's scope", async () => {
+  const unlinked = { ...person, dingtalk_user_id: null }
+  const app = fakeClient({
+    people: [{ ...jzPerson }, unlinked], assignments: [{ ...jzAssignment }, { ...assignment }],
+    reminders: [{ ...jzReminder }, { ...reminder }], confirmations: [{ ...jzPending }, { ...pending }], syncHistory: [], sync: null,
+  })
+  assert.equal((await autoConfirmOverdueAttendance(app.client, now, undefined, "cyDingTalkException")).systemConfirmed, 0)
+  assert.equal((await autoConfirmOverdueAttendance(app.client, now, undefined, "jzDingTalkException", null)).systemConfirmed, 1)
+  await assert.rejects(autoConfirmOverdueAttendance(app.client, now, undefined, "ordinary"), /no DingTalk identity/)
+  assert.deepEqual(app.writes.map(row => row.person_id), [jzPerson.id])
+})
+
+test("a fresh snapshot rejects JZ tuple, link, reminder or policy-source changes during ordinary requery", async () => {
+  for (const [index, change] of [
+    (tables: Record<string, Row[]>) => { tables.attendance_people[1].admin_user_id = "another-admin" },
+    (tables: Record<string, Row[]>) => { tables.attendance_people[1].dingtalk_user_id = "new-link" },
+    (tables: Record<string, Row[]>) => { tables.attendance_reminder_dispatches[1].status = "failed" },
+  ].entries()) {
+    const app = fakeClient({
+      people: [{ ...person }, { ...jzPerson }], assignments: [{ ...assignment }, { ...jzAssignment }],
+      reminders: [{ ...reminder }, { ...jzReminder }], confirmations: [{ ...pending }, { ...jzPending }],
+    })
+    await assert.rejects(autoConfirmOverdueAttendance(app.client, now, async () => { change(app.tables); app.bumpRevision() }),
+      // Losing the pinned admin removes the exception, so the ordinary
+      // missing-ID guard correctly rejects even before fingerprint comparison.
+      index === 0 ? /no DingTalk identity/ : { name: "AttendanceSourceChangedError" })
+    assert.deepEqual(app.writes, [])
+  }
 })

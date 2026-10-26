@@ -8,6 +8,7 @@ const postcss = require("postcss")
 const tailwind = require("@tailwindcss/postcss")
 const { chromium, webkit } = require("playwright")
 const root = path.resolve(__dirname, "..")
+const partialResults = []
 const mocks = {
   "@/lib/useSimpleAdminAuth": "export const useSimpleAdminAuth=()=>window.__techStackHarness.auth; export const clearAdminClientSessionCache=()=>{};",
   "next/navigation": "const router={push:path=>window.__techStackHarness.routes.push(path),replace:path=>window.__techStackHarness.routes.push(path),prefetch:()=>{}};export const useRouter=()=>router;export const usePathname=()=>'/admin/techstack';",
@@ -43,7 +44,7 @@ async function main() {
   })
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve))
   const origin = "http://127.0.0.1:" + server.address().port
-  const results = []
+  const results = partialResults
   try {
     for (const [engine, launcher] of [["chromium", chromium], ["webkit", webkit]]) {
       const browser = await launcher.launch({ headless: true, ...(engine === "chromium" && process.env.CHROME_EXECUTABLE_PATH ? { executablePath: process.env.CHROME_EXECUTABLE_PATH } : {}) })
@@ -138,12 +139,95 @@ async function main() {
               await correspondence.scrollIntoViewIfNeeded()
               await page.screenshot({ path: path.join(output, label + "-" + permission + "-file-correspondence.png") })
             }
+            assert.equal(await page.getByRole("heading", { name: "PHONEBOOK SERVER", exact: true }).count(), 0)
+            assert.equal(await page.evaluate(() => window.__techStackHarness.configurationReads), 0, "View/Edit permission is not ADMIN authority.")
+            const serverPanel = () => page.getByRole("region", { name: "Phonebook server configuration", exact: true })
+            const serverRefresh = () => serverPanel().getByRole("button", { name: "REFRESH SERVER", exact: true })
+            await page.evaluate(() => {
+              const h = window.__techStackHarness
+              h.auth = { ...h.auth, role: "ADMIN" }; h.render()
+            })
+            await serverPanel().getByText("server.example.test", { exact: true }).waitFor()
+            assert.match(await serverPanel().innerText(), /CONFIGURATION ONLY; CONNECTION NOT CHECKED/)
+            assert.match(await serverPanel().innerText(), /2026-10-26T06:00:00\.000Z/)
+            assert.equal(await serverPanel().getByText("c".repeat(40), { exact: true }).count(), 1)
+            await serverPanel().scrollIntoViewIfNeeded()
+            const adminDimensions = await page.evaluate(() => ({ width: innerWidth, scroll: document.documentElement.scrollWidth }))
+            assert.ok(adminDimensions.scroll <= adminDimensions.width + 1, "Visible ADMIN server panel must not overflow: " + JSON.stringify(adminDimensions))
+            await page.screenshot({ path: path.join(output, label + "-admin-server.png") })
+            for (const configurationMode of ["http", "invalid"]) {
+              await page.evaluate(mode => { window.__techStackHarness.configurationMode = mode }, configurationMode)
+              await serverRefresh().click(); await serverPanel().getByRole("status").waitFor()
+              assert.equal(await serverPanel().getByText("server.example.test", { exact: true }).count(), 0, "A failed refresh must not retain the old hostname.")
+              assert.doesNotMatch(await serverPanel().innerText(), /password|private-server-error|private-server\.example/)
+            }
+            await page.screenshot({ path: path.join(output, label + "-admin-server-unavailable.png") })
+            for (const configurationMode of ["defer", "defer-body"]) {
+              await page.evaluate(mode => { window.__techStackHarness.configurationMode = mode }, configurationMode)
+              await serverRefresh().click()
+              await page.waitForFunction(() => window.__techStackHarness.configurationPending.length === 1)
+              assert.equal(await serverPanel().getByText("server.example.test", { exact: true }).count(), 0)
+              await page.evaluate(() => {
+                const h = window.__techStackHarness
+                h.auth = { ...h.auth, role: "USER" }; h.render()
+              })
+              await page.waitForFunction(() => window.__techStackHarness.configurationPending[0].signal.aborted)
+              assert.equal(await serverPanel().count(), 0, "Role downgrade immediately removes the diagnostic.")
+              const reads = await page.evaluate(() => window.__techStackHarness.configurationReads)
+              await page.screenshot({ path: path.join(output, label + "-viewer-no-server.png") })
+              await page.evaluate(() => {
+                const h = window.__techStackHarness
+                h.configurationMode = "ok"; h.configurationHostname = "current.example.test"
+                h.auth = { ...h.auth, role: "ADMIN", actorKey: h.auth.actorKey === "a".repeat(64) ? "b".repeat(64) : "a".repeat(64) }; h.render()
+              })
+              await serverPanel().getByText("current.example.test", { exact: true }).waitFor()
+              assert.equal(await page.evaluate(() => window.__techStackHarness.configurationReads), reads + 1)
+              await page.evaluate(() => {
+                const h = window.__techStackHarness
+                h.configurationPending.shift().resolve(Response.json(h.configuration("stale.example.invalid")))
+              })
+              await page.waitForTimeout(30)
+              assert.equal(await page.getByText("stale.example.invalid", { exact: true }).count(), 0, "Late headers/body cannot restore a previous owner's hostname.")
+            }
+            await page.evaluate(() => { window.__techStackHarness.configurationMode = "defer-body" })
+            await serverRefresh().click()
+            await page.waitForFunction(() => window.__techStackHarness.configurationPending.length === 1)
+            await page.evaluate(() => {
+              const h = window.__techStackHarness
+              h.configurationMode = "ok"; h.configurationHostname = "replacement.example.test"
+              h.auth = { ...h.auth, actorKey: "d".repeat(64) }; h.render()
+            })
+            await page.waitForFunction(() => window.__techStackHarness.configurationPending[0].signal.aborted)
+            await serverPanel().getByText("replacement.example.test", { exact: true }).waitFor()
+            await page.evaluate(() => {
+              const h = window.__techStackHarness
+              h.configurationPending.shift().resolve(Response.json(h.configuration("previous-admin.example.invalid")))
+            })
+            await page.waitForTimeout(30)
+            assert.equal(await page.getByText("previous-admin.example.invalid", { exact: true }).count(), 0, "Same-role ADMIN replacement cannot reuse the previous actor's response.")
+            await page.evaluate(() => {
+              const h = window.__techStackHarness
+              h.auth = { ...h.auth, resetRequired: true }; h.render()
+            })
+            await serverPanel().waitFor({ state: "detached" })
+            const beforeReset = await page.evaluate(() => window.__techStackHarness.configurationReads)
+            await page.evaluate(() => { window.__techStackHarness.auth = { ...window.__techStackHarness.auth, authenticated: false }; window.__techStackHarness.render() })
+            await page.waitForFunction(() => window.__techStackHarness.routes.includes("/admin"))
+            assert.equal(await page.getByText("replacement.example.test", { exact: true }).count(), 0)
+            assert.equal(await page.evaluate(() => window.__techStackHarness.configurationReads), beforeReset)
+            await page.screenshot({ path: path.join(output, label + "-signed-out-no-server.png") })
+            await page.evaluate(() => {
+              const h = window.__techStackHarness
+              h.auth = { ...h.auth, authenticated: true, role: "USER", resetRequired: false }; h.render()
+            })
+            await page.getByRole("heading", { name: "CURRENT DEPLOYMENT", exact: true }).waitFor()
+            assert.equal(await serverPanel().count(), 0)
             const dimensions = await page.evaluate(() => ({ width: innerWidth, scroll: document.documentElement.scrollWidth }))
             assert.ok(dimensions.scroll <= dimensions.width + 1, JSON.stringify(dimensions))
             await page.screenshot({ path: path.join(output, label + "-verified.png"), fullPage: true })
             await page.screenshot({ path: path.join(output, label + "-verified-viewport.png") })
             assert.deepEqual(errors, []); assert.deepEqual(unexpected, [])
-            results.push({ engine, width, scheme, sourceTruthCopy: "view/edit pass", networkRecovery: "pass", invalidResponse: "pass", staleResponse: "ignored", signedOut: "no data", dimensions })
+            results.push({ engine, width, scheme, sourceTruthCopy: "view/edit pass", networkRecovery: "pass", invalidResponse: "pass", staleResponse: "ignored", signedOut: "no data", phonebookServer: "ADMIN-only; failed refresh clears; late headers/body ignored; same-role actor replacement/downgrade/reset/logout hides", adminDimensions, dimensions })
           } finally { await context.close() }
         }
       } finally { await browser.close() }
@@ -154,4 +238,12 @@ async function main() {
     console.log(JSON.stringify(receipt))
   } finally { await new Promise(resolve => server.close(resolve)) }
 }
-main().catch(error => { console.error(error); process.exitCode = 1 })
+main().catch(error => {
+  const output = process.env.TECH_STACK_SCREENSHOTS
+  if (output && path.isAbsolute(output) && fs.existsSync(output)) {
+    fs.writeFileSync(path.join(output, "failed-receipt.json"), JSON.stringify({ passed: partialResults.length,
+      failed: 1, complete: false, results: partialResults, error: error.message,
+      limits: ["A partial run is not a complete desktop/mobile verification; the original failure remains fatal."] }, null, 2))
+  }
+  console.error(error); process.exitCode = 1
+})
