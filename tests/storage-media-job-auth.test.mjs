@@ -3,7 +3,8 @@ import test from "node:test"
 import { spawnSync } from "node:child_process"
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, posix } from "node:path"
+import { transformSync } from "esbuild"
 import { fcunoConnectionPolicy } from "../config/fcunoConnections.ts"
 import { createMetadataAccessTokenProvider, createExistingDriveAccessTokenProvider, requireStorageMediaJobRuntime } from "../scripts/lib/storage-media-job-auth.mjs"
 import { main } from "../scripts/backup-storage-media-to-gcs.mjs"
@@ -92,20 +93,8 @@ test("CLI failure output is constant and never prints the thrown exception messa
   assert.doesNotMatch(result.stderr, /Explicit one-time|Error:|client_secret|refresh_token/)
 })
 
-test("image packaging retains the existing Drive default and adds only the one-time runner dependencies", () => {
-  const docker = readFileSync(new URL("../Dockerfile.drive-backup", import.meta.url), "utf8")
-  assert.match(docker, /CMD \["npm", "run", "backup:drive-files:gcs"\]/)
-  for (const required of ["scripts/backup-storage-media-to-gcs.mjs", "scripts/lib/storage-media-*.mjs", "config/fcunoConnections.ts", "lib/storageMediaBackup.mjs lib/backupValidationSpool.mjs"]) assert.ok(docker.includes(required))
-  assert.doesNotMatch(docker, /ENV STORAGE_MEDIA_BACKUP_|GOOGLE_APPLICATION_CREDENTIALS|\.env|oauth-token/)
-})
-
-test("Cloud Build upload allowlist includes every Docker COPY source and excludes local private files", () => {
-  const docker = readFileSync(new URL("../Dockerfile.drive-backup", import.meta.url), "utf8")
-  const ignore = readFileSync(new URL("../.gcloudignore", import.meta.url), "utf8")
-  // This file uses ordinary gitignore syntax only. Keep the offline check honest
-  // if a future change introduces gcloud's include directive.
-  assert.doesNotMatch(ignore, /^#!include:/m)
-  const sources = new Set(["cloudbuild.drive-backup.yaml", "Dockerfile.drive-backup"])
+function dockerCopySources(docker) {
+  const sources = new Set()
   for (const line of docker.split("\n").filter(line => line.startsWith("COPY "))) {
     for (const source of line.trim().split(/\s+/).slice(1, -1)) {
       assert.doesNotMatch(source, /^--|\[|\?|\*\*/)
@@ -123,6 +112,42 @@ test("Cloud Build upload allowlist includes every Docker COPY source and exclude
       for (const match of matches) sources.add(match)
     }
   }
+  return sources
+}
+
+test("image packaging preserves Drive default and the complete one-time and recurring import closure", () => {
+  const docker = readFileSync(new URL("../Dockerfile.drive-backup", import.meta.url), "utf8")
+  assert.match(docker, /CMD \["npm", "run", "backup:drive-files:gcs"\]/)
+  const copied = dockerCopySources(docker)
+  for (const required of ["scripts/backup-google-drive-files-to-gcs.mjs", "scripts/backup-storage-media-to-gcs.mjs",
+    "scripts/lib/storage-media-recurring-run.mjs", "scripts/lib/storage-media-drive-publication.mjs", "scripts/lib/storage-media-budget-runtime.mjs",
+    "scripts/lib/backup-budget-guard.mjs", "scripts/lib/backup-budget-pubsub.mjs", "config/fcunoConnections.ts",
+    "lib/storageMediaBackup.mjs", "lib/storageMediaRecurring.mjs", "lib/storageMediaBackupHealth.mjs", "lib/backupOperatingPolicy.mjs", "lib/backupValidationSpool.mjs"]) assert.ok(copied.has(required), required)
+  const { dependencies } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"))
+  for (const file of copied) {
+    if (!/\.(?:mjs|ts)$/.test(file)) continue
+    const code = transformSync(readFileSync(new URL(`../${file}`, import.meta.url), "utf8"), { loader: file.endsWith(".ts") ? "ts" : "js", format: "esm", target: "node24" }).code
+    for (const [, , specifier] of code.matchAll(/\b(?:from\s*|import\s*(?:\(\s*)?)(["'])([^"']+)\1/g)) {
+      if (specifier.startsWith("node:")) continue
+      if (specifier.startsWith(".")) {
+        const dependency = posix.normalize(posix.join(posix.dirname(file), specifier))
+        assert.ok(copied.has(dependency), `Docker import missing: ${file} -> ${dependency}`)
+      } else {
+        const dependency = specifier.startsWith("@") ? specifier.split("/").slice(0, 2).join("/") : specifier.split("/")[0]
+        assert.ok(Object.hasOwn(dependencies, dependency), `Production package missing: ${file} -> ${dependency}`)
+      }
+    }
+  }
+  assert.doesNotMatch(docker, /ENV STORAGE_MEDIA_BACKUP_|GOOGLE_APPLICATION_CREDENTIALS|\.env|oauth-token/)
+})
+
+test("Cloud Build upload allowlist includes every Docker COPY source and excludes local private files", () => {
+  const docker = readFileSync(new URL("../Dockerfile.drive-backup", import.meta.url), "utf8")
+  const ignore = readFileSync(new URL("../.gcloudignore", import.meta.url), "utf8")
+  // This file uses ordinary gitignore syntax only. Keep the offline check honest
+  // if a future change introduces gcloud's include directive.
+  assert.doesNotMatch(ignore, /^#!include:/m)
+  const sources = new Set(["cloudbuild.drive-backup.yaml", "Dockerfile.drive-backup", ...dockerCopySources(docker)])
   const denied = [".env", ".env.local", ".git/config", ".google-drive-oauth-token.json", ".vercel/project.json",
     "browser-state/session.json", "backups/database.json", "exports/database.sql", "node_modules/package/index.js",
     "scripts/auth-google-drive.mjs", "scripts/lib/private-key.json", "scripts/lib/storage-media-token.json",

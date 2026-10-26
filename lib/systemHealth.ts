@@ -6,6 +6,9 @@ import { loadGoogleApis } from "@/lib/googleApis"
 import { evaluateDriveFileBackupHealth, getDriveFileBackupGaps, isVerifiedDriveBackupManifest, type ActiveDriveBackupFile, type DriveBackupManifest } from "@/lib/driveFileBackupHealth"
 import { BackupProtectionObservationError, backupDueWindow, evaluateDatabaseBackupProtection, unknownBackupProtection, type BackupGapObserver, type BackupGapInput, type BackupProtectionGap } from "@/lib/backupProtectionPolicy"
 import { parsePricingBackupSchemaVersion, pricingBackupSchemaFromArtifact, pricingBackupSchemaFromInventory, pricingBackupSchemaVersion, type PricingBackupSchemaVersion } from "@/lib/backupPricingSchema.mjs"
+import { evaluateStorageMediaBackupHealth, readStorageMediaHealthReceipt } from "@/lib/storageMediaBackupHealthService"
+import { createSupabaseStorageReadProvider, readCurrentStorageMediaInventoryStatus } from "@/lib/storageMediaBackupSource"
+import { fcunoConnectionPolicy } from "@/config/fcunoConnections"
 
 export type HealthStatus = "ok" | "warning" | "error"
 
@@ -436,6 +439,7 @@ async function runCheck(
     return { id, label, checkedAt, ...result }
   } catch (error) {
     if (error instanceof BackupProtectionObservationError) throw error
+    if (id === "storage-media-backup") return { id, label, checkedAt, ...unknownBackupProtection("Uploaded-file backup protection could not be checked. It has not been marked as recovered.") }
     if (id === "backup" || id === "drive-file-content-backup") {
       await observeBackupGaps(backupObserver, id === "backup" ? "database" : "drive-file", checkedAt, [], false)
       return { id, label, checkedAt, ...unknownBackupProtection() }
@@ -2979,6 +2983,38 @@ async function checkDriveFileContentBackup(observer?: BackupGapObserver): Promis
   }
 }
 
+async function checkStorageMediaBackup(): Promise<HealthCheckResult> {
+  const runtime = {
+    enabled: process.env.STORAGE_MEDIA_BACKUP_RECURRING_ENABLED,
+    activatedAt: process.env.STORAGE_MEDIA_BACKUP_RECURRING_ACTIVATED_AT,
+  }
+  const now = Date.now()
+  const activation = Date.parse(runtime.activatedAt || "")
+  if (runtime.enabled !== "1" || !Number.isFinite(activation) || new Date(activation).toISOString() !== runtime.activatedAt || activation > now) {
+    return evaluateStorageMediaBackupHealth({ runtime, now, receipt: null, inventoryStatus: null })
+  }
+  const signal = AbortSignal.timeout(40_000)
+  const storage = createSupabaseStorageReadProvider({
+    url: requireEnv("NEXT_PUBLIC_SUPABASE_URL"), serviceRoleKey: requireEnv("SUPABASE_SERVICE_ROLE_KEY"), fetch,
+  })
+  const { google } = await loadGoogleApis()
+  const drive = google.drive({ version: "v3", auth: await getOAuthClient("GOOGLE_DRIVE_REFRESH_TOKEN") })
+  const [inventoryStatus, receipt] = await Promise.all([
+    readCurrentStorageMediaInventoryStatus(storage, signal),
+    readStorageMediaHealthReceipt({ drive,
+      rootFolderId: process.env.GOOGLE_DRIVE_BACKUP_FOLDER_ID || requireEnv("GOOGLE_DRIVE_COMPANY_FOLDER_ID"),
+      sharedDriveId: process.env.GOOGLE_DRIVE_SHARED_DRIVE_ID || null, activatedAt: runtime.activatedAt!, signal, now,
+    }),
+  ])
+  // Do not use a source inventory collected for an unrelated project. The
+  // provider is itself hard-bound, and this independent final check preserves
+  // that boundary if the adapter is ever replaced.
+  if (inventoryStatus.inventory.some(source => source.bucket !== fcunoConnectionPolicy.storageMediaBackup.sourceBucket)) {
+    return unknownBackupProtection("Uploaded-file backup protection could not be checked. It has not been marked as recovered.")
+  }
+  return evaluateStorageMediaBackupHealth({ runtime, now: Date.now(), receipt, inventoryStatus })
+}
+
 async function checkGoogleCalendar(): Promise<HealthCheckResult> {
   const { google } = await loadGoogleApis()
   const calendar = google.calendar({ version: "v3", auth: await getOAuthClient("GOOGLE_CALENDAR_REFRESH_TOKEN") })
@@ -3268,6 +3304,7 @@ export async function getSystemHealth(options: { backupGapObserver?: BackupGapOb
       observer,
     ),
     runCheck("drive-file-content-backup", "Drive File Content Backup", () => checkDriveFileContentBackup(observer), 45_000, observer),
+    runCheck("storage-media-backup", "Uploaded-file Backup", checkStorageMediaBackup, 45_000),
     runCheck("calendar", "Google Calendar", checkGoogleCalendar),
     runCheck("contacts", "Google Contacts", checkGoogleContacts),
     runCheck("exchange-truth", "Exchange Truth Chain", checkExchangeTruth, OUTLOOK_TRUTH_CHECK_TIMEOUT_MS),

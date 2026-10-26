@@ -42,6 +42,9 @@ jobs:
       - name: Verify immutable FCUNO-FCOS contract
         run: npm run contract:verify
 
+      - name: Verify compiler import-error release guard
+        run: node --test tests/production-build-guard.test.mjs
+
       - name: Build the production application
         run: npm run build
 
@@ -50,6 +53,9 @@ jobs:
 
       - name: Verify font delivery in the built production server
         run: node tests/roboto-self-hosting.production.test.cjs
+
+      - name: Verify uploaded-file health service in the actual compiled route
+        run: node tests/storage-media-health.production.test.cjs
 
   static-security-evidence:
     name: Focused tests and dependency audit
@@ -199,12 +205,19 @@ jobs:
           NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/spc-feedback*.test.ts 2>&1 | tee directory-feedback-tests.tap
           node --import tsx --test tests/ccinfo-index-sdk.test.mjs 2>&1 | tee directory-sdk-tests.tap
 
-      - name: Verify temporary storage backup identity streams copies and publication fences
+      - name: Verify one-time and recurring media identity streams copies and publication fences
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
         run: |
           set -o pipefail
           FCUNO_MEDIA_REFERENCE_SCALE_TEST=1 node --max-old-space-size=256 --import tsx --test tests/storage-media-*.test.mjs tests/storage-media-backup-source.test.ts tests/backup-media-reference-stream.test.mjs 2>&1 | tee storage-media-backup-tests.tap
+
+      - name: Verify cloud budget observations conservative pause and retention safeguards
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --import tsx --test tests/backup-operating-policy.test.mjs tests/backup-budget-guard.test.mjs tests/backup-budget-pubsub.test.mjs tests/drive-file-backup-runner.test.mjs 2>&1 | tee backup-operating-policy-tests.tap
 
       - name: Verify streaming backup validation at full inventory scale
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -218,7 +231,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/backup-protection-*.test.ts tests/backup-truth-snapshot-export.test.ts tests/drive-file-backup-health.test.ts tests/system-health-alerts.test.ts tests/system-health-backup-window.test.ts 2>&1 | tee backup-protection-tests.tap
+          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/backup-protection-*.test.ts tests/backup-truth-snapshot-export.test.ts tests/drive-file-backup-health.test.ts tests/storage-media-backup-health.test.ts tests/system-health-alerts.test.ts tests/system-health-backup-window.test.ts 2>&1 | tee backup-protection-tests.tap
           node --test --test-reporter=tap tests/backup-receipt-description.test.mjs 2>&1 | tee backup-receipt-description.tap
 
       - name: Verify nonretryable backup observation failures through the SDK callback
@@ -333,6 +346,7 @@ jobs:
             directory-feedback-tests.tap
             directory-sdk-tests.tap
             storage-media-backup-tests.tap
+            backup-operating-policy-tests.tap
             backup-stream-tests.tap
             backup-protection-tests.tap
             backup-receipt-description.tap
@@ -391,6 +405,7 @@ jobs:
           mkdir -p "$evidence_dir/enquiry-parser"
           ENQUIRY_CORRECTNESS_EVIDENCE="$evidence_dir/enquiry-parser" node tests/enquiry-parser-correctness.browser.test.cjs 2>&1 | tee "$test_runtime/enquiry-parser.log"
           SPC_ENQUIRY_METADATA_EVIDENCE="$evidence_dir/spc-enquiry-metadata" node tests/spc-enquiry-metadata.browser.test.cjs 2>&1 | tee "$test_runtime/spc-enquiry-metadata.log"
+          STORAGE_MEDIA_HEALTH_SCREENSHOTS="$evidence_dir/storage-media-health" node tests/storage-media-system-health.browser.test.cjs 2>&1 | tee "$test_runtime/storage-media-health.log"
 
       - name: Retain synthetic browser verification evidence
         if: always()
@@ -407,6 +422,7 @@ jobs:
             ${{ runner.temp }}/fcuno-report-browser-runtime/tech-stack.log
             ${{ runner.temp }}/fcuno-report-browser-runtime/enquiry-parser.log
             ${{ runner.temp }}/fcuno-report-browser-runtime/spc-enquiry-metadata.log
+            ${{ runner.temp }}/fcuno-report-browser-runtime/storage-media-health.log
           if-no-files-found: warn
           retention-days: 90
 

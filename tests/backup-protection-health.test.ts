@@ -6,6 +6,9 @@ import { transformSync } from "esbuild"
 import * as policy from "../lib/backupProtectionPolicy"
 import * as files from "../lib/driveFileBackupHealth"
 import * as pricing from "../lib/backupPricingSchema.mjs"
+import * as mediaHealth from "../lib/storageMediaBackupHealthService"
+import * as mediaSource from "../lib/storageMediaBackupSource"
+import * as connections from "../config/fcunoConnections"
 import type { HealthCheckResult, SystemHealth } from "../lib/systemHealth"
 
 function fixture(options: { active?: boolean; driveError?: boolean; verified?: Record<string, unknown>; inventory?: Record<string, unknown>; corrupt?: boolean; readFailure?: boolean } = {}) {
@@ -32,6 +35,8 @@ function fixture(options: { active?: boolean; driveError?: boolean; verified?: R
     "@/lib/emailNotice": { getEmailNoticeConfigStatus: () => ({ missing: [] }) },
     "@/lib/googleApis": { loadGoogleApis: async () => ({ google: { drive: () => drive, auth: { OAuth2: class { setCredentials() {} } } } }) },
     "@/lib/driveFileBackupHealth": files, "@/lib/backupProtectionPolicy": policy, "@/lib/backupPricingSchema.mjs": pricing,
+    "@/lib/storageMediaBackupHealthService": mediaHealth, "@/lib/storageMediaBackupSource": mediaSource,
+    "@/config/fcunoConnections": connections,
   }
   const loaded = { exports: {} as { getSystemHealth(options?: { backupGapObserver?: policy.BackupGapObserver }): Promise<SystemHealth>; fixture: {
     checkDriveBackup(observer?: policy.BackupGapObserver): Promise<HealthCheckResult>
@@ -59,7 +64,8 @@ const recordObserver = () => {
 test("normal System Health get remains read-only without an observer", async () => {
   const f = fixture()
   const health = await f.getSystemHealth()
-  assert.equal(health.checks.length, 12)
+  assert.equal(health.checks.length, 13)
+  assert.equal(health.checks.find((check) => check.id === "storage-media-backup")?.details?.notificationEligible, false)
   assert.equal(health.checks.find((check) => check.id === "backup")?.details?.notificationEligible, true)
   assert.doesNotMatch(JSON.stringify(health), /firstUncoveredAt|firstDueAt|fcuno.backup-protection-gaps/)
 })

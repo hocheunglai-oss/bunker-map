@@ -15,9 +15,9 @@ function identity(value) {
       !Number.isSafeInteger(value.sizeBytes) || value.sizeBytes < 0 || Object.is(value.sizeBytes, -0)) fail()
   return { bucket: value.bucket, path: value.path, id: value.id, version: value.version, sizeBytes: value.sizeBytes }
 }
-function signalFor(context, maximum = 55_000) {
+function signalFor(context, maximum = 55_000, now = Date.now) {
   context.signal.throwIfAborted()
-  const remaining = context.deadline - Date.now()
+  const remaining = context.deadline - now()
   if (!Number.isSafeInteger(remaining) || remaining <= 0) fail()
   return AbortSignal.any([context.signal, AbortSignal.timeout(Math.min(remaining, maximum))])
 }
@@ -51,7 +51,7 @@ async function boundedText(response, maximum, signal) {
 export function createMetadataIdentityTokenProvider({ fetch: fetchImpl = fetch, runtime = process.env, now = Date.now } = {}) {
   return async context => {
     if (runtime.CLOUD_RUN_JOB !== policy.googleJob || runtime.GOOGLE_APPLICATION_CREDENTIALS) fail()
-    const signal = signalFor(context)
+    const signal = signalFor(context, 55_000, now)
     const response = await fetchImpl(METADATA_IDENTITY_URL, {
       headers: { "Metadata-Flavor": "Google" }, signal, redirect: "error", cache: "no-store",
     })
@@ -71,17 +71,19 @@ export function createMetadataIdentityTokenProvider({ fetch: fetchImpl = fetch, 
   }
 }
 
-export function createStorageMediaSourceAdapter({ fetch: fetchImpl = fetch, getIdentityToken, now = Date.now } = {}) {
+export function createStorageMediaSourceAdapter({ fetch: fetchImpl = fetch, getIdentityToken, now = Date.now, mode = "approved-snapshot" } = {}) {
   if (typeof getIdentityToken !== "function") fail()
+  if (!["approved-snapshot", "recurring"].includes(mode)) fail()
   const receipts = new Map(), etags = new Map()
-  let baseline = null
+  let baseline = null, snapshot = null
   async function api(input, context, stream = false) {
     const local = stream ? new AbortController() : null
-    const signal = local ? AbortSignal.any([signalFor(context, 240_000), local.signal]) : signalFor(context)
+    const signal = local ? AbortSignal.any([signalFor(context, 240_000, now), local.signal]) : signalFor(context, 55_000, now)
     const token = await getIdentityToken(context)
     const response = await fetchImpl(SOURCE_URL, {
       method: "POST", redirect: "error", cache: "no-store", signal,
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Accept-Encoding": "identity", "Cache-Control": "no-cache" },
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Accept-Encoding": "identity", "Cache-Control": "no-cache",
+        ...(mode === "recurring" ? { "X-Fcuno-Storage-Mode": "recurring" } : {}) },
       body: JSON.stringify(input),
     })
     if (response.status !== 200) { local?.abort(); void response.body?.cancel().catch(() => {}); fail() }
@@ -97,7 +99,7 @@ export function createStorageMediaSourceAdapter({ fetch: fetchImpl = fetch, getI
       receipt = receipts.get(key)
       if (typeof receipt !== "string" || Number(receipt.split(".")[0]) <= Math.floor(now() / 1000) + 60) fail()
     }
-    return { operation, source, receipt }
+    return { operation, source, receipt, ...(mode === "recurring" ? { snapshot } : {}) }
   }
   function checkedInfo(result, source) {
     if (sourceKey(identity(result?.source)) !== sourceKey(identity(source)) ||
@@ -109,7 +111,7 @@ export function createStorageMediaSourceAdapter({ fetch: fetchImpl = fetch, getI
   }
   async function loadInventory(context) {
       const result = await api({ operation: "inventory" }, context)
-      if (result?.schema !== "fcuno.storage-media-source/v1" || !Array.isArray(result.items) || result.items.length > 50_000) fail()
+      if (result?.schema !== (mode === "recurring" ? "fcuno.storage-media-source/v2" : "fcuno.storage-media-source/v1") || !Array.isArray(result.items) || result.items.length > (mode === "recurring" ? policy.recurring.maxObjects : 50_000)) fail()
       const paths = new Set(), ids = new Set(), sources = [], nextReceipts = new Map()
       for (const item of result.items) {
         const source = identity(item?.source), path = JSON.stringify([source.bucket, source.path]), id = JSON.stringify([source.bucket, source.id])
@@ -119,12 +121,29 @@ export function createStorageMediaSourceAdapter({ fetch: fetchImpl = fetch, getI
       }
       const fingerprint = JSON.stringify(sources.map(sourceKey).sort())
       if (baseline !== null && baseline !== fingerprint) fail()
+      if (mode === "recurring") {
+        const next = result.snapshot
+        const total = sources.reduce((sum, item) => sum + item.sizeBytes, 0)
+        const sorted = sources.slice().sort((a, b) => JSON.stringify(a) < JSON.stringify(b) ? -1 : JSON.stringify(a) > JSON.stringify(b) ? 1 : 0)
+        if (!next || Object.keys(next).sort().join(",") !== "inventorySha256,windowExpiresAt,windowStartsAt" ||
+            next.inventorySha256 !== createHash("sha256").update(JSON.stringify(sorted)).digest("hex") ||
+            sources.some(item => item.bucket !== policy.sourceBucket || item.sizeBytes > policy.recurring.maxObjectBytes) ||
+            !Number.isSafeInteger(total) || total > policy.recurring.maxTotalBytes ||
+            ![next.windowStartsAt, next.windowExpiresAt].every(value => typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value) ||
+            Date.parse(next.windowStartsAt) > now() || Date.parse(next.windowExpiresAt) <= now() ||
+            Date.parse(next.windowExpiresAt) - Date.parse(next.windowStartsAt) !== (policy.recurring.windowEndHourHkt - policy.recurring.windowStartHourHkt) * 3_600_000 ||
+            new Date(Date.parse(next.windowStartsAt) + 8 * 3_600_000).getUTCHours() !== policy.recurring.windowStartHourHkt ||
+            new Date(next.windowStartsAt).getUTCMinutes() !== 0 || new Date(next.windowStartsAt).getUTCSeconds() !== 0 || new Date(next.windowStartsAt).getUTCMilliseconds() !== 0 ||
+            (snapshot && JSON.stringify(snapshot) !== JSON.stringify(next))) fail()
+        snapshot = structuredClone(next)
+      }
       baseline = fingerprint; receipts.clear()
       for (const [key, receipt] of nextReceipts) receipts.set(key, receipt)
       return sources
   }
   return {
     inventory: loadInventory,
+    snapshot() { if (mode !== "recurring" || !snapshot) fail(); return structuredClone(snapshot) },
     async inspectSource(source, context) {
       return checkedInfo(await api(await request("inspect", source, context), context), source).source
     },

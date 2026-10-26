@@ -84,6 +84,36 @@ test("create-only media upload captures server receipt and preserves unsafe-inte
   assert.ok(calls.every(call => call.init.method !== "DELETE"))
 })
 
+test("recurring mode uses separate pinned daily object/control paths and preserves legacy records", async () => {
+  const { adapter, calls } = setup({ factory: { mode: "recurring" } })
+  const saved = await adapter.writeTarget({ source, bytes, ifGenerationMatch: "0" }, context())
+  assert.match(saved.target.objectName, /^fcuno-storage-media\/daily\/runs\/offline-run_1\/objects\/[a-f0-9]{64}$/)
+  assert.equal(adapter.manifestObjectName, `${policy.targetPrefix}/daily/runs/offline-run_1/manifest.json`)
+  assert.equal(await adapter.control.read(context()), null)
+  const dailyRecord = { schema: "fcuno.storage-media-daily-control/v1", fence: 1, lease: null, latestSuccess: null }
+  const committed = await adapter.control.compareAndSwap("0", dailyRecord, context())
+  assert.deepEqual(committed.record, dailyRecord)
+  await assert.rejects(adapter.control.compareAndSwap(committed.generation, record, context()))
+  await assert.rejects(adapter.inspectTarget({ ...saved.target, objectName: saved.target.objectName.replace("/daily/", "/") }, context()))
+  assert.ok(calls.filter(call => call.init.method === "POST").every(call => call.url.searchParams.get("name").startsWith(`${policy.targetPrefix}/daily/`)))
+  assert.ok(calls.every(call => call.init.method !== "DELETE"))
+})
+
+test("recurring lifecycle guard refuses any deletion rule that could erase a still-referenced daily generation", async () => {
+  for (const lifecycle of [null, { rule: "invalid" }, { rule: [{ action: { type: "Delete" }, condition: { age: 365 } }] },
+    { rule: [{ action: { type: "Delete" }, condition: { numNewerVersions: 5, matchesPrefix: [policy.targetPrefix] } }] },
+    { rule: [{ action: { type: "Delete" }, condition: { matchesPrefix: [`${policy.targetPrefix}/daily/runs/`] } }] },
+    { rule: [{ action: { type: "Delete" }, condition: { matchesPrefix: [] } }] }]) {
+    const { adapter, calls } = setup({ factory: { mode: "recurring" }, bucket: { lifecycle } })
+    await assert.rejects(adapter.validateBucket(context()), /unsafe_lifecycle_configuration/)
+    assert.equal(calls.some(call => call.init.method === "POST"), false)
+  }
+  const { adapter } = setup({ factory: { mode: "recurring" }, bucket: { lifecycle: { rule: [
+    { action: { type: "Delete" }, condition: { age: 30, matchesPrefix: ["unrelated-drive-versions/"] } },
+  ] } } })
+  assert.equal((await adapter.validateBucket(context())).versioning, true)
+})
+
 test("metadata and readback select the receipt generation, not a newer live object", async () => {
   const { adapter, resources, latest, calls } = setup()
   const saved = await adapter.writeTarget({ source, bytes, ifGenerationMatch: "0" }, context())

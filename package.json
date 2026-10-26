@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "restart:dev": "sh ./scripts/restart-dev.sh",
-    "build": "next build --webpack",
+    "build": "node scripts/build-production.mjs",
     "lint": "eslint app components lib",
     "test:parsers": "tsx --test tests/enquiry-parsers.test.ts",
     "test:attendance": "NODE_OPTIONS=--conditions=react-server tsx --test tests/attendance*.test.ts tests/dingtalk-attendance.test.ts",
@@ -18,7 +18,7 @@
     "security:check-live": "node scripts/check-live-security-baseline.mjs",
     "start": "next start",
     "release:check": "node scripts/release-check.mjs",
-    "vercel-build": "next build --webpack",
+    "vercel-build": "node scripts/build-production.mjs",
     "auth:google-drive": "node scripts/auth-google-drive.mjs",
     "backup:drive-files:gcs": "node scripts/backup-google-drive-files-to-gcs.mjs",
     "drive:ccinfo-public": "node scripts/make-ccinfo-drive-files-public.mjs",

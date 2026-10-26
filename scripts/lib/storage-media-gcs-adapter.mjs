@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import { fcunoConnectionPolicy } from "../../config/fcunoConnections.ts"
+import { validateRecurringControl } from "../../lib/storageMediaRecurring.mjs"
 import { validateControlRecord, validateSourceIdentity, validateTargetIdentity } from "../../lib/storageMediaBackup.mjs"
 
 const policy = fcunoConnectionPolicy.storageMediaBackup
@@ -66,12 +67,15 @@ function guarded(promise, signal, late = () => {}) {
 }
 
 /** No import-time IO, environment access, SDK cleanup, deletion or retries. */
-export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAccessToken, runId, now = Date.now } = {}) {
+export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAccessToken, runId, now = Date.now, mode = "approved-snapshot" } = {}) {
   if (typeof fetchImpl !== "function" || typeof getAccessToken !== "function" || typeof now !== "function" ||
-      typeof runId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(runId)) fail("invalid_configuration")
-  const runPrefix = `${PREFIX}/runs/${runId}`
+      !["approved-snapshot", "recurring"].includes(mode) || typeof runId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(runId)) fail("invalid_configuration")
+  const scopedPrefix = mode === "recurring" ? `${PREFIX}/daily` : PREFIX
+  const runPrefix = `${scopedPrefix}/runs/${runId}`
   const manifestObjectName = `${runPrefix}/manifest.json`
-  const controlName = `${PREFIX}/control.json`
+  const controlName = `${scopedPrefix}/control.json`
+  const validateControl = mode === "recurring" ? validateRecurringControl : validateControlRecord
+  const maximumObjectBytes = mode === "recurring" ? policy.recurring.maxObjectBytes : policy.approvedTotalBytes
   let bucketValidated = false
   function operation(context, maximum) {
     if (!context?.signal || typeof context.signal.throwIfAborted !== "function" || !Number.isSafeInteger(context.deadline)) fail("invalid_context")
@@ -84,7 +88,7 @@ export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAcce
   function target(value) {
     const result = validateTargetIdentity(value)
     generation(result.generation)
-    if (result.bucket !== BUCKET || !new RegExp(`^${PREFIX}/runs/[A-Za-z0-9][A-Za-z0-9_-]{0,79}/(?:objects/[0-9a-f]{64}|manifest\\.json)$`).test(result.objectName)) fail("unapproved_target")
+    if (result.bucket !== BUCKET || !new RegExp(`^${scopedPrefix}/runs/[A-Za-z0-9][A-Za-z0-9_-]{0,79}/(?:objects/[0-9a-f]{64}|manifest\\.json)$`).test(result.objectName)) fail("unapproved_target")
     return result
   }
   function objectUrl(name, query = {}) {
@@ -137,11 +141,26 @@ export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAcce
   }
   async function validateBucket(context) {
     const op = operation(context, 20_000)
-    const response = await request(`${ORIGIN}/storage/v1/b/${encodeURIComponent(BUCKET)}?fields=name,location,iamConfiguration,versioning`, op)
+    const response = await request(`${ORIGIN}/storage/v1/b/${encodeURIComponent(BUCKET)}?fields=name,location,iamConfiguration,versioning${mode === "recurring" ? ",lifecycle" : ""}`, op)
     if (response.status !== 200) { await discard(response); fail("bucket_read_failed") }
     const info = record(await json(response, op))
     if (info.name !== BUCKET || info.location !== policy.googleRegion.toUpperCase() || info.versioning?.enabled !== true ||
         info.iamConfiguration?.publicAccessPrevention !== "enforced" || info.iamConfiguration?.uniformBucketLevelAccess?.enabled !== true) fail("unsafe_bucket_configuration")
+    if (mode === "recurring" && info.lifecycle !== undefined) {
+      if (!info.lifecycle || typeof info.lifecycle !== "object" || Array.isArray(info.lifecycle)) fail("unsafe_lifecycle_configuration")
+      const rules = info.lifecycle?.rule
+      if (rules !== undefined && (!Array.isArray(rules) || rules.length > 1000)) fail("unsafe_lifecycle_configuration")
+      for (const rule of rules || []) {
+        if (!rule || typeof rule !== "object" || !rule.action || typeof rule.action.type !== "string") fail("unsafe_lifecycle_configuration")
+        if (rule.action.type !== "Delete") continue
+        const prefixes = rule.condition?.matchesPrefix
+        // An age/noncurrent-version condition is not a dependency safeguard:
+        // an old generation may still be referenced by today's manifest.
+        if (!Array.isArray(prefixes) || !prefixes.length || prefixes.length > 1000 || prefixes.some(prefix =>
+          typeof prefix !== "string" || !prefix.isWellFormed() || Buffer.byteLength(prefix) > 4096 || /[\x00-\x1f\x7f]/.test(prefix) ||
+          `${scopedPrefix}/`.startsWith(prefix) || prefix.startsWith(`${scopedPrefix}/`))) fail("unsafe_lifecycle_configuration")
+      }
+    }
     op.signal.throwIfAborted(); bucketValidated = true
     return Object.freeze({ bucket: BUCKET, location: info.location, versioning: true, publicAccessPrevention: "enforced", uniformBucketLevelAccess: true })
   }
@@ -149,7 +168,7 @@ export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAcce
   function receipt(metadata, name) {
     const info = record(metadata)
     if (info.bucket !== BUCKET || info.name !== name) fail("receipt_identity_mismatch")
-    const sizeBytes = size(info.size), maximum = name === controlName ? JSON_LIMIT : name.endsWith("/manifest.json") ? MANIFEST_LIMIT : policy.approvedTotalBytes
+    const sizeBytes = size(info.size), maximum = name === controlName ? JSON_LIMIT : name.endsWith("/manifest.json") ? MANIFEST_LIMIT : maximumObjectBytes
     if (sizeBytes > maximum) fail("receipt_size_exceeded")
     return Object.freeze({ target: Object.freeze({ bucket: BUCKET, objectName: name, generation: generation(info.generation) }), sizeBytes, crc32c: crc(info.crc32c) })
   }
@@ -223,13 +242,13 @@ export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAcce
   }
   function objectNameForSource(value) {
     const source = validateSourceIdentity(value)
-    if (source.bucket !== policy.sourceBucket || source.sizeBytes > policy.approvedTotalBytes) fail("unapproved_source")
+    if (source.bucket !== policy.sourceBucket || source.sizeBytes > maximumObjectBytes) fail("unapproved_source")
     return `${runPrefix}/objects/${digest(JSON.stringify(source))}`
   }
   async function writeTarget(input, context) {
     if (input?.ifGenerationMatch !== "0") fail("create_only_required")
     const source = validateSourceIdentity(input.source)
-    return upload(objectNameForSource(source), input.bytes, "0", context, { maximum: policy.approvedTotalBytes, expectedBytes: source.sizeBytes })
+    return upload(objectNameForSource(source), input.bytes, "0", context, { maximum: maximumObjectBytes, expectedBytes: source.sizeBytes })
   }
   async function uploadImmutable(input, context) {
     if (!input || (input.ifGenerationMatch !== undefined && input.ifGenerationMatch !== "0") || input.objectName !== manifestObjectName ||
@@ -293,7 +312,7 @@ export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAcce
     if (bytes.byteLength !== expected.sizeBytes || crc32c(bytes) !== expected.crc32c) fail("control_integrity_mismatch")
     let value
     try { value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) } catch { fail("invalid_control_json") }
-    return { bytes, snapshot: { generation: expected.target.generation, record: validateControlRecord(value) } }
+    return { bytes, snapshot: { generation: expected.target.generation, record: validateControl(value) } }
   }
   const control = Object.freeze({
     async read(context) {
@@ -305,7 +324,7 @@ export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAcce
     },
     async compareAndSwap(expectedGeneration, record, context) {
       generation(expectedGeneration, true)
-      const op = operation(context, 20_000), checked = validateControlRecord(record), bytes = Buffer.from(JSON.stringify(checked))
+      const op = operation(context, 20_000), checked = validateControl(record), bytes = Buffer.from(JSON.stringify(checked))
       if (bytes.byteLength > JSON_LIMIT) fail("control_limit_exceeded")
       const saved = await upload(controlName, bytes, expectedGeneration, op, { maximum: JSON_LIMIT, expectedBytes: bytes.byteLength, conflict: true, contentType: "application/json", milliseconds: 20_000 })
       if (saved === null) return null
