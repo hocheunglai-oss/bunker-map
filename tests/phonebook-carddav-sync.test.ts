@@ -5,6 +5,7 @@ import { performance } from "node:perf_hooks"
 import test from "node:test"
 import vm from "node:vm"
 import ts from "typescript"
+import { isAdminRole } from "../lib/adminPages"
 
 const routeSource = readFileSync(new URL("../app/api/phonebook/carddav-sync/route.ts", import.meta.url), "utf8")
 const routeOutput = ts.transpileModule(routeSource, {
@@ -49,6 +50,7 @@ function fixture(options: FixtureOptions = {}) {
   const queue: Array<{ contact_id: string; version: string }> = []
   const exports: { POST?: (request: Request) => Promise<Response>; GET?: (request?: Request) => Promise<Response>; maxDuration?: number } = {}
   const dependencies: Record<string, unknown> = {
+    "@/lib/adminPages": { isAdminRole },
     "node:crypto": { createHash, randomUUID },
     "node:perf_hooks": { performance },
     "next/server": { NextResponse: Response },

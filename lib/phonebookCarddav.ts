@@ -359,12 +359,17 @@ export async function readSavedContactIds(supabase: SupabaseClient) {
   return ids
 }
 
-export function getCardDavConfig() {
+export function getCardDavAddressBookUrl() {
   const addressBookUrl = requireEnv("CARDDAV_ADDRESSBOOK_URL").replace(/\/?$/, "/")
   const book = new URL(addressBookUrl)
   if (book.protocol !== "https:" || book.username || book.password || book.search || book.hash) {
     throw new SyncError("Invalid CardDAV address-book configuration.", "configuration")
   }
+  return addressBookUrl
+}
+
+export function getCardDavConfig() {
+  const addressBookUrl = getCardDavAddressBookUrl()
   const username = requireEnv("CARDDAV_USERNAME")
   const password = requireEnv("CARDDAV_PASSWORD")
   const auth = Buffer.from(`${username}:${password}`).toString("base64")
