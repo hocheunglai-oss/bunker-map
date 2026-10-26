@@ -4,7 +4,7 @@ import test from "node:test"
 import vm from "node:vm"
 import ts from "typescript"
 import { fcunoConnectionPolicy } from "../config/fcunoConnections"
-import { isTechStackResponse } from "../lib/techStackClient"
+import { isTechStackResponse, isPhonebookServerConfiguration } from "../lib/techStackClient"
 import { evaluateDatabaseBackupProtection } from "../lib/backupProtectionPolicy"
 
 const routeSource = readFileSync(new URL("../app/api/admin/tech-stack/route.ts", import.meta.url), "utf8")
@@ -153,6 +153,40 @@ test("Tech Stack never accepts an incomplete inventory or unmasked credential re
   ]) assert.equal(isTechStackResponse({ ...body, ...patch }), false)
   assert.equal(isTechStackResponse(null), false)
   assert.equal(isTechStackResponse([]), false)
+})
+
+const serverConfiguration = () => ({
+  hostname: "server.example.test",
+  deployment: { environment: "production", commit: "a".repeat(40) },
+  connectivity: "not_checked", checkedAt: "2026-10-26T06:00:00.000Z",
+})
+
+test("Phonebook configuration parser accepts only hostname and explicit unchecked provenance", () => {
+  for (const hostname of ["server.example.test", "192.0.2.1", "[2001:db8::1]", "xn--bcher-kva.example", "server.example.test."]) {
+    for (const environment of ["production", "preview", "development", null]) {
+      assert.equal(isPhonebookServerConfiguration({ ...serverConfiguration(), hostname,
+        deployment: { environment, commit: null } }), true, hostname)
+    }
+  }
+  assert.equal(isPhonebookServerConfiguration(serverConfiguration()), true)
+})
+
+test("Phonebook configuration parser rejects raw URLs, paths, ports, credentials and malformed hosts", () => {
+  for (const hostname of ["https://server.example.test/addressbook", "name:password@server.example.test", "server.example.test:443",
+    "server.example.test/path", "server.example.test?secret=value", "server.example.test#fragment", "server.example.test\n",
+    "SERVER.example.test", "bücher.example", ".", "-server.example.test", "server..example.test", "server.example.test/", "[::1]:443", "x".repeat(254)]) {
+    assert.equal(isPhonebookServerConfiguration({ ...serverConfiguration(), hostname }), false, hostname)
+  }
+})
+
+test("Phonebook configuration parser fails closed on extra fields and invalid deployment or timestamps", () => {
+  for (const value of [null, [], {}, { ...serverConfiguration(), password: "never-render-this" },
+    { ...serverConfiguration(), deployment: { environment: "production", commit: "a".repeat(40), url: "never-render-this" } },
+    ...[undefined, "Production", "unknown", 1, {}].map(environment => ({ ...serverConfiguration(), deployment: { environment, commit: null } })),
+    ...[undefined, "a".repeat(7), "A".repeat(40), 1, {}].map(commit => ({ ...serverConfiguration(), deployment: { environment: null, commit } })),
+    ...["checked", "healthy", null, true].map(connectivity => ({ ...serverConfiguration(), connectivity })),
+    ...["not-a-date", "2026-02-31T06:00:00.000Z", "2026-10-26", "2026-10-26T06:00:00Z", "2026-10-26T06:00:00.000+00:00", null].map(checkedAt => ({ ...serverConfiguration(), checkedAt })),
+  ]) assert.equal(isPhonebookServerConfiguration(value), false, JSON.stringify(value))
 })
 
 test("Tech Stack and recovery docs distinguish the verified one-time media snapshot from recurring backup and full recovery", () => {

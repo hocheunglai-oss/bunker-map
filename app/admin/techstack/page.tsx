@@ -6,7 +6,7 @@ import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
 import { DEFAULT_PARSER_AI_MODEL } from "@/lib/parserAiConfig"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { fcunoConnectionPolicy } from "@/config/fcunoConnections"
-import { isTechStackResponse, type TechStackResponse } from "@/lib/techStackClient"
+import { isTechStackResponse, isPhonebookServerConfiguration, type TechStackResponse, type PhonebookServerConfiguration } from "@/lib/techStackClient"
 import exchangePublicationBaseline from "@/scripts/azure-automation/exchange-publication-baseline.json"
 import styles from "./techStack.module.css"
 
@@ -23,7 +23,7 @@ const SERVICES = [
   ["UPLOADED MEDIA SNAPSHOT", "ONE-TIME SUPABASE STORAGE BYTE COPY", "GOOGLE CLOUD STORAGE", "VERIFIED 2026-10-21; 15 FILES / 224,309,367 BYTES; NOT RECURRING OR MONITORED BY SYSTEM HEALTH"],
   ["BACKUP RUNNER", "CLOUD RUN JOB", "GOOGLE CLOUD", "US-CENTRAL1"],
   ["BACKUP SCHEDULER", "CLOUD SCHEDULER", "GOOGLE CLOUD", "DAILY"],
-  ["PHONEBOOK SYNC", "CARDDAV / NEXTCLOUD", "THE GOOD CLOUD", "USE22.THEGOOD.CLOUD"],
+  ["PHONEBOOK SYNC", "CARDDAV", "CONFIGURED EXTERNAL ADDRESS BOOK", "RUNTIME HOSTNAME AVAILABLE TO ADMINISTRATORS ABOVE"],
   ["CALENDAR SYNC", "GOOGLE CALENDAR API", "GOOGLE", "FCB.BUNKER@GMAIL.COM"],
   ["ADMIN SESSION SECURITY", "RANDOM SERVER SESSION / SHA-256 TOKEN / RENEWABLE 400-DAY BROWSER-MAXIMUM PERSISTENCE / ATOMIC LINKED-SPC REVOCATION ON FCUNO LOGOUT / FORCED PASSWORD ROTATION", "SUPABASE / HTTPONLY COOKIE", "ACTIVE USE RENEWS HOURLY UNTIL LOGOUT; DORMANT SESSIONS EXPIRE; FCUNO LOGOUT ALSO REVOKES EVERY SPC SESSION FOR THE LINKED IDENTITY; PASSWORD CHANGE, ACCOUNT DISABLEMENT, OR REVOCATION FAILS CLOSED; ADMIN_SESSIONS IS EPHEMERAL AND NEVER BACKED UP"],
   ["MAIL DIRECTORY", "FCUNO AUTHORITY / EXCHANGE ONLINE PROJECTION / EXACT CERTIFIED GROUP SMTP", "MICROSOFT 365", "CANONICAL GROUP DOMAIN COSULICH1.ONMICROSOFT.COM; AZURE VARIABLE MUST MATCH"],
@@ -234,9 +234,77 @@ const CRON_DESCRIPTIONS: Record<string, readonly [string, string]> = {
   "/api/cron/fcos-identity-sync": ["FCOS IDENTITY SYNC", "EVERY FIVE MINUTES / FEATURE-GATED SIGNED OUTBOX"],
 }
 
+function PhonebookServerReadout() {
+  const [configuration, setConfiguration] = useState<PhonebookServerConfiguration | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [unavailable, setUnavailable] = useState(false)
+  const request = useRef<{ controller: AbortController; cancelTimer: () => void } | null>(null)
+  const load = useCallback(async () => {
+    request.current?.controller.abort()
+    request.current?.cancelTimer()
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const current = { controller, cancelTimer: () => clearTimeout(timer) }
+    request.current = current
+    // A refresh never presents a retained hostname as a new response.
+    setConfiguration(null)
+    setLoading(true)
+    setUnavailable(false)
+    try {
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => { reject(new Error("Configuration unavailable")); controller.abort() }, 10_000)
+      })
+      const work = fetch("/api/phonebook/carddav-sync?configuration=1", {
+        cache: "no-store", signal: controller.signal,
+      }).then(async response => {
+        if (!response.ok) throw new Error("Configuration unavailable")
+        const result: unknown = await response.json()
+        if (!isPhonebookServerConfiguration(result)) throw new Error("Configuration unavailable")
+        return result
+      })
+      const result = await Promise.race([work, timeout])
+      if (controller.signal.aborted || request.current !== current) return
+      setConfiguration(result)
+    } catch {
+      if (request.current !== current) return
+      setUnavailable(true)
+    } finally {
+      current.cancelTimer()
+      if (request.current === current) { request.current = null; setLoading(false) }
+    }
+  }, [])
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => void load(), 0)
+    return () => {
+      window.clearTimeout(initialLoad)
+      request.current?.controller.abort()
+      request.current?.cancelTimer()
+      request.current = null
+    }
+  }, [load])
+  return <section className={styles.section} aria-label="Phonebook server configuration">
+    <div className={styles.sectionTitle}>
+      <h2>PHONEBOOK SERVER</h2>
+      <button className={styles.refreshButton} type="button" onClick={() => void load()} disabled={loading}>
+        {loading ? "LOADING SERVER..." : "REFRESH SERVER"}
+      </button>
+    </div>
+    <div className={styles.factGrid}>
+      <div><span>CONFIGURED HOSTNAME</span><strong>{configuration?.hostname || (loading ? "LOADING" : "UNAVAILABLE")}</strong></div>
+      <div><span>DEPLOYMENT ENVIRONMENT</span><strong>{configuration?.deployment.environment?.toUpperCase() || "UNKNOWN"}</strong></div>
+      <div><span>DEPLOYMENT COMMIT</span><strong>{configuration?.deployment.commit || "UNKNOWN"}</strong></div>
+    </div>
+    <div className={styles.notes}>
+      <p>CONFIGURATION ONLY; CONNECTION NOT CHECKED.</p>
+      {configuration ? <p>RESPONSE GENERATED: {configuration.checkedAt}.</p> : null}
+      {unavailable ? <p role="status">Configuration unavailable. Refresh server to try again.</p> : null}
+    </div>
+  </section>
+}
+
 export default function TechStackPage() {
   const router = useRouter()
-  const { loading: authLoading, authenticated, permissions, role } = useSimpleAdminAuth()
+  const { loading: authLoading, authenticated, permissions, role, resetRequired, actorKey } = useSimpleAdminAuth()
   const [data, setData] = useState<TechStackResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState("")
@@ -322,6 +390,8 @@ export default function TechStackPage() {
             <p>DESCRIPTIONS BELOW DOCUMENT THIS RELEASE&apos;S SOURCE CONFIGURATION. EXTERNAL LIVE CHECKS ARE DATED SEPARATELY; UNKNOWN SETTINGS ARE NOT CERTIFIED.</p>
           </div>
         </section>
+
+        {!resetRequired && isAdminRole(role) && actorKey ? <PhonebookServerReadout key={actorKey} /> : null}
 
         <section className={styles.section}>
           <div className={styles.sectionTitle}><h2>SERVICES AND ACCOUNTS</h2></div>

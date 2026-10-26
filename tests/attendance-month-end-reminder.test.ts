@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 import type { SupabaseClient } from "@supabase/supabase-js"
@@ -24,6 +25,13 @@ const client = source("../app/admin/attendancerecord/AttendanceRecordClient.tsx"
 const autoRoute = source("../app/api/cron/attendance-auto-confirm/route.ts")
 const workflowMigration = source("../supabase/migrations/20260810101816_extend_attendance_confirmation_workflow.sql")
 const annualMigration = source("../supabase/migrations/20260811102410_add_attendance_annual_summary_reminders.sql")
+
+test("CY-equivalent JZ policy does not change the existing reminder body, cutoff or dispute wording", () => {
+  const input = { displayName: "Test User", year: 2026, month: 10 }
+  const signature = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex")
+  assert.equal(signature(buildAttendanceMonthEndReviewEmail(input)), "39f9683995e38b8147bb2a7e2ad9ccfcedea05a0e4591ea6ae659bb115c64a1f")
+  assert.equal(signature(buildAttendanceSecondReminderEmail(input)), "de51c5346a2cf206cf399333eaf10b7f8ccb215370435d2649f473190978d1cd")
+})
 
 test("last Hong Kong working day excludes later weekdays, weekends, and persisted holidays", () => {
   assert.equal(
@@ -111,7 +119,7 @@ test("all eligible users receive the reminder and system confirmation remains di
   assert.match(autoRoute, /CRON_SECRET/)
   assert.match(data, /dispatch_kind: "second_reminder"/)
   assert.doesNotMatch(data, /confirmedIds\.has\(personId\)/)
-  assert.match(data, /p_actor: cyException \? CY_DINGTALK_EXCEPTION_ACTOR : "system:attendance-auto-confirm"/)
+  assert.match(data, /p_actor: cyException \? CY_DINGTALK_EXCEPTION_ACTOR\s*: jzException \? JZ_DINGTALK_EXCEPTION_ACTOR : "system:attendance-auto-confirm"/)
   assert.match(autoRoute, /!hasCyDingTalkAutoConfirmException\(person, period\)/)
   assert.match(data, /The employee may dispute the record directly with an administrator/)
   assert.match(client, /SYSTEM CONFIRMED/)

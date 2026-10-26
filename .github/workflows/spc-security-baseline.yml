@@ -107,8 +107,9 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           npm run test:attendance 2>&1 | tee attendance-tests.tap
+          node --test tests/attendance-auto-confirm-route.test.mjs 2>&1 | tee attendance-auto-confirm-route.tap
 
       - name: Verify calendar saves holidays recovery and reminder delivery
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -317,6 +318,7 @@ jobs:
             admin-role-default-save.tap
             admin-auth-security.tap
             attendance-tests.tap
+            attendance-auto-confirm-route.tap
             calendar-tests.tap
             ccinfo-table-tests.tap
             country-pricing-tests.tap
