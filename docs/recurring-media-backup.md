@@ -181,11 +181,18 @@ exactly to `readStorageMediaBudgetRuntimeConfig` in
   `subscriptionSha256` digests. Document the absence of a project parent when
   hashing the ancestor review; an empty-looking field is not evidence.
 
-Pacific calendar wording in provider documentation is ambiguous about seasonal
-offsets. `America/Los_Angeles` is a candidate, **not yet a verified assertion**:
-the first authentic monthly boundary must match the configured zone exactly,
-including daylight saving. A mismatch stays paused and needs review; do not
-accept the current UTC month or change the zone merely to make a test green.
+**Dated billing-calendar verification — 2026-10-26:** the first authentic
+matching budget publication, published at `2026-10-26T10:54:15.528Z`, reported
+`costIntervalStart=2026-10-01T07:00:00Z`. The actual billing-message parser and
+budget policy accepted this exact October boundary for
+`America/Los_Angeles`, with the pinned billing account, budget, currency and
+amount. This verifies that publication and October's boundary, **not permanent
+daylight-saving correctness or every future billing period**. Each future
+period must still match the configured local month boundary exactly, including
+seasonal offsets. A mismatch stays paused and needs review; do not accept the
+current UTC month or change the zone merely to make a test green. This dated
+validation is not a job's durably committed budget control, real-time cost
+evidence, an exact spending cap or proof of an overnight file backup.
 The maximum observation age is 36 hours. Missing, malformed, stale, wrong-month
 or unauthenticated evidence pauses optional copying, never deletes old copies
 or disables the separate essential Drive backup. A same-day retry whose exact
@@ -215,8 +222,8 @@ container import closure, focused tests, legacy streaming regression and
 production dependency audit before updating the existing job. Keep its default
 Drive backup command and existing scheduler unchanged.
 
-Create a **separate daily invocation** for recurring media, using the existing
-job and a per-execution argument override for:
+Create **separate overnight media invocations** with four explicit attempt
+slots, using the existing job and a per-execution argument override for:
 
 ```sh
 node scripts/backup-storage-media-to-gcs.mjs --execute-recurring-daily
@@ -224,17 +231,27 @@ node scripts/backup-storage-media-to-gcs.mjs --execute-recurring-daily
 
 Inspect the actual container entrypoint/command before constructing the Cloud
 Run override body: do not prepend a second `node` argument to an existing
-`node` command. Use the dedicated schedule-only identity above for the tested
+`node` command. Use the dedicated scheduler identity above for the tested
 job-execution/override capability on this exact job, not project Editor. It
-has no bucket, Drive or secret access. The running backup continues to use its
-separate, already-pinned data-access identity; no user-managed key is created.
+has no **direct** bucket, Drive or secret IAM grants. Nevertheless, overriding
+arguments or environment on this existing secret-bearing job is **trusted
+privileged execution** and can exercise the job's effective data-access
+capabilities. It must not be described as unable to access data. The running
+backup continues to use its separate, already-pinned data-access identity.
+Create no user-managed keys and grant no new impersonation authority to other
+principals beyond the reviewed scheduler-service path.
 Record the actual scheduler name, target, service account, override body,
-timezone, retry policy and image digest in private release evidence. A daily
-02:15 Asia/Hong_Kong invocation (`15 2 * * *`) fits the 02:00–06:00 source
-window; verify the deployed schedule rather than assume this recommendation
-was applied. Bound retries and execution duration so a retry cannot authorize
-outside-window source access. No Mac, local cron or local export runner is
-involved.
+timezone, retry policy and image digest in private release evidence. Configure
+`15 2-5 * * *` in `Asia/Hong_Kong`: 02:15, 03:15, 04:15 and 05:15. Set the
+execution timeout override to **2,700 seconds (45 minutes) on every media
+attempt**, so the planned 05:15 slot ends by 06:00 when started on time. The
+source independently refuses outside-window access even if dispatch is late.
+Preserve the existing Drive job's **3,300-second default** and its original
+scheduler; only the separate media invocations receive the shorter override.
+Verify the deployed schedule, all four timeout overrides and bounded dispatch
+retries rather than assume this intended configuration was applied. An exact
+same-day verified success skips later media attempts without new copies or
+fresh success claims. No Mac, local cron or local export runner is involved.
 
 Enable only after the project, IAM, bucket retention, budget-message identity,
 calendar and job configuration checks pass. If an authentic first billing
