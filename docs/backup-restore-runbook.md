@@ -51,11 +51,50 @@ external services, role passwords, or historical file versions. At this
 rehearsal's completion, database-to-file correspondence had not yet been tested;
 the separate dated metadata-only comparison below was completed later, not as
 part of a Storage-byte restore. Historical file-version recovery remains
-unproved. The
-separate 2026-10-21 media snapshot is still one-time and is not monitored by
-System Health. The recurring Drive JSON export still retains only its latest
-two verified artifacts; this rehearsal changed no schedule, retention, budget,
+unproved. The separate 2026-10-21 media snapshot remains historical one-time
+evidence; recurring media was not monitored during this rehearsal. See the
+separate 2026-10-26 capability follow-up below. The recurring Drive JSON export
+still retains only its latest two verified artifacts; this rehearsal changed no
+schedule, retention, budget,
 cost control, or backup-health policy.
+
+## Separately gated recurring media capability — 2026-10-26
+
+The current release adds a separate, cloud-only overnight uploaded-media
+version-copy capability and a System Health check. Its source window is
+02:00–06:00 Asia/Hong_Kong. It binds the complete current source inventory to
+exact immutable GCS generations, reads copied/reused bytes and the manifest
+back, and publishes a fenced, authenticated health receipt only after those
+checks. New versions do not replace older retained copies. Retention remains
+dry-run only; no automatic pruning is enabled.
+
+A separate **2026-10-26 bucket-configuration check** removed the previous
+noncurrent-object lifecycle Delete rule. Metadata readback showed no automatic
+lifecycle deletion; versioning, enforced public-access prevention, uniform
+bucket-level access and seven-day soft-delete protection were preserved.
+Existing copies were not deleted. This is dated configuration evidence, not a
+new file-byte availability check, restore test or successful overnight run.
+
+This is an additive configured capability, **not proof of a first successful
+overnight execution**. Check the current activation, verified run receipt,
+current file coverage and deadline in System Health; this runbook is not a live
+deployment or scheduler query. The dated 15-file snapshot and database rehearsal
+above remain their own historical evidence. Neither certifies the new daily
+schedule or a later changed-file copy.
+
+Optional copying pauses for missing, invalid, stale or over-threshold budget
+evidence. Existing copies and essential Drive backup work remain protected.
+Billing information is delayed; the approved USD10 policy is not an exact
+all-service spending ceiling. The existing daily JSON artifact policy is
+unchanged. The separately approved weekly independent full PostgreSQL copy is
+**not active**: a backup-only source connection must first be proven unable to
+write database data. Four verified weeks are the planned retention, not recovery
+points already available.
+
+See [recurring-media-backup.md](recurring-media-backup.md) for the pinned cloud
+resources, explicit activation gates, budget-message verification, retention
+safeguards, schedule configuration, first-run evidence and rollback procedure.
+Do not mark recurring protection complete before that live evidence exists.
 
 ## Recovery contract
 
@@ -274,9 +313,9 @@ this review. Do not treat a healthy Drive backup as proof of their recovery.
 second independent read-only check matched SHA-256 and CRC32C at the exact
 stored generations. Its manifest maps the snapshot to the two database
 archives retained at the time; historical file-version matching remains
-unproved. Temporary source access is off, no recurring media backup is
-scheduled, and System Health does not monitor this media snapshot. This was
-not a whole-database restore or a timed recovery rehearsal. See the
+unproved. At that date, temporary source access was off, no recurring media
+backup was scheduled, and System Health did not monitor this media snapshot.
+This was not a whole-database restore or a timed recovery rehearsal. See the
 [dated rollout evidence and limits](storage-media-backup-source-implementation.md#verified-one-time-rollout--2026-10-21)
 before relying on this snapshot.
 
@@ -292,7 +331,10 @@ This establishes only the exact versions recorded by that V9 snapshot. It is
 not a new cloud-availability check, Storage-byte restoration, proof for older
 database snapshots or uploads after V9, recurring media backup, managed
 physical/PITR recovery or a recovery-time guarantee. The historical evidence
-above and the one-time snapshot's scheduling/monitoring limits are unchanged.
+above remains dated: neither the one-time copy nor that metadata-only check
+enabled a recurring schedule or monitoring. The separate
+[2026-10-26 capability](#separately-gated-recurring-media-capability--2026-10-26)
+does not retroactively expand either dated result.
 
 Google Calendar and Google Contacts remain their own live systems, although a
 current API export is included for investigation. Google Drive remains the live
