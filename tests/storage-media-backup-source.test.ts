@@ -4,8 +4,21 @@ import { fcunoConnectionPolicy } from "../config/fcunoConnections"
 import {
   createSupabaseStorageReadProvider, encodedStorageKey, handleStorageMediaBackupSource,
   STORAGE_MEDIA_SOURCE_URL, storageSourceInventorySha256, validateStorageBackupGoogleClaims,
+  readCurrentStorageMediaInventoryStatus,
   type StorageReadProvider, type StorageSourceDependencies, type StorageSourceIdentity,
 } from "../lib/storageMediaBackupSource"
+
+function recurringSetup() {
+  const value = setup(), tick = Date.parse("2026-10-26T18:00:00.000Z")
+  value.deps.now = () => tick
+  value.deps.runtime.recurringEnabled = "1"
+  value.deps.runtime.recurringActivatedAt = "2026-10-26T00:00:00.000Z"
+  value.deps.verifyToken = async () => ({ ...claims, iat: tick / 1000, exp: tick / 1000 + 3600 })
+  const request = (body: unknown = { operation: "inventory" }) => value.request(body, {
+    headers: { Authorization: "Bearer header.payload.signature", "Content-Type": "application/json", "X-Fcuno-Storage-Mode": "recurring" },
+  })
+  return { ...value, request, tick }
+}
 
 const now = Date.parse("2026-10-21T05:00:00.000Z")
 const seconds = now / 1000
@@ -52,6 +65,61 @@ test("anonymous, malformed, browser credentials and wrong URL deny without provi
     assert.equal((await handleStorageMediaBackupSource(request(undefined, {}, url), deps)).status, 403)
     assert.equal(calls.verify, 0); assert.equal(calls.provider, 0)
   }
+})
+
+test("recurring mode is independently gated, production-pinned and available only02-06HKT", async () => {
+  for (const change of [{ recurringEnabled: undefined }, { recurringEnabled: "0" }, { recurringActivatedAt: undefined },
+    { recurringActivatedAt: "2026-10-27T00:00:00.000Z" }, { recurringActivatedAt: "2026-10-26T00:00:00Z" }]) {
+    const { deps, request, calls } = recurringSetup(); Object.assign(deps.runtime, change)
+    assert.equal((await handleStorageMediaBackupSource(request(), deps)).status, 404); assert.equal(calls.provider, 0)
+  }
+  for (const tick of ["2026-10-26T17:59:59.999Z", "2026-10-26T22:00:00.000Z"]) {
+    const { deps, request, calls } = recurringSetup(); deps.now = () => Date.parse(tick)
+    assert.equal((await handleStorageMediaBackupSource(request(), deps)).status, 404); assert.equal(calls.provider, 0)
+  }
+})
+
+test("recurring complete inventory has snapshot-bound receipts, independent of fixed legacy approval", async () => {
+  const { deps, request, storage, calls } = recurringSetup()
+  deps.runtime.enabled = "0"; deps.runtime.windowStartsAt = undefined; deps.runtime.windowExpiresAt = undefined; deps.runtime.approvedInventorySha256 = undefined
+  storage.listObjects = async () => { calls.list++; return { objects: [{ name: source.path, id: source.id }], folders: [], hasNext: false } }
+  const response = await handleStorageMediaBackupSource(request(), deps), data = await response.json()
+  assert.equal(response.status, 200); assert.equal(data.schema, "fcuno.storage-media-source/v2"); assert.equal(calls.list, 2)
+  assert.deepEqual(data.snapshot, { inventorySha256: storageSourceInventorySha256([source]), windowStartsAt: "2026-10-26T18:00:00.000Z", windowExpiresAt: "2026-10-26T22:00:00.000Z" })
+  const input = { operation: "read", ...data.items[0], snapshot: data.snapshot }
+  const read = await handleStorageMediaBackupSource(request(input), deps)
+  assert.equal(read.status, 200); assert.deepEqual(new Uint8Array(await read.arrayBuffer()), new Uint8Array([1, 2, 3, 4]))
+  for (const snapshot of [{ ...data.snapshot, inventorySha256: "0".repeat(64) }, { ...data.snapshot, windowStartsAt: "2026-10-25T18:00:00.000Z" }]) {
+    const before = calls.inspect
+    assert.equal((await handleStorageMediaBackupSource(request({ ...input, snapshot }), deps)).status, 403)
+    assert.equal(calls.inspect, before)
+  }
+})
+
+test("recurring inventory must agree across full walks and respect finite size caps", async () => {
+  for (const variant of ["changed", "oversized", "total"]) {
+    const { deps, request, storage } = recurringSetup(); let count = 0
+    storage.listObjects = async () => ({ objects: [{ name: source.path, id: source.id }], folders: [], hasNext: false })
+    storage.inspect = async () => ({ etag: info.etag, source: { ...source,
+      version: variant === "changed" && ++count > 1 ? "changed" : source.version,
+      sizeBytes: variant === "oversized" ? fcunoConnectionPolicy.storageMediaBackup.recurring.maxObjectBytes + 1 : source.sizeBytes } })
+    if (variant === "total") {
+      storage.listObjects = async () => ({ objects: approved.slice(0, 5).map(item => ({ name: item.path, id: item.id })), folders: [], hasNext: false })
+      storage.inspect = async (_bucket, path) => ({ etag: info.etag, source: { ...approved.find(item => item.path === path)!, sizeBytes: fcunoConnectionPolicy.storageMediaBackup.recurring.maxObjectBytes } })
+    }
+    assert.notEqual((await handleStorageMediaBackupSource(request(), deps)).status, 200)
+  }
+})
+
+test("internal readonly health inventory includes only server modification evidence and explicit unknowns", async () => {
+  const { storage } = setup()
+  storage.listObjects = async () => ({ objects: [{ name: source.path, id: source.id }], folders: [], hasNext: false })
+  storage.inspect = async () => ({ ...info, modifiedAt: "2026-10-26T10:00:00Z" })
+  assert.deepEqual(await readCurrentStorageMediaInventoryStatus(storage, new AbortController().signal), {
+    inventory: [source], modifiedAtByIdentity: [{ id: source.id, version: source.version, modifiedAt: "2026-10-26T10:00:00.000Z" }],
+  })
+  storage.inspect = async () => ({ ...info, modifiedAt: "not-a-date" })
+  assert.equal((await readCurrentStorageMediaInventoryStatus(storage, new AbortController().signal)).modifiedAtByIdentity[0].modifiedAt, null)
 })
 
 test("disabled, preview, dev and wrong Vercel project fail before auth", async () => {

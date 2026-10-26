@@ -16,7 +16,7 @@ const HEADERS = {
 }
 
 export type StorageSourceIdentity = { bucket: string; path: string; id: string; version: string; sizeBytes: number }
-export type StorageSourceInfo = { source: StorageSourceIdentity; etag: string }
+export type StorageSourceInfo = { source: StorageSourceIdentity; etag: string; modifiedAt?: string | null }
 export type StorageReadProvider = {
   listObjects(bucket: string, cursor: string | undefined, signal: AbortSignal): Promise<unknown>
   inspect(bucket: string, path: string, signal: AbortSignal): Promise<StorageSourceInfo>
@@ -24,7 +24,7 @@ export type StorageReadProvider = {
 }
 type Claims = { iss?: unknown; aud?: unknown; sub?: unknown; email?: unknown; email_verified?: unknown; iat?: unknown; exp?: unknown }
 export type StorageSourceDependencies = {
-  runtime: { enabled?: string; vercel?: string; environment?: string; projectId?: string; windowStartsAt?: string; windowExpiresAt?: string; approvedInventorySha256?: string }
+  runtime: { enabled?: string; recurringEnabled?: string; recurringActivatedAt?: string; vercel?: string; environment?: string; projectId?: string; windowStartsAt?: string; windowExpiresAt?: string; approvedInventorySha256?: string }
   now(): number
   verifyToken(token: string, audience: string): Promise<Claims | undefined>
   provider(): { storage: StorageReadProvider; receiptKey: string }
@@ -46,6 +46,33 @@ function accessWindow(runtime: StorageSourceDependencies["runtime"], now: number
       new Date(end).toISOString() !== runtime.windowExpiresAt || end <= start || end - start > 3_600_000 ||
       now < start || now >= end) fail(404, "not_found")
   return end
+}
+// This is a separate, explicit recurring authorization. It never stretches or
+// silently replaces the legacy approved one-hour snapshot window.
+export function recurringStorageAccessWindow(now: number) {
+  const shifted = new Date(now + 8 * 3_600_000)
+  const day = Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate()) - 8 * 3_600_000
+  const start = day + policy.recurring.windowStartHourHkt * 3_600_000
+  const end = day + policy.recurring.windowEndHourHkt * 3_600_000
+  if (!Number.isSafeInteger(now) || now < start || now >= end) fail(404, "not_found")
+  return { windowStartsAt: new Date(start).toISOString(), windowExpiresAt: new Date(end).toISOString() }
+}
+type RecurringSnapshot = { inventorySha256: string; windowStartsAt: string; windowExpiresAt: string }
+function recurringSnapshot(value: unknown, window: ReturnType<typeof recurringStorageAccessWindow>): RecurringSnapshot {
+  const snapshot = record(value)
+  if (!exact(snapshot, ["inventorySha256", "windowStartsAt", "windowExpiresAt"]) ||
+      typeof snapshot.inventorySha256 !== "string" || !/^[0-9a-f]{64}$/.test(snapshot.inventorySha256) ||
+      snapshot.windowStartsAt !== window.windowStartsAt || snapshot.windowExpiresAt !== window.windowExpiresAt) fail(403, "invalid_snapshot")
+  return { inventorySha256: snapshot.inventorySha256, ...window }
+}
+function boundedRecurringInventory(sources: StorageSourceIdentity[]) {
+  let total = 0
+  if (sources.length > policy.recurring.maxObjects) fail(413, "inventory_limit_exceeded")
+  for (const source of sources) {
+    if (source.bucket !== policy.sourceBucket || source.sizeBytes > policy.recurring.maxObjectBytes) fail(413, "inventory_limit_exceeded")
+    total += source.sizeBytes
+    if (!Number.isSafeInteger(total) || total > policy.recurring.maxTotalBytes) fail(413, "inventory_limit_exceeded")
+  }
 }
 function text(value: unknown, max = 4096): value is string {
   return typeof value === "string" && value.length > 0 && value.isWellFormed() &&
@@ -167,10 +194,14 @@ export function createSupabaseStorageReadProvider(options: { url: string; servic
       if (source.bucket !== bucket || source.path !== path) fail(502, "storage_identity_mismatch")
       // Storage's info ETag is backend metadata, never user-supplied metadata.
       const etag = typeof data.etag === "string" && !data.etag.startsWith('"') ? `"${data.etag}"` : data.etag
-      return { source, etag: strongEtag(etag) }
+      const rawModified = data.updated_at ?? data.updatedAt
+      const modified = typeof rawModified === "string" ? Date.parse(rawModified) : NaN
+      // Only server-owned object-info metadata, not the user metadata object.
+      const modifiedAt = Number.isFinite(modified) ? new Date(modified).toISOString() : null
+      return { source, etag: strongEtag(etag), ...(rawModified === undefined ? {} : { modifiedAt }) }
     },
     async open(source, etag, signal) {
-      if (source.bucket !== policy.sourceBucket || source.sizeBytes > policy.approvedTotalBytes) fail(403, "unapproved_source")
+      if (source.bucket !== policy.sourceBucket || source.sizeBytes > Math.max(policy.approvedTotalBytes, policy.recurring.maxObjectBytes)) fail(403, "unapproved_source")
       return options.fetch(`${STORAGE_ORIGIN}/storage/v1/object/authenticated/${encodedStorageKey(source.bucket, source.path)}`, {
         method: "GET", redirect: "error", cache: "no-store", signal,
         headers: { apikey: options.serviceRoleKey, Authorization: `Bearer ${options.serviceRoleKey}`,
@@ -180,7 +211,7 @@ export function createSupabaseStorageReadProvider(options: { url: string; servic
   }
 }
 
-async function inventory(storage: StorageReadProvider, signal: AbortSignal) {
+async function inventory(storage: StorageReadProvider, signal: AbortSignal, options?: { recurring?: boolean; modified?: { id: string; version: string; modifiedAt: string | null }[] }) {
   const result: StorageSourceIdentity[] = [], paths = new Set<string>(), ids = new Set<string>()
   for (const bucket of [policy.sourceBucket]) {
     let cursor: string | undefined
@@ -191,7 +222,7 @@ async function inventory(storage: StorageReadProvider, signal: AbortSignal) {
           typeof page.hasNext !== "boolean") fail(502, "invalid_object_page")
       for (const raw of page.objects) {
         const row = record(raw)
-        if (!text(row.name) || !text(row.id, 200) || result.length >= MAX_OBJECTS) fail(502, "invalid_object_inventory")
+        if (!text(row.name) || !text(row.id, 200) || result.length >= (options?.recurring ? policy.recurring.maxObjects : MAX_OBJECTS)) fail(502, "invalid_object_inventory")
         const pathKey = JSON.stringify([bucket, row.name]), idKey = JSON.stringify([bucket, row.id])
         if (paths.has(pathKey) || ids.has(idKey)) fail(409, "inventory_changed")
         const info = await storage.inspect(bucket, row.name, signal)
@@ -199,6 +230,8 @@ async function inventory(storage: StorageReadProvider, signal: AbortSignal) {
         const source = validateStorageSource(info.source)
         strongEtag(info.etag)
         paths.add(pathKey); ids.add(idKey); result.push(source)
+        options?.modified?.push({ id: source.id, version: source.version, modifiedAt: typeof info.modifiedAt === "string" && Number.isFinite(Date.parse(info.modifiedAt)) ? new Date(info.modifiedAt).toISOString() : null })
+        if (options?.recurring) boundedRecurringInventory(result)
       }
       if (!page.hasNext) break
       if (!page.objects.length || !text(page.nextCursor, 16_384) || cursors.has(page.nextCursor)) fail(502, "invalid_object_cursor")
@@ -206,6 +239,18 @@ async function inventory(storage: StorageReadProvider, signal: AbortSignal) {
     }
   }
   return result
+}
+
+export async function readCurrentStorageMediaInventory(storage: StorageReadProvider, signal: AbortSignal) {
+  const sources = await inventory(storage, signal, { recurring: true })
+  boundedRecurringInventory(sources)
+  return sources
+}
+
+export async function readCurrentStorageMediaInventoryStatus(storage: StorageReadProvider, signal: AbortSignal) {
+  const modifiedAtByIdentity: { id: string; version: string; modifiedAt: string | null }[] = []
+  const sources = await inventory(storage, signal, { recurring: true, modified: modifiedAtByIdentity })
+  return { inventory: sources, modifiedAtByIdentity }
 }
 
 function checkedStream(source: StorageSourceIdentity, etag: string, upstream: Response, storage: StorageReadProvider, signal: AbortSignal, stopUpstream: () => void) {
@@ -274,10 +319,15 @@ export async function handleStorageMediaBackupSource(request: Request, deps: Sto
   const startedAt = deps.now()
   try {
     const runtime = deps.runtime
-    if (runtime.enabled !== "1" || runtime.vercel !== "1" || runtime.environment !== "production" ||
+    const mode = request.headers.get("x-fcuno-storage-mode")
+    const recurring = mode === "recurring"
+    if ((mode !== null && !recurring) || (recurring ? runtime.recurringEnabled !== "1" : runtime.enabled !== "1") || runtime.vercel !== "1" || runtime.environment !== "production" ||
         runtime.projectId !== fcunoConnectionPolicy.vercel.projectId) fail(404, "not_found")
-    const windowEnd = accessWindow(runtime, deps.now())
-    if (!runtime.approvedInventorySha256 || !/^[0-9a-f]{64}$/.test(runtime.approvedInventorySha256)) fail(404, "not_found")
+    const dailyWindow = recurring ? recurringStorageAccessWindow(deps.now()) : null
+    const activatedAt = Date.parse(runtime.recurringActivatedAt || "")
+    if (recurring && (!Number.isFinite(activatedAt) || new Date(activatedAt).toISOString() !== runtime.recurringActivatedAt || activatedAt > deps.now())) fail(404, "not_found")
+    const windowEnd = dailyWindow ? Date.parse(dailyWindow.windowExpiresAt) : accessWindow(runtime, deps.now())
+    if (!recurring && (!runtime.approvedInventorySha256 || !/^[0-9a-f]{64}$/.test(runtime.approvedInventorySha256))) fail(404, "not_found")
     if (request.url !== STORAGE_MEDIA_SOURCE_URL || request.headers.has("origin") || request.headers.has("cookie")) fail(403, "forbidden")
     const authorization = request.headers.get("authorization") || ""
     if (!/^Bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(authorization) || authorization.length > 16_384) fail(401, "unauthorized")
@@ -290,31 +340,44 @@ export async function handleStorageMediaBackupSource(request: Request, deps: Sto
     const inputSignal = AbortSignal.any([request.signal, AbortSignal.timeout(10_000)])
     const input = record(await readBoundedStorageJson(new Response(request.body), 20_000, inputSignal))
     if (!["inventory", "inspect", "read"].includes(String(input.operation)) ||
-        !exact(input, input.operation === "inventory" ? ["operation"] : ["operation", "source", "receipt"])) fail(400, "invalid_operation")
+        !exact(input, input.operation === "inventory" ? ["operation"] : ["operation", "source", "receipt", ...(recurring ? ["snapshot"] : [])])) fail(400, "invalid_operation")
     const remaining = Math.min((input.operation === "read" ? STORAGE_MEDIA_READ_SECONDS * 1000 : 55_000) - (deps.now() - startedAt), windowEnd - deps.now())
     if (!Number.isSafeInteger(remaining) || remaining <= 0) fail(403, "access_window_ending")
     const signal = AbortSignal.any([request.signal, AbortSignal.timeout(remaining)])
     const provider = deps.provider(), storage = provider.storage
     if (!provider.receiptKey) fail(503, "source_not_configured")
-    const receiptKey = createHmac("sha256", provider.receiptKey).update(`fcuno-storage-snapshot/v1\0${runtime.windowStartsAt}\0${runtime.approvedInventorySha256}`).digest("hex")
+    let snapshot: RecurringSnapshot | null = null
+    if (recurring && input.operation !== "inventory") snapshot = recurringSnapshot(input.snapshot, dailyWindow!)
+    const receiptKeyFor = (daily: RecurringSnapshot | null) => createHmac("sha256", provider.receiptKey).update(daily ?
+      `fcuno-storage-snapshot/v2\0${JSON.stringify(daily)}` : `fcuno-storage-snapshot/v1\0${runtime.windowStartsAt}\0${runtime.approvedInventorySha256}`).digest("hex")
     if (input.operation === "inventory") {
-      const sources = await inventory(storage, signal)
-      if (sources.length !== policy.approvedObjectCount || sources.reduce((sum, source) => sum + source.sizeBytes, 0) !== policy.approvedTotalBytes ||
+      const sources = await inventory(storage, signal, { recurring })
+      if (recurring) {
+        boundedRecurringInventory(sources)
+        const digest = storageSourceInventorySha256(sources)
+        // A non-atomic storage cursor walk is not a snapshot. Require a second
+        // full walk to agree before issuing snapshot-bound short-lived reads.
+        const after = await inventory(storage, signal, { recurring: true })
+        boundedRecurringInventory(after)
+        if (storageSourceInventorySha256(after) !== digest) fail(409, "inventory_changed")
+        snapshot = { inventorySha256: digest, ...dailyWindow! }
+      } else if (sources.length !== policy.approvedObjectCount || sources.reduce((sum, source) => sum + source.sizeBytes, 0) !== policy.approvedTotalBytes ||
           storageSourceInventorySha256(sources) !== runtime.approvedInventorySha256) fail(409, "unapproved_inventory")
+      const receiptKey = receiptKeyFor(snapshot)
       const items = sources.map(source => ({ source, receipt: issueReceipt(source, receiptKey, deps.now()) }))
-      const body = JSON.stringify({ schema: "fcuno.storage-media-source/v1", items })
+      const body = JSON.stringify({ schema: recurring ? "fcuno.storage-media-source/v2" : "fcuno.storage-media-source/v1", ...(snapshot ? { snapshot } : {}), items })
       if (Buffer.byteLength(body) > MAX_BYTES) fail(413, "inventory_limit_exceeded")
-      accessWindow(runtime, deps.now())
+      if (recurring) recurringStorageAccessWindow(deps.now()); else accessWindow(runtime, deps.now())
       return new Response(body, { headers: { ...HEADERS, "Content-Type": "application/json" } })
     }
     const source = validateStorageSource(input.source)
-    if (source.bucket !== policy.sourceBucket || source.sizeBytes > policy.approvedTotalBytes) fail(403, "unapproved_source")
-    verifyReceipt(source, input.receipt, receiptKey, deps.now())
+    if (source.bucket !== policy.sourceBucket || source.sizeBytes > (recurring ? policy.recurring.maxObjectBytes : policy.approvedTotalBytes)) fail(403, "unapproved_source")
+    verifyReceipt(source, input.receipt, receiptKeyFor(snapshot), deps.now())
     const before = await storage.inspect(source.bucket, source.path, signal)
     if (!equalSource(before.source, source)) fail(409, "source_changed")
     strongEtag(before.etag)
     if (input.operation === "inspect") {
-      accessWindow(runtime, deps.now())
+      if (recurring) recurringStorageAccessWindow(deps.now()); else accessWindow(runtime, deps.now())
       return Response.json({ source, etag: before.etag }, { headers: HEADERS })
     }
     const upstreamController = new AbortController(), upstreamSignal = AbortSignal.any([signal, upstreamController.signal])

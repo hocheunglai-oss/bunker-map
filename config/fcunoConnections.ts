@@ -32,6 +32,16 @@ export const fcunoConnectionPolicy = Object.freeze({
     targetBucket: "bunker-map-drive-uploader-bunker-map-drive-file-backups",
     targetPrefix: "fcuno-storage-media",
     googleTokenIssuer: "https://accounts.google.com",
+    recurring: {
+      maxObjects: 1000,
+      maxTotalBytes: 1073741824,
+      maxObjectBytes: 268435456,
+      windowStartHourHkt: 2,
+      windowEndHourHkt: 6,
+      healthFolderName: "Storage Media Backup Manifests",
+      healthFilePrefix: "storage-media-backup-health-",
+      budgetUsdMicros: 10000000,
+    },
   },
   browser: {
     fallbackProfile: "Otto",

@@ -10,8 +10,12 @@
 !scripts/backup-storage-media-to-gcs.mjs
 !scripts/lib/
 !scripts/lib/storage-media-*.mjs
+!scripts/lib/backup-budget-*.mjs
 !config/
 !config/fcunoConnections.ts
 !lib/
 !lib/storageMediaBackup.mjs
+!lib/storageMediaRecurring.mjs
+!lib/storageMediaBackupHealth.mjs
+!lib/backupOperatingPolicy.mjs
 !lib/backupValidationSpool.mjs

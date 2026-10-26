@@ -3,6 +3,7 @@ import test from "node:test"
 import { createHash } from "node:crypto"
 import { fcunoConnectionPolicy } from "../config/fcunoConnections.ts"
 import { createMetadataIdentityTokenProvider, createStorageMediaSourceAdapter } from "../scripts/lib/storage-media-source-adapter.mjs"
+import { recurringInventorySha256 } from "../lib/storageMediaRecurring.mjs"
 
 const policy = fcunoConnectionPolicy.storageMediaBackup
 const sourceUrl = `${fcunoConnectionPolicy.vercel.productionOrigins[0]}${policy.sourcePath}`
@@ -138,6 +139,7 @@ test("metadata identity accepts only fixed local metadata origin, exact audience
 
 test("receipt renewal re-enumerates and compares the exact snapshot before another source operation", async () => {
   let tick = Date.now(), inventories = 0, changed = false, inspections = 0
+  const renewalContext = () => ({ signal: new AbortController().signal, deadline: tick + 600_000 })
   const adapter = createStorageMediaSourceAdapter({ now: () => tick, getIdentityToken: async () => "google-test",
     fetch: async (_url, init) => {
       const input = JSON.parse(init.body)
@@ -149,11 +151,11 @@ test("receipt renewal re-enumerates and compares the exact snapshot before anoth
       inspections++; return Response.json({ source, etag: '"same"' })
     },
   })
-  await adapter.inventory(context()); tick += 241_000
-  assert.deepEqual(await adapter.inspectSource(source, context()), source)
+  await adapter.inventory(renewalContext()); tick += 241_000
+  assert.deepEqual(await adapter.inspectSource(source, renewalContext()), source)
   assert.equal(inventories, 2); assert.equal(inspections, 1)
   changed = true; tick += 241_000
-  await assert.rejects(adapter.inspectSource(source, context()))
+  await assert.rejects(adapter.inspectSource(source, renewalContext()))
   assert.equal(inventories, 3); assert.equal(inspections, 1)
 })
 
@@ -165,4 +167,35 @@ test("closing an opened source before the first byte cancels HTTP even if underl
     "X-Fcuno-Storage-Source-Sha256": digest, "Cache-Control": "private, no-store" } }) : null })
   const opened = await adapter.openSource(source, context())
   assert.deepEqual(await opened.bytes.return(), { done: true }); assert.equal(cancelled, 1)
+})
+
+test("recurring adapter pins complete snapshot digest/window and forwards it only to the fixed authenticated source", async () => {
+  const tick = Date.parse("2026-10-26T18:30:00.000Z"), calls = []
+  const snapshot = { inventorySha256: recurringInventorySha256([source]), windowStartsAt: "2026-10-26T18:00:00.000Z", windowExpiresAt: "2026-10-26T22:00:00.000Z" }
+  const ctx = { signal: new AbortController().signal, deadline: tick + 600_000 }
+  const adapter = createStorageMediaSourceAdapter({ mode: "recurring", now: () => tick, getIdentityToken: async () => "google-identity",
+    fetch: async (url, init) => {
+      calls.push({ url, init }); const input = JSON.parse(init.body)
+      assert.equal(url, sourceUrl); assert.equal(init.headers["X-Fcuno-Storage-Mode"], "recurring")
+      if (input.operation === "inventory") return Response.json({ schema: "fcuno.storage-media-source/v2", snapshot,
+        items: [{ source, receipt: `${tick / 1000 + 300}.${"a".repeat(43)}` }] })
+      assert.deepEqual(input.snapshot, snapshot)
+      return Response.json({ source, etag: '"same"' })
+    },
+  })
+  assert.deepEqual(await adapter.inventory(ctx), [source]); assert.deepEqual(adapter.snapshot(), snapshot)
+  await adapter.inspectSource(source, ctx); assert.equal(calls.length, 2)
+})
+
+test("recurring adapter rejects loose minute windows, wrong digest and future windows", async () => {
+  const tick = Date.parse("2026-10-26T18:30:00.000Z")
+  const baseline = { inventorySha256: recurringInventorySha256([source]), windowStartsAt: "2026-10-26T18:00:00.000Z", windowExpiresAt: "2026-10-26T22:00:00.000Z" }
+  for (const change of [{ inventorySha256: "0".repeat(64) }, { windowStartsAt: "2026-10-26T18:01:00.000Z", windowExpiresAt: "2026-10-26T22:01:00.000Z" },
+    { windowStartsAt: "2026-10-27T18:00:00.000Z", windowExpiresAt: "2026-10-27T22:00:00.000Z" }]) {
+    const adapter = createStorageMediaSourceAdapter({ mode: "recurring", now: () => tick, getIdentityToken: async () => "google",
+      fetch: async () => Response.json({ schema: "fcuno.storage-media-source/v2", snapshot: { ...baseline, ...change },
+        items: [{ source, receipt: `${tick / 1000 + 300}.${"a".repeat(43)}` }] }),
+    })
+    await assert.rejects(adapter.inventory({ signal: new AbortController().signal, deadline: tick + 600_000 }))
+  }
 })

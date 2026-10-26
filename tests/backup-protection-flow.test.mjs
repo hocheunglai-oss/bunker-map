@@ -5,6 +5,8 @@ import test from "node:test"
 import { transformSync } from "esbuild"
 import { gapFixtureSql, h1, h2, c1, c2 } from "./fixtures/backup-protection-gaps-sql.mjs"
 import * as pricing from "../lib/backupPricingSchema.mjs"
+import * as mediaHealth from "../lib/storageMediaBackupHealth.ts"
+import * as mediaSource from "../lib/storageMediaBackupSource.ts"
 
 // Required local PostgreSQL runtime: fail clearly if missing, never contact a
 // hosted database or quietly skip the notification/clock integration boundary.
@@ -62,6 +64,8 @@ function actualFileHealth(activeFiles, manifests, now, observer) {
     "@/lib/emailNotice": { getEmailNoticeConfigStatus: () => ({ missing: [] }) },
     "@/lib/googleApis": { loadGoogleApis: async () => ({ google: { drive: () => drive, auth: { OAuth2: class { setCredentials() {} } } } }) },
     "@/lib/driveFileBackupHealth": files, "@/lib/backupProtectionPolicy": policy, "@/lib/backupPricingSchema.mjs": pricing,
+    "@/lib/storageMediaBackupHealth": mediaHealth, "@/lib/storageMediaBackupSource": mediaSource,
+    "@/config/fcunoConnections": config,
   }
   const loaded = { exports: {} }
   const code = transformSync(readFileSync(new URL("../lib/systemHealth.ts", import.meta.url), "utf8"), { loader: "ts", format: "cjs", target: "node24" }).code

@@ -50,7 +50,7 @@ function displayFileName(value: string) {
 export function buildHealthAlertHtml(checks: HealthCheck[], checkedAt: string) {
   const rows = checks.map((check) => {
     const details = check.details || {}
-    const isBackup = check.id === "drive-file-content-backup" || check.id === "backup"
+    const isBackup = check.id === "drive-file-content-backup" || check.id === "backup" || check.id === "storage-media-backup"
     const names = typeof details.missingFileNames === "string" ? details.missingFileNames.split("; ").filter(Boolean) : []
     const remaining = Math.max(0, Number(details.missingFiles || names.length) - 3)
     const affected = names.slice(0, 3).map(displayFileName).join("; ") + (remaining ? `; and ${remaining} more` : "")

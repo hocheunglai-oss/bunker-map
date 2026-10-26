@@ -10,6 +10,8 @@ function handle(request: Request) {
   return handleStorageMediaBackupSource(request, {
     runtime: {
       enabled: process.env.STORAGE_MEDIA_BACKUP_ENABLED,
+      recurringEnabled: process.env.STORAGE_MEDIA_BACKUP_RECURRING_ENABLED,
+      recurringActivatedAt: process.env.STORAGE_MEDIA_BACKUP_RECURRING_ACTIVATED_AT,
       vercel: process.env.VERCEL,
       environment: process.env.VERCEL_ENV,
       projectId: process.env.VERCEL_PROJECT_ID,
