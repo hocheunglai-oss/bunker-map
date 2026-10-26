@@ -42,6 +42,9 @@ jobs:
       - name: Verify immutable FCUNO-FCOS contract
         run: npm run contract:verify
 
+      - name: Verify compiler import-error release guard
+        run: node --test tests/production-build-guard.test.mjs
+
       - name: Build the production application
         run: npm run build
 
@@ -50,6 +53,9 @@ jobs:
 
       - name: Verify font delivery in the built production server
         run: node tests/roboto-self-hosting.production.test.cjs
+
+      - name: Verify uploaded-file health service in the actual compiled route
+        run: node tests/storage-media-health.production.test.cjs
 
   static-security-evidence:
     name: Focused tests and dependency audit

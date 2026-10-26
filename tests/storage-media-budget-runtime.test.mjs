@@ -133,7 +133,7 @@ test("drains more than one daily batch before deciding and sees a later expensiv
   assert.equal(result.allowed, false); assert.equal(result.reason, "actual_cost_near_limit")
   assert.equal(f.latest().sourceMessageId, "144"); assert.equal(f.acknowledgements.length, 45)
   assert.equal(new Set(f.acknowledgements).size, 45)
-  assert.equal(f.calls.filter(item => item[0].endsWith(":pull")).length, 4)
+  assert.equal(f.calls.filter(item => item[0].endsWith(":pull")).length, 6)
 })
 
 test("fully validated obsolete publication is acknowledged only after a durable fresh newer record", async () => {
@@ -143,7 +143,7 @@ test("fully validated obsolete publication is acknowledged only after a durable 
     { messageBatches: [[old], [fresh]] },
   ]) {
     const f = fixture(options), result = await f.budget.checkOptionalWork({}, context())
-    assert.equal(result.allowed, true)
+    assert.equal(result.allowed, !options.previous)
     assert.ok(f.acknowledgements.includes("synthetic-80"))
     assert.notEqual(f.latest().sourceMessageId, "80")
     if (!options.previous) {
@@ -167,7 +167,7 @@ test("obsolete input alone cannot seed the control, be acknowledged or permit op
 test("acknowledging obsolete cheap input never weakens a current durable over-budget pause", async () => {
   const f = fixture({ previous: observation("100", 80), messages: [message("80", 1, now - 48 * 3_600_000)] })
   const result = await f.budget.checkOptionalWork({}, context())
-  assert.equal(result.allowed, false); assert.equal(result.reason, "actual_cost_near_limit")
+  assert.equal(result.allowed, false); assert.equal(result.reason, "budget_control_unavailable")
   assert.equal(f.latest().sourceMessageId, "100"); assert.equal(f.latest().actualCostMicros, 80_000_000)
   assert.deepEqual(f.acknowledgements, ["synthetic-80"]); assert.equal(f.writes.length, 0)
 })
@@ -199,12 +199,39 @@ test("malformed relevant billing publication cannot fall back to an older cheap 
   assert.equal(f.writes.length, 0); assert.equal(f.acknowledgements.length, 0); assert.equal(f.latest().actualCostMicros, 1_000_000)
 })
 
-test("empty subscription only uses a fresh authenticated prior record; unknown/stale/new month stays paused", async () => {
-  for (const [previous, allowed] of [[null, false], [observation(), true], [observation("90", 1, now - 48 * 3600000), false],
-    [{ ...observation(), periodStart: "2026-09-01T07:00:00.000Z", periodEnd: "2026-10-01T07:00:00.000Z", observedAt: "2026-09-30T12:00:00.000Z" }, false]]) {
+test("empty-only responses never authorize cached costs, including a fresh cheap prior record", async () => {
+  for (const previous of [null, observation(), observation("90", 1, now - 48 * 3600000),
+    { ...observation(), periodStart: "2026-09-01T07:00:00.000Z", periodEnd: "2026-10-01T07:00:00.000Z", observedAt: "2026-09-30T12:00:00.000Z" }]) {
     const f = fixture({ previous, messages: [] }), result = await f.budget.checkOptionalWork({}, context())
-    assert.equal(result.allowed, allowed); assert.equal(f.writes.length, 0); assert.equal(f.acknowledgements.length, 0)
+    assert.equal(result.allowed, false); assert.equal(result.reason, "budget_control_unavailable")
+    assert.equal(f.writes.length, 0); assert.equal(f.acknowledgements.length, 0)
+    assert.equal(f.calls.filter(item => item[0].endsWith(":pull")).length, 3)
   }
+})
+
+test("an empty response before a later expensive publication cannot authorize cached cheap costs", async () => {
+  const f = fixture({ previous: observation(), messageBatches: [[], [message("101", 80, now - 500)]] })
+  const result = await f.budget.checkOptionalWork({}, context())
+  assert.equal(result.allowed, false); assert.equal(result.reason, "actual_cost_near_limit")
+  assert.equal(f.latest().sourceMessageId, "101"); assert.equal(f.calls.filter(item => item[0].endsWith(":pull")).length, 5)
+  assert.deepEqual(f.acknowledgements, ["synthetic-101"])
+})
+
+test("interleaved empty responses reset the retry bound when actual messages arrive", async () => {
+  const f = fixture({ messageBatches: [[message()], [], [message("101", 80, now - 500)]] })
+  const result = await f.budget.checkOptionalWork({}, context())
+  assert.equal(result.allowed, false); assert.equal(result.reason, "actual_cost_near_limit")
+  assert.equal(f.latest().sourceMessageId, "101"); assert.equal(f.calls.filter(item => item[0].endsWith(":pull")).length, 6)
+  assert.deepEqual(f.acknowledgements, ["synthetic-100", "synthetic-101"])
+})
+
+test("malformed relevant input after a transient empty response still fails closed", async () => {
+  const invalid = message("101", 80, now - 500); invalid.message.data = Buffer.from("bad").toString("base64")
+  const f = fixture({ previous: observation(), messageBatches: [[], [invalid]] })
+  const result = await f.budget.checkOptionalWork({}, context())
+  assert.equal(result.allowed, false); assert.equal(result.reason, "budget_control_unavailable")
+  assert.equal(f.calls.filter(item => item[0].endsWith(":pull")).length, 2)
+  assert.equal(f.writes.length, 0); assert.deepEqual(f.acknowledgements, [])
 })
 
 test("failed readback never acknowledges; acknowledgement failure safely pauses without discarding durable observation", async () => {
@@ -236,22 +263,24 @@ test("non-cooperative token requests are bounded by cancellation and never start
 
 test("real recurring entry constructs native budget and Drive publisher without test injection, while retaining activation gates", async () => {
   let calls = 0
-  const enabled = { ...runtime(), STORAGE_MEDIA_BACKUP_RECURRING_ENABLED: "1", STORAGE_MEDIA_BACKUP_RECURRING_ACTIVATED_AT: "2026-10-26T12:00:00.000Z",
+  const current = Date.now()
+  const enabled = { ...runtime(), STORAGE_MEDIA_BACKUP_RECURRING_ENABLED: "1", STORAGE_MEDIA_BACKUP_RECURRING_ACTIVATED_AT: new Date(current - 60_000).toISOString(),
     GOOGLE_DRIVE_BACKUP_FOLDER_ID: "synthetic-parent-folder" }
   const fetch = async url => { calls++; assert.equal(new URL(url).hostname, "metadata.google.internal"); return new Response("synthetic unavailable", { status: 500 }) }
-  await assert.rejects(main({ args: ["--execute-recurring-daily"], runtime: enabled, fetch, now: () => now }), /failed during source-inventory/)
+  await assert.rejects(main({ args: ["--execute-recurring-daily"], runtime: enabled, fetch, now: () => current }), /failed during source-inventory/)
   assert.equal(calls, 1, "both native factories constructed successfully before the deliberately unavailable synthetic source")
   calls = 0
-  await assert.rejects(main({ args: ["--execute-recurring-daily"], runtime: { ...enabled, STORAGE_MEDIA_BACKUP_RECURRING_ENABLED: "0" }, fetch, now: () => now }))
-  await assert.rejects(main({ args: ["--execute-recurring-daily"], runtime: { ...enabled, STORAGE_MEDIA_BACKUP_BUDGET_CONFIG_JSON: "" }, fetch, now: () => now }))
+  await assert.rejects(main({ args: ["--execute-recurring-daily"], runtime: { ...enabled, STORAGE_MEDIA_BACKUP_RECURRING_ENABLED: "0" }, fetch, now: () => current }))
+  await assert.rejects(main({ args: ["--execute-recurring-daily"], runtime: { ...enabled, STORAGE_MEDIA_BACKUP_BUDGET_CONFIG_JSON: "" }, fetch, now: () => current }))
   assert.equal(calls, 0, "missing activation or verified configuration cannot reach provider IO")
 })
 
 test("real recurring entry retains explicit publisher/budget injection for synthetic integration", async () => {
   let calls = 0
+  const current = Date.now()
   await assert.rejects(main({ args: ["--execute-recurring-daily"], runtime: { CLOUD_RUN_JOB: pinned.googleJob,
     STORAGE_MEDIA_BACKUP_RECURRING_ENABLED: "1", GOOGLE_DRIVE_BACKUP_FOLDER_ID: "synthetic-parent-folder" },
-    publisher: { publishHealth() {}, publishAttempt() {} }, budget: { checkOptionalWork() {} }, now: () => now,
+    publisher: { publishHealth() {}, publishAttempt() {} }, budget: { checkOptionalWork() {} }, now: () => current,
     fetch: async () => { calls++; return new Response("synthetic unavailable", { status: 500 }) } }), /failed during source-inventory/)
   assert.equal(calls, 1)
 })

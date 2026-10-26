@@ -6,7 +6,7 @@ import { loadGoogleApis } from "@/lib/googleApis"
 import { evaluateDriveFileBackupHealth, getDriveFileBackupGaps, isVerifiedDriveBackupManifest, type ActiveDriveBackupFile, type DriveBackupManifest } from "@/lib/driveFileBackupHealth"
 import { BackupProtectionObservationError, backupDueWindow, evaluateDatabaseBackupProtection, unknownBackupProtection, type BackupGapObserver, type BackupGapInput, type BackupProtectionGap } from "@/lib/backupProtectionPolicy"
 import { parsePricingBackupSchemaVersion, pricingBackupSchemaFromArtifact, pricingBackupSchemaFromInventory, pricingBackupSchemaVersion, type PricingBackupSchemaVersion } from "@/lib/backupPricingSchema.mjs"
-import { evaluateStorageMediaBackupHealth, readStorageMediaHealthReceipt } from "@/lib/storageMediaBackupHealth"
+import { evaluateStorageMediaBackupHealth, readStorageMediaHealthReceipt } from "@/lib/storageMediaBackupHealthService"
 import { createSupabaseStorageReadProvider, readCurrentStorageMediaInventoryStatus } from "@/lib/storageMediaBackupSource"
 import { fcunoConnectionPolicy } from "@/config/fcunoConnections"
 

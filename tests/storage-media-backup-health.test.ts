@@ -9,7 +9,7 @@ import { recurringInventorySha256, recurringMediaScope } from "../lib/storageMed
 import { buildStorageMediaHealthReceipt, encodeStorageMediaHealthReceipt, validateStorageMediaHealthReceipt,
   STORAGE_MEDIA_HEALTH_SCHEMA, STORAGE_MEDIA_HEALTH_PREFIX, STORAGE_MEDIA_HEALTH_MAX_BYTES } from "../lib/storageMediaBackupHealth.mjs"
 import { selectStorageMediaHealthFile } from "../lib/storageMediaBackupHealth.mjs"
-import { evaluateStorageMediaBackupHealth, readStorageMediaHealthReceipt, type StorageMediaInventoryStatus } from "../lib/storageMediaBackupHealth"
+import { evaluateStorageMediaBackupHealth, readStorageMediaHealthReceipt, type StorageMediaInventoryStatus } from "../lib/storageMediaBackupHealthService"
 import { buildHealthAlertHtml, healthAlertObservation } from "../lib/systemHealthAlerts"
 
 const scope = fcunoConnectionPolicy.storageMediaBackup

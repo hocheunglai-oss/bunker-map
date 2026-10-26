@@ -45,7 +45,10 @@ function fixture(options = {}, previous = null) {
       },
     },
     async writeTarget(input) { events.push("object-write"); assert.equal(input.ifGenerationMatch, "0"); return save(`${policy.targetPrefix}/daily/runs/${runId}/objects/${sha(JSON.stringify(input.source))}`, input.bytes, input.source.sizeBytes) },
-    async inspectTarget(target) { const { data, ...receipt } = objects.get(JSON.stringify(target)); return structuredClone(receipt) },
+    async inspectTarget(target) {
+      const saved = objects.get(JSON.stringify(target))
+      return structuredClone({ target: saved.target, sizeBytes: saved.sizeBytes, crc32c: saved.crc32c })
+    },
     async readTarget(target) {
       events.push(target.objectName.endsWith("manifest.json") ? "manifest-read" : "object-readback")
       const saved = objects.get(JSON.stringify(target))
@@ -90,6 +93,37 @@ test("same-day retry verifies pinned previous manifest without copying or republ
   const repeated = fixture({}, f.state()), result = await runRecurringStorageMediaBackup(repeated, repeated.context)
   assert.equal(result.status, "already-succeeded"); assert.equal(repeated.events.includes("object-write"), false)
   assert.equal(repeated.events.includes("cas"), false); assert.equal(repeated.published.length, 0)
+})
+
+test("unchanged verified same-day success needs no new budget delivery or warning publication", async () => {
+  const f = fixture(); await runRecurringStorageMediaBackup(f, f.context)
+  const repeated = fixture({}, f.state())
+  repeated.budget.checkOptionalWork = async () => { throw new Error("No new billing delivery is available") }
+  const result = await runRecurringStorageMediaBackup(repeated, repeated.context)
+  assert.equal(result.status, "already-succeeded")
+  assert.equal(result.runId, f.runId); assert.equal(result.copiedObjects, 0); assert.equal(result.copiedBytes, 0)
+  assert.deepEqual(repeated.events, ["validate-bucket", "manifest-read"])
+  assert.equal(repeated.attempts.length, 0); assert.equal(repeated.published.length, 0)
+  assert.deepEqual(repeated.getControl(), f.getControl())
+})
+
+test("same-day changed source version still requires the budget guard and remains paused without new cost evidence", async () => {
+  const f = fixture(); await runRecurringStorageMediaBackup(f, f.context)
+  const changed = fixture({ changedVersion: true, paused: true }, f.state())
+  const result = await runRecurringStorageMediaBackup(changed, changed.context)
+  assert.equal(result.status, "budget-paused")
+  assert.equal(changed.events.includes("budget"), true); assert.equal(changed.events.includes("object-write"), false)
+  assert.equal(changed.published.length, 0); assert.equal(changed.attempts[0].state, "budget-paused")
+  assert.deepEqual(changed.getControl().record.latestSuccess, f.getControl().record.latestSuccess)
+})
+
+test("same-day no-write shortcut still refuses a changed second source-inventory walk", async () => {
+  const f = fixture(); await runRecurringStorageMediaBackup(f, f.context)
+  const changed = fixture({ changedInventory: true }, f.state())
+  changed.budget.checkOptionalWork = async () => { throw new Error("Shortcut must not call budget") }
+  await assert.rejects(runRecurringStorageMediaBackup(changed, changed.context), /existing-daily-success-check/)
+  assert.equal(changed.events.includes("object-write"), false); assert.equal(changed.events.includes("cas"), false)
+  assert.equal(changed.attempts.length, 0); assert.equal(changed.published.length, 0)
 })
 
 test("next-day identical source versions are independently read back and reused without new media writes", async () => {

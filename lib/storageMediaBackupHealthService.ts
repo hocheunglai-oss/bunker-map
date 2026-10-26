@@ -1,3 +1,5 @@
+// Keep orchestration distinct from storageMediaBackupHealth.mjs: extensionless
+// Webpack imports must not resolve the protocol module instead of this service.
 import { createHash } from "node:crypto"
 import type { drive_v3 } from "googleapis"
 import { fcunoConnectionPolicy } from "../config/fcunoConnections"

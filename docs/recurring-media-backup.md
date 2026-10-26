@@ -93,6 +93,7 @@ digests or treat a configuration flag as proof.
 | Existing billing budget | `billingAccounts/018B3D-80BC56-D81278/budgets/75363d19-f390-48ea-b7a5-ee1b84c42554` |
 | Budget notification topic | `projects/bunker-map-drive-uploader/topics/fcuno-backup-budget` |
 | Job pull subscription | `projects/bunker-map-drive-uploader/subscriptions/fcuno-backup-budget-reader` |
+| Schedule-only managed identity | `fcuno-media-backup-scheduler@bunker-map-drive-uploader.iam.gserviceaccount.com` |
 
 ### Budget source and least-privilege access
 
@@ -114,9 +115,15 @@ only to the official billing publisher, not an application user:
 pinning the reviewed trusted operators. Give the existing job account consume
 access on only the named pull subscription. Keep it pull-only, attached to the
 exact topic, without a message filter, push endpoint or dead-letter diversion.
-Use **24-hour message retention**. Bounded draining and generation-CAS protect
-against out-of-order delivery; retention also limits stale backlog. Never
-acknowledge an unverified publication just to clear a queue.
+Use **24-hour message retention**. Bounded polling and generation-CAS protect
+against out-of-order delivery; retention also limits stale backlog. Polling
+continues across up to three consecutive empty replies, with a maximum of 100
+batches. Empty replies do not prove that the queue is empty. Optional copying
+requires a fresh, matching provider publication actually delivered and durably
+handled during that check; cached low-cost evidence plus empty replies cannot
+authorize it. Billing remains a delayed, best-effort signal, not proof of the
+current total cost. Never acknowledge an unverified publication just to clear
+a queue.
 
 The additional project custom role `fcunoBackupGuardMetadataReader` contains
 only these read permissions:
@@ -181,7 +188,10 @@ including daylight saving. A mismatch stays paused and needs review; do not
 accept the current UTC month or change the zone merely to make a test green.
 The maximum observation age is 36 hours. Missing, malformed, stale, wrong-month
 or unauthenticated evidence pauses optional copying, never deletes old copies
-or disables the separate essential Drive backup.
+or disables the separate essential Drive backup. A same-day retry whose exact
+inventory and previous immutable manifest are already verified does no new
+copying and does not require another budget delivery. It returns the existing
+success without publishing a budget warning or a fresh success timestamp.
 
 Re-use `GOOGLE_DRIVE_BACKUP_FOLDER_ID` (or the existing company-folder fallback)
 and any existing shared-drive setting. Preserve all existing secret references;
@@ -214,8 +224,10 @@ node scripts/backup-storage-media-to-gcs.mjs --execute-recurring-daily
 
 Inspect the actual container entrypoint/command before constructing the Cloud
 Run override body: do not prepend a second `node` argument to an existing
-`node` command. The scheduler's invocation identity needs only the tested
-job-execution/override capability for this exact job, not project Editor.
+`node` command. Use the dedicated schedule-only identity above for the tested
+job-execution/override capability on this exact job, not project Editor. It
+has no bucket, Drive or secret access. The running backup continues to use its
+separate, already-pinned data-access identity; no user-managed key is created.
 Record the actual scheduler name, target, service account, override body,
 timezone, retry policy and image digest in private release evidence. A daily
 02:15 Asia/Hong_Kong invocation (`15 2 * * *`) fits the 02:00–06:00 source

@@ -7,7 +7,7 @@ import { requireStorageMediaJobRuntime } from "./storage-media-job-auth.mjs"
 
 const pinned = fcunoConnectionPolicy.storageMediaBackup
 const MAX_CONTROL = 16 * 1024, MAX_JSON = 2 * 1024 * 1024
-const MAX_PULL_BATCHES = 100, PULL_BATCH_SIZE = 20
+const MAX_PULL_BATCHES = 100, PULL_BATCH_SIZE = 20, EMPTY_PULL_RETRIES = 3
 const prefix = `${pinned.targetPrefix}/budget`, objectName = `${prefix}/observation.json`
 const digest = bytes => createHash("sha256").update(bytes).digest("hex")
 const fail = () => { throw new Error("Media backup budget source could not be verified") }
@@ -177,6 +177,7 @@ export function createStorageMediaBudgetRuntime({ runtime, getAccessToken, fetch
   async function ingest(context) {
     await preflight(context)
     let obsolete = []
+    let consecutiveEmpty = 0, currentPublicationRecorded = false
     const [, billingAccountId, budgetId] = /^billingAccounts\/([A-Z0-9-]+)\/budgets\/([A-Za-z0-9_-]+)$/.exec(config.budgetResourceName)
     async function acknowledge(ids) {
       for (let offset = 0; offset < ids.length; offset += PULL_BATCH_SIZE) {
@@ -192,6 +193,7 @@ export function createStorageMediaBudgetRuntime({ runtime, getAccessToken, fetch
       })).value
       const entries = pulled.receivedMessages === undefined ? [] : pulled.receivedMessages
       if (!Array.isArray(entries) || entries.length > PULL_BATCH_SIZE) fail()
+      consecutiveEmpty = entries.length ? 0 : consecutiveEmpty + 1
       const verified = []
       let relevantUnverified = false
       for (const entry of entries) {
@@ -221,6 +223,8 @@ export function createStorageMediaBudgetRuntime({ runtime, getAccessToken, fetch
       for (const selected of verified) {
         await record(selected.observation, context)
         acknowledgements.push(selected.ackId)
+        const decision = evaluateOptionalBackupBudget(selected.observation, { ...config.policy, now: now() })
+        if (["below_optional_pause_threshold", "actual_cost_near_limit", "forecast_reaches_limit"].includes(decision.reason)) currentPublicationRecorded = true
       }
       if (obsolete.length) {
         const durable = await readSelected(null, context, true)
@@ -234,13 +238,17 @@ export function createStorageMediaBudgetRuntime({ runtime, getAccessToken, fetch
         }
       }
       await acknowledge(acknowledgements)
-      if (!entries.length) {
-        if (obsolete.length) fail()
+      if (consecutiveEmpty >= EMPTY_PULL_RETRIES) {
+        // Pub/Sub may return zero even while messages remain available. These
+        // bounded retries are not proof of an empty queue or real-time costs.
+        // Cached cheap evidence plus empty pulls must never authorize work:
+        // require a current matching publication durably handled in THIS run.
+        if (obsolete.length || !currentPublicationRecorded) fail()
         return
       }
     }
-    // Never authorize optional writes when a bounded drain may have left a
-    // newer, more expensive publication unread. Existing copies are untouched.
+    // Exhausting the polling budget is an unknown state, not evidence that
+    // pending cost publications were consumed. Existing copies are untouched.
     fail()
   }
   const transport = {

@@ -75,16 +75,16 @@ export async function runRecurringStorageMediaBackup({ source, gcs, publisher, b
     if (previous && (previous.runId !== initial.record.latestSuccess.runId || previous.finishedAt !== initial.record.latestSuccess.finishedAt || Date.parse(previous.finishedAt) > context.now())) fail()
     const prior = new Map(previous?.copies.map(copy => [key(copy.source), copy]) || [])
     const plannedWriteBytes = inventory.reduce((sum, item) => sum + (prior.has(key(item)) ? 0 : item.sizeBytes), 0)
-    phase = "optional-budget-check"
-    const decision = await budget.checkOptionalWork({ inventory, plannedWriteBytes }, context)
-    if (!decision || typeof decision.allowed !== "boolean" || typeof decision.reason !== "string" || !decision.reason || decision.reason.length > 100) fail()
-    if (decision.allowed && previous && equal(previous.snapshot, snapshot)) {
+    if (previous && equal(previous.snapshot, snapshot)) {
       phase = "existing-daily-success-check"
       if (recurringInventorySha256(validateRecurringInventory(await source.inventory(context))) !== baseline) fail()
       // Do not publish a falsely fresh receipt or overwrite a later failure
       // with the old success's timestamp merely because a scheduler retried.
       return { status: "already-succeeded", runId: previous.runId, copiedObjects: 0, copiedBytes: 0, reusedObjects: previous.copies.length }
     }
+    phase = "optional-budget-check"
+    const decision = await budget.checkOptionalWork({ inventory, plannedWriteBytes }, context)
+    if (!decision || typeof decision.allowed !== "boolean" || typeof decision.reason !== "string" || !decision.reason || decision.reason.length > 100) fail()
     phase = "lease-acquisition"
     if (initial?.record.lease && initial.record.lease.expiresAt > context.now()) throw new Error("Another recurring media backup owns the lease")
     const record = { schema: RECURRING_CONTROL_SCHEMA, fence: (initial?.record.fence || 0) + 1,

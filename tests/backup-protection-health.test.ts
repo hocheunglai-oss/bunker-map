@@ -6,7 +6,7 @@ import { transformSync } from "esbuild"
 import * as policy from "../lib/backupProtectionPolicy"
 import * as files from "../lib/driveFileBackupHealth"
 import * as pricing from "../lib/backupPricingSchema.mjs"
-import * as mediaHealth from "../lib/storageMediaBackupHealth"
+import * as mediaHealth from "../lib/storageMediaBackupHealthService"
 import * as mediaSource from "../lib/storageMediaBackupSource"
 import * as connections from "../config/fcunoConnections"
 import type { HealthCheckResult, SystemHealth } from "../lib/systemHealth"
@@ -35,7 +35,7 @@ function fixture(options: { active?: boolean; driveError?: boolean; verified?: R
     "@/lib/emailNotice": { getEmailNoticeConfigStatus: () => ({ missing: [] }) },
     "@/lib/googleApis": { loadGoogleApis: async () => ({ google: { drive: () => drive, auth: { OAuth2: class { setCredentials() {} } } } }) },
     "@/lib/driveFileBackupHealth": files, "@/lib/backupProtectionPolicy": policy, "@/lib/backupPricingSchema.mjs": pricing,
-    "@/lib/storageMediaBackupHealth": mediaHealth, "@/lib/storageMediaBackupSource": mediaSource,
+    "@/lib/storageMediaBackupHealthService": mediaHealth, "@/lib/storageMediaBackupSource": mediaSource,
     "@/config/fcunoConnections": connections,
   }
   const loaded = { exports: {} as { getSystemHealth(options?: { backupGapObserver?: policy.BackupGapObserver }): Promise<SystemHealth>; fixture: {
