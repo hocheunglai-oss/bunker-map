@@ -43,10 +43,11 @@ test("installed and locked dependencies retain their security fixes", () => {
   ) as { packages: Record<string, PackageVersion> }
   const floors: Record<string, string> = {
     next: "16.4.1",
-    nodemailer: "10.0.13",
+    nodemailer: "10.1.4",
     sharp: "0.35.5",
     "source-map-js": "1.2.2",
     uuid: "11.1.1",
+    zod: "4.6.6",
   }
 
   for (const [name, minimum] of Object.entries(floors)) {
@@ -60,7 +61,7 @@ test("installed and locked dependencies retain their security fixes", () => {
   }
 
   for (const [packagePath, locked] of Object.entries(lock.packages)) {
-    const name = packagePath.match(/(?:^|\/)node_modules\/(next|nodemailer|sharp|source-map-js|uuid|brace-expansion|@img\/sharp-[^/]+)$/)?.[1]
+    const name = packagePath.match(/(?:^|\/)node_modules\/(next|nodemailer|sharp|source-map-js|uuid|zod|brace-expansion|@img\/sharp-[^/]+)$/)?.[1]
     if (!name) continue
     const braceFloors: Record<string, string> = { 1: "1.1.21", 2: "2.1.7", 3: "3.0.9", 5: "5.0.12" }
     const minimum = name === "brace-expansion"
@@ -208,6 +209,124 @@ test("mail comments cannot concatenate a trusted-looking domain with a second do
     const result = await compileEmail({ to: address })
     assert.deepEqual(result.envelope.to, ["user@good.example"], address)
   }
+})
+
+test("nested comments never become mail recipients", async () => {
+  const result = await compileEmail({
+    to: "Victim (x(y) <unintended@example.invalid>) <intended@example.test>",
+  })
+  assert.deepEqual(result.envelope.to, ["intended@example.test"])
+})
+
+test("group display text never becomes a mail recipient", async () => {
+  for (const address of [
+    "G: (a; <unintended@example.invalid>) <intended@example.test>;",
+    'G: "a;" "<unintended@example.invalid>" <intended@example.test>;',
+  ]) {
+    const result = await compileEmail({ to: address })
+    assert.deepEqual(result.envelope.to, ["intended@example.test"], address)
+  }
+})
+
+test("actual notice sender preserves SMTP policy and compiled To CC BCC routing", async t => {
+  const originalCreateTransport = nodemailer.createTransport
+  const originalEnvironment = Object.fromEntries([
+    "EMAIL_NOTICE_FROM", "EXCHANGE_SMTP_HOST", "EXCHANGE_SMTP_PORT",
+    "EXCHANGE_SMTP_USER", "EXCHANGE_SMTP_PASSWORD",
+  ].map(name => [name, process.env[name]]))
+  Object.assign(process.env, {
+    EMAIL_NOTICE_FROM: "FC Uno <notice@example.test>",
+    EXCHANGE_SMTP_HOST: "smtp.example.invalid",
+    EXCHANGE_SMTP_PORT: "587",
+    EXCHANGE_SMTP_USER: "notice@example.test",
+    EXCHANGE_SMTP_PASSWORD: "synthetic-test-password",
+  })
+  t.after(() => {
+    nodemailer.createTransport = originalCreateTransport
+    for (const [name, value] of Object.entries(originalEnvironment)) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  })
+  const envelopes: { from: string | false; to: string[] }[] = []
+  const compiledTransport = originalCreateTransport({
+    streamTransport: true, buffer: true, newline: "windows",
+    disableFileAccess: true, disableUrlAccess: true,
+  })
+  nodemailer.createTransport = ((options: unknown) => {
+    assert.deepEqual(options, {
+      host: "smtp.example.invalid", port: 587, secure: false, requireTLS: true,
+      auth: { user: "notice@example.test", pass: "synthetic-test-password" },
+      tls: { minVersion: "TLSv1.2" },
+    })
+    return {
+      async sendMail(input: SendMailOptions) {
+        const result = await compiledTransport.sendMail(input)
+        envelopes.push(result.envelope)
+        assert.ok(Buffer.isBuffer(result.message))
+        assert.match(result.message.toString("utf8"), /<p>Notice body<\/p>/)
+        return { messageId: result.messageId, accepted: result.envelope.to, rejected: [] }
+      },
+    }
+  }) as typeof nodemailer.createTransport
+  const { sendNoticeEmail } = await import("../lib/emailNotice")
+  const result = await sendNoticeEmail({
+    to: ["Alice Example <alice+calendar@example.test>"],
+    cc: ["Operations <ops@example.test>"], bcc: ["Audit <audit@example.test>"],
+    subject: "Notice check", html: "<p>Notice body</p>",
+  })
+  assert.match(result.id, /^<[^<>]+@example\.test>$/)
+  assert.deepEqual(result.accepted, ["alice+calendar@example.test", "ops@example.test", "audit@example.test"])
+  assert.deepEqual(result.rejected, [])
+  const bccOnly = await sendNoticeEmail({
+    to: [], bcc: ["Audit <audit+only@example.test>"],
+    subject: "Private notice check", html: "<p>Notice body</p>",
+  })
+  assert.deepEqual(bccOnly.accepted, ["audit+only@example.test"])
+  assert.deepEqual(envelopes, [
+    { from: "notice@example.test", to: result.accepted },
+    { from: "notice@example.test", to: bccOnly.accepted },
+  ])
+})
+
+test("quoted angle-address local parts preserve the intended recipient domain", async () => {
+  const parse = require("nodemailer/lib/addressparser") as (value: string) => { address: string }[]
+  for (const address of [
+    '<"a@unintended.example>"@intended.example>',
+    '"a@unintended.example>"@intended.example',
+  ]) {
+    assert.deepEqual(parse(address).map(recipient => recipient.address), ['"a@unintended.example>"@intended.example'])
+    const result = await compileEmail({ to: address })
+    // The SMTP envelope's existing delimiter sanitization is separate from
+    // parsing: neither representation may switch to the display-text domain.
+    assert.deepEqual(result.envelope.to, ['"a@unintended.example "@intended.example'], address)
+  }
+})
+
+test("development schema bounds reject oversized collections before parsing their elements", () => {
+  const { z } = require("zod") as typeof import("zod")
+  for (const kind of ["array", "set", "map"] as const) {
+    let parsedElements = 0
+    const element = z.string().superRefine(() => { parsedElements++ })
+    const values = ["a", "b", "c"]
+    const schema = kind === "array" ? z.array(element).max(2)
+      : kind === "set" ? z.set(element).max(2)
+      : z.map(element, element).max(2)
+    const oversized = kind === "array" ? values
+      : kind === "set" ? new Set(values)
+      : new Map(values.map(value => [value, value]))
+    assert.equal(schema.safeParse(oversized).success, false, kind)
+    assert.equal(parsedElements, 0, `${kind} must reject excess size before element validation`)
+    const ordinary = kind === "array" ? values.slice(0, 2)
+      : kind === "set" ? new Set(values.slice(0, 2))
+      : new Map(values.slice(0, 2).map(value => [value, value]))
+    assert.equal(schema.safeParse(ordinary).success, true, `${kind} keeps bounded valid input`)
+    assert.equal(parsedElements, kind === "map" ? 4 : 2, kind)
+  }
+  // An earlier rewrite may legitimately shrink a collection before its bound;
+  // the security fix must not move that later check ahead of the rewrite.
+  const rewritten = z.array(z.string()).overwrite(values => values.slice(0, 2)).max(2)
+  assert.deepEqual(rewritten.parse(["a", "b", "c"]), ["a", "b"])
 })
 
 test("mail domain normalization follows IDN mapping without URL-style truncation", async () => {
