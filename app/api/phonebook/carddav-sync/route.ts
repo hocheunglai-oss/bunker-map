@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server"
 import { performance } from "node:perf_hooks"
 import { createClient } from "@supabase/supabase-js"
-import { requireAdminPagePermission } from "@/lib/adminAuth"
+import { requireAdminPagePermission, requireAdminSession } from "@/lib/adminAuth"
+import { isAdminRole } from "@/lib/adminPages"
 import { observePhonebookCarddavSemanticShadow } from "@/lib/phonebookCarddavSemanticShadow"
 
-import { SYNC_BATCH_SIZE, SyncError, safeSyncError, logSyncFailure, logVerifiedContacts, requireEnv, getCardDavConfig, readSavedContactIds, readCardDavInventoryXml, countAddressBookCards, inspectOtherCards, validateSyncRequest, deleteCard, fetchContacts, putContact, type SyncStage, acquireCardDavWriteLease, readCardDavQueueVersions, acknowledgeCardDavQueue } from "@/lib/phonebookCarddav"
+import { SYNC_BATCH_SIZE, SyncError, safeSyncError, logSyncFailure, logVerifiedContacts, requireEnv, getCardDavConfig, getCardDavAddressBookUrl, readSavedContactIds, readCardDavInventoryXml, countAddressBookCards, inspectOtherCards, validateSyncRequest, deleteCard, fetchContacts, putContact, type SyncStage, acquireCardDavWriteLease, readCardDavQueueVersions, acknowledgeCardDavQueue } from "@/lib/phonebookCarddav"
 
 export const maxDuration = 300
 
@@ -52,9 +53,33 @@ function safeDiagnosticSummary(value: Record<string, unknown> | null, commit: st
 
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams
+  const configurationRequested = params.has("configuration")
   const contentRequested = params.getAll("verifyContent").includes("1")
   const requestStartedMonotonicMs = contentRequested ? performance.now() : 0
   try {
+    if (configurationRequested) {
+      // Authenticate the actual ADMIN role before query validation or reading
+      // configuration. Phonebook View/Edit alone must not disclose it.
+      const session = await requireAdminSession()
+      if (!isAdminRole(session.role)) throw new Error("Forbidden")
+      if (params.getAll("configuration").length !== 1 || params.get("configuration") !== "1" || [...params.keys()].some((key) => key !== "configuration")) {
+        return diagnosticJson({ message: "Use configuration=1 without other parameters." }, 400)
+      }
+      // Configuration only: no credentials, business reads, provider requests,
+      // synchronization, or claim that the provider connection is healthy.
+      const hostname = new URL(getCardDavAddressBookUrl()).hostname
+      const environment = process.env.VERCEL_ENV
+      const commit = process.env.DEPLOY_COMMIT || process.env.NEXT_PUBLIC_DEPLOY_COMMIT || process.env.VERCEL_GIT_COMMIT_SHA || ""
+      return diagnosticJson({
+        hostname,
+        deployment: {
+          environment: ["production", "preview", "development"].includes(environment || "") ? environment : null,
+          commit: /^[a-f0-9]{40}$/.test(commit) ? commit : null,
+        },
+        connectivity: "not_checked",
+        checkedAt: new Date().toISOString(),
+      }, 200)
+    }
     await requireAdminPagePermission("phonebook", "view")
     if (contentRequested) {
       const window = fixedDiagnosticWindow(params)
@@ -121,8 +146,9 @@ export async function GET(request: Request) {
   } catch (error) {
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
       const status = error.message === "Unauthorized" ? 401 : 403
-      return contentRequested ? diagnosticJson({ message: error.message }, status) : NextResponse.json({ message: error.message }, { status })
+      return contentRequested || configurationRequested ? diagnosticJson({ message: error.message }, status) : NextResponse.json({ message: error.message }, { status })
     }
+    if (configurationRequested) return diagnosticJson({ message: "CardDAV configuration unavailable." }, 503)
     if (contentRequested) return diagnosticJson({ message: "CardDAV content verification did not complete." }, 503)
     const safeError = safeSyncError(error, "verification")
     logSyncFailure(undefined, safeError)
