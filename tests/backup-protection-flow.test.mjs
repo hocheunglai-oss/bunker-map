@@ -7,6 +7,8 @@ import { gapFixtureSql, h1, h2, c1, c2 } from "./fixtures/backup-protection-gaps
 import * as pricing from "../lib/backupPricingSchema.mjs"
 import * as mediaHealth from "../lib/storageMediaBackupHealthService.ts"
 import * as mediaSource from "../lib/storageMediaBackupSource.ts"
+import * as attendanceExceptions from "../lib/attendanceAutoConfirmPolicy.ts"
+import * as attendanceRules from "../lib/attendanceRules.ts"
 
 // Required local PostgreSQL runtime: fail clearly if missing, never contact a
 // hosted database or quietly skip the notification/clock integration boundary.
@@ -66,6 +68,7 @@ function actualFileHealth(activeFiles, manifests, now, observer) {
     "@/lib/driveFileBackupHealth": files, "@/lib/backupProtectionPolicy": policy, "@/lib/backupPricingSchema.mjs": pricing,
     "@/lib/storageMediaBackupHealthService": mediaHealth, "@/lib/storageMediaBackupSource": mediaSource,
     "@/config/fcunoConnections": config,
+    "@/lib/attendanceAutoConfirmPolicy": attendanceExceptions, "@/lib/attendanceRules": attendanceRules,
   }
   const loaded = { exports: {} }
   const code = transformSync(readFileSync(new URL("../lib/systemHealth.ts", import.meta.url), "utf8"), { loader: "ts", format: "cjs", target: "node24" }).code

@@ -9,6 +9,8 @@ import { parsePricingBackupSchemaVersion, pricingBackupSchemaFromArtifact, prici
 import { evaluateStorageMediaBackupHealth, readStorageMediaHealthReceipt } from "@/lib/storageMediaBackupHealthService"
 import { createSupabaseStorageReadProvider, readCurrentStorageMediaInventoryStatus } from "@/lib/storageMediaBackupSource"
 import { fcunoConnectionPolicy } from "@/config/fcunoConnections"
+import { hasCyDingTalkAutoConfirmException, hasJzDingTalkAutoConfirmException } from "@/lib/attendanceAutoConfirmPolicy"
+import { hktDateFromTimestamp } from "@/lib/attendanceRules"
 
 export type HealthStatus = "ok" | "warning" | "error"
 
@@ -1333,19 +1335,15 @@ async function checkAttendanceSync(): Promise<HealthCheckResult> {
   )
   const [
     activeResponse,
-    mappedResponse,
     currentGroupResponse,
     latestResponse,
   ] = await Promise.all([
     supabase
       .from("attendance_people")
-      .select("id", { count: "exact", head: true })
-      .eq("is_active", true),
-    supabase
-      .from("attendance_people")
-      .select("id", { count: "exact", head: true })
+      .select("id,admin_user_id,staff_code,dingtalk_user_id", { count: "exact" })
       .eq("is_active", true)
-      .not("dingtalk_user_id", "is", null),
+      .order("id", { ascending: true })
+      .limit(SUPABASE_HEALTH_PAGE_SIZE),
     supabase
       .from("attendance_team_assignments")
       .select("person_id", { count: "exact", head: true })
@@ -1361,20 +1359,44 @@ async function checkAttendanceSync(): Promise<HealthCheckResult> {
   ])
 
   if (activeResponse.error) throw activeResponse.error
-  if (mappedResponse.error) throw mappedResponse.error
   if (currentGroupResponse.error) throw currentGroupResponse.error
   if (latestResponse.error) throw latestResponse.error
 
-  const activePeople = activeResponse.count || 0
-  const mappedPeople = mappedResponse.count || 0
+  // Counts alone cannot distinguish an approved exception from a missing
+  // employee link. Use the same identity-pinned, effective-period policy as
+  // monthly confirmation, without changing that policy or any attendance data.
+  const people = activeResponse.data
+  if (!Array.isArray(people) || !Number.isSafeInteger(activeResponse.count) ||
+      activeResponse.count !== people.length) throw new Error("Active attendance mapping inventory is incomplete")
+  const now = Date.now()
+  const [year, month] = hktDateFromTimestamp(now).split("-").map(Number)
+  const period = { year, month }, personIds = new Set<string>()
+  let mappedPeople = 0, approvedMappingExceptions = 0
+  for (const row of people) {
+    if (typeof row.id !== "string" || !row.id || personIds.has(row.id) ||
+        typeof row.staff_code !== "string" ||
+        (row.admin_user_id !== null && typeof row.admin_user_id !== "string") ||
+        (row.dingtalk_user_id !== null && typeof row.dingtalk_user_id !== "string")) {
+      throw new Error("Active attendance mapping inventory could not be verified")
+    }
+    personIds.add(row.id)
+    if (typeof row.dingtalk_user_id === "string" && row.dingtalk_user_id.trim()) {
+      mappedPeople++
+    } else {
+      const person = { id: row.id, adminUserId: row.admin_user_id, staffCode: row.staff_code }
+      if (hasCyDingTalkAutoConfirmException(person, period) || hasJzDingTalkAutoConfirmException(person, period)) approvedMappingExceptions++
+    }
+  }
+  const activePeople = people.length
+  const missingRequiredMappings = activePeople - mappedPeople - approvedMappingExceptions
   const currentGroupAssignments = currentGroupResponse.count || 0
   const latest = latestResponse.data
   const startedAt = latest?.started_at ? Date.parse(latest.started_at) : 0
   const ageMinutes = startedAt
-    ? Math.max(0, Math.round((Date.now() - startedAt) / 60_000))
+    ? Math.max(0, Math.round((now - startedAt) / 60_000))
     : null
   const stale = ageMinutes !== null && ageMinutes > 60
-  const incompleteMappings = mappedPeople < activePeople
+  const incompleteMappings = missingRequiredMappings > 0
   const latestStatus = String(latest?.status || "never")
   const unhealthyRun = ["failed", "partial"].includes(latestStatus)
 
@@ -1382,7 +1404,7 @@ async function checkAttendanceSync(): Promise<HealthCheckResult> {
   if (!configured) warnings.push("DingTalk credentials are not configured")
   if (!activePeople) warnings.push("no active attendance people are configured")
   if (incompleteMappings) {
-    warnings.push(`${activePeople - mappedPeople} active people need a DingTalk user mapping`)
+    warnings.push(`${missingRequiredMappings} active people need a DingTalk user mapping`)
   }
   if (currentGroupAssignments !== activePeople) {
     warnings.push("active attendance people and current group history do not match")
@@ -1400,6 +1422,8 @@ async function checkAttendanceSync(): Promise<HealthCheckResult> {
       configured,
       activePeople,
       mappedPeople,
+      approvedMappingExceptions,
+      missingRequiredMappings,
       currentGroupAssignments,
       latestStatus,
       latestStartedAt: latest?.started_at || null,

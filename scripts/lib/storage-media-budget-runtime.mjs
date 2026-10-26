@@ -71,8 +71,11 @@ function bounded(operation, signal, onLate) {
   })
 }
 
-// These are resource-local IAM roles only. A custom or newly introduced role
-// is not guessed safe: the deployment must review it before optional work.
+// These are resource-local IAM roles only. The one reviewed metadata role is
+// accepted on the pinned topic only for the existing job's sole unconditional
+// binding. Deployment must read back its exact three read-only permissions;
+// its name is not runtime proof of its definition. Project admins and the job
+// remain trusted. Every other custom/new role still pauses optional work.
 function verifyResourceIam(value, kind, trusted) {
   if (!value || !Array.isArray(value.bindings) || value.bindings.length > 200) fail()
   const readers = new Set(kind === "bucket" ? ["roles/storage.objectViewer", "roles/storage.legacyBucketReader", "roles/storage.legacyObjectReader"] : ["roles/pubsub.viewer", "roles/pubsub.subscriber"])
@@ -80,6 +83,11 @@ function verifyResourceIam(value, kind, trusted) {
   let expected = false
   for (const binding of value.bindings) {
     if (!binding || !Array.isArray(binding.members) || !binding.members.length || binding.members.length > 1000) fail()
+    if (binding.role === `projects/${pinned.googleProjectId}/roles/fcunoBackupGuardMetadataReader`) {
+      if (kind !== "topic" || Object.hasOwn(binding, "condition") || binding.members.length !== 1 ||
+          binding.members[0] !== `serviceAccount:${pinned.googleServiceAccount}`) fail()
+      continue
+    }
     if (readers.has(binding.role)) continue
     if (!writers.has(binding.role) || binding.members.some(member => !trusted.has(member))) fail()
     if (!binding.condition && binding.members.some(member => trusted.has(member))) expected = true
