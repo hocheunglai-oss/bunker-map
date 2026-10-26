@@ -132,11 +132,45 @@ only these read permissions:
 - `pubsub.topics.getIamPolicy`
 - `pubsub.subscriptions.get`
 
-Bind it to the existing job service account with a condition restricted to the
-exact bucket, topic and subscription resource names above. Read back the live
-binding and prove the condition permits those reads and refuses unrelated
-resources. A general Viewer role does not supply the needed IAM-policy reads;
-do not broaden this to Owner, Editor, Billing Administrator or new credentials.
+Use the exact role
+`projects/bunker-map-drive-uploader/roles/fcunoBackupGuardMetadataReader`
+with these separate scopes:
+
+- Keep its project-level binding restricted **only** to
+  `resource.name == "projects/_/buckets/bunker-map-drive-uploader-bunker-map-drive-file-backups"`.
+- Bind that same role directly on the exact topic and directly on the exact
+  subscription above. Both resource-local bindings must be unconditional
+  (no `condition` field), with the existing job service account as their sole
+  member:
+  `serviceAccount:bunker-map-drive-backup@bunker-map-drive-uploader.iam.gserviceaccount.com`.
+  Preserve the subscription's separate consume-only grant.
+
+Do not put Pub/Sub names into the project condition or substitute a project
+number to make it match. Google's [supported condition attributes](https://docs.cloud.google.com/iam/docs/conditions-attribute-reference)
+list resource-name support for Pub/Sub **Lite**, not standard Pub/Sub; an
+unavailable attribute cannot grant access. Google supports
+[project custom roles on resources in that project](https://docs.cloud.google.com/iam/docs/roles-overview#custom_roles)
+and [resource-local Pub/Sub IAM bindings](https://docs.cloud.google.com/pubsub/docs/access-control).
+The [Pub/Sub permission reference](https://docs.cloud.google.com/iam/docs/roles-permissions/pubsub)
+also shows why Viewer alone is insufficient: Pub/Sub Viewer includes
+`pubsub.subscriptions.get`, but not `pubsub.topics.getIamPolicy`; Subscriber
+does not supply either metadata read. Do not replace this narrow role with
+Owner, Editor, Billing Administrator or new credentials.
+
+Read back the actual custom-role definition, record its etag and SHA-256 in
+private deployment evidence, and require exactly the three read permissions
+listed above. Audit both direct bindings and the Storage-only condition.
+Then prove the exact reads succeed and unrelated resource reads are refused
+from the running job's data identity, not merely the administrator's session.
+The runtime's topic-policy check accepts this custom role only by that exact
+role path, absent condition and sole pinned job-account member; it never
+accepts this exception on the bucket. Runtime checks the subscription's
+identity and configuration, not its complete IAM policy or the custom-role
+definition. Definition review remains a deployment responsibility. Existing
+highly trusted role administrators can change a custom role's permissions;
+that trusted-administrator boundary is not eliminated by the runtime's name
+and member checks. Do not describe the role name itself as permission proof.
+
 The job additionally reuses its already-approved bucket object access and
 existing Drive OAuth credential. Google metadata ADC must identify the pinned
 service account; local gcloud credentials, service-account key files and Mac

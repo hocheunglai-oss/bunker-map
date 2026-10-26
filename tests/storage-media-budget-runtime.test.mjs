@@ -89,6 +89,49 @@ test("unrelated read-only IAM additions do not trip brittle full-policy fingerpr
   assert.equal((await f.budget.checkOptionalWork({}, context())).allowed, true)
 })
 
+test("the deployment-reviewed metadata role is accepted only as the exact job's topic reader, not as a publisher", async () => {
+  const conf = config(), f = fixture({ topicBindings: [
+    { role: "roles/pubsub.publisher", members: conf.trustedPublisherMembers },
+    { role: `projects/${pinned.googleProjectId}/roles/fcunoBackupGuardMetadataReader`, members: [`serviceAccount:${pinned.googleServiceAccount}`] },
+  ] })
+  assert.equal((await f.budget.checkOptionalWork({}, context())).allowed, true)
+  assert.deepEqual(f.acknowledgements, ["synthetic-100"]); assert.equal(f.writes.length, 1)
+  assert.equal(f.latest().sourceMessageId, "100")
+  assert.equal(conf.trustedPublisherMembers.includes(`serviceAccount:${pinned.googleServiceAccount}`), false)
+})
+
+test("metadata-role exceptions never admit a foreign role, bucket, condition or expanded principal set", async t => {
+  const conf = config(), role = `projects/${pinned.googleProjectId}/roles/fcunoBackupGuardMetadataReader`
+  const job = `serviceAccount:${pinned.googleServiceAccount}`, publisher = { role: "roles/pubsub.publisher", members: conf.trustedPublisherMembers }
+  const metadata = { role, members: [job] }
+  const topic = binding => ({ topicBindings: [publisher, binding] })
+  for (const [name, options] of Object.entries({
+    bucket: { bucketBindings: [{ role: "roles/storage.objectAdmin", members: conf.trustedWriterMembers }, metadata] },
+    foreignProject: topic({ ...metadata, role: "projects/foreign-project/roles/fcunoBackupGuardMetadataReader" }),
+    organizationRole: topic({ ...metadata, role: "organizations/123456789/roles/fcunoBackupGuardMetadataReader" }),
+    unknownLocalRole: topic({ ...metadata, role: `projects/${pinned.googleProjectId}/roles/unreviewedMetadataReader` }),
+    roleSuffix: topic({ ...metadata, role: `${role}Extra` }),
+    otherServiceAccount: topic({ ...metadata, members: ["serviceAccount:other@example.test"] }),
+    trustedPublisherIsNotJob: topic({ ...metadata, members: conf.trustedPublisherMembers }),
+    additionalUnknownMember: topic({ ...metadata, members: [job, "user:stranger@example.test"] }),
+    additionalTrustedMember: topic({ ...metadata, members: [job, ...conf.trustedPublisherMembers] }),
+    duplicateMember: topic({ ...metadata, members: [job, job] }),
+    publicMember: topic({ ...metadata, members: ["allUsers"] }),
+    conditional: topic({ ...metadata, condition: { title: "restricted", expression: "resource.name == 'synthetic'" } }),
+    emptyCondition: topic({ ...metadata, condition: {} }),
+    nullCondition: topic({ ...metadata, condition: null }),
+    emptyMembers: topic({ ...metadata, members: [] }),
+    unknownOtherBinding: { topicBindings: [publisher, metadata, { role: "projects/foreign-project/roles/unknown", members: [job] }] },
+    noActualPublisher: { topicBindings: [metadata] },
+    conditionalPublisher: { topicBindings: [metadata, { ...publisher, condition: { expression: "true" } }] },
+  })) await t.test(name, async () => {
+    const f = fixture(options), result = await f.budget.checkOptionalWork({}, context())
+    assert.equal(result.allowed, false); assert.equal(result.reason, "budget_control_unavailable")
+    assert.equal(f.calls.some(item => item[0].includes(":pull")), false)
+    assert.equal(f.writes.length, 0); assert.deepEqual(f.acknowledgements, [])
+  })
+})
+
 test("legacy bucket project writer groups require exact pinned project and deployment-reviewed allowlist", () => {
   const conf = config()
   for (const role of ["projectOwner", "projectEditor"]) {

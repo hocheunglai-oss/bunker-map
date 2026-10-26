@@ -9,6 +9,8 @@ import * as pricing from "../lib/backupPricingSchema.mjs"
 import * as mediaHealth from "../lib/storageMediaBackupHealthService"
 import * as mediaSource from "../lib/storageMediaBackupSource"
 import * as connections from "../config/fcunoConnections"
+import * as attendanceExceptions from "../lib/attendanceAutoConfirmPolicy"
+import * as attendanceRules from "../lib/attendanceRules"
 import type { HealthCheckResult, SystemHealth } from "../lib/systemHealth"
 
 function fixture(options: { active?: boolean; driveError?: boolean; verified?: Record<string, unknown>; inventory?: Record<string, unknown>; corrupt?: boolean; readFailure?: boolean } = {}) {
@@ -37,6 +39,7 @@ function fixture(options: { active?: boolean; driveError?: boolean; verified?: R
     "@/lib/driveFileBackupHealth": files, "@/lib/backupProtectionPolicy": policy, "@/lib/backupPricingSchema.mjs": pricing,
     "@/lib/storageMediaBackupHealthService": mediaHealth, "@/lib/storageMediaBackupSource": mediaSource,
     "@/config/fcunoConnections": connections,
+    "@/lib/attendanceAutoConfirmPolicy": attendanceExceptions, "@/lib/attendanceRules": attendanceRules,
   }
   const loaded = { exports: {} as { getSystemHealth(options?: { backupGapObserver?: policy.BackupGapObserver }): Promise<SystemHealth>; fixture: {
     checkDriveBackup(observer?: policy.BackupGapObserver): Promise<HealthCheckResult>
