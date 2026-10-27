@@ -8,6 +8,14 @@ const { chromium, webkit } = require("playwright")
 const { createHomepageMarketApp } = require("./fixtures/homepage-market-app.cjs")
 const root = path.resolve(__dirname, ".."), results = []
 const tile = '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256"><path fill="#071a2c" d="M0 0h256v256H0z"/><path fill="none" stroke="#12334b" d="M0 0h256v256H0zM128 0v256M0 128h256"/></svg>'
+async function bounded(promise, label) {
+  let timer
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(Error(label + " did not start within12s")), 12000)
+    })])
+  } finally { clearTimeout(timer) }
+}
 async function main() {
   const output = process.env.HOMEPAGE_SCREENSHOTS
   assert.ok(output && path.isAbsolute(output), "Use an owned absolute evidence directory")
@@ -28,7 +36,7 @@ async function main() {
   const assets = new Map(bundle.outputFiles.map(file => ["/" + path.basename(file.path), file.contents]))
   const script = [...assets.keys()].find(name => name.endsWith(".js")), css = [...assets.keys()].filter(name => name.endsWith(".css"))
   const globalCss = (await postcss([tailwind()]).process(fs.readFileSync(path.join(root, "app/globals.css"), "utf8"), { from: path.join(root, "app/globals.css") })).css
-  let app = createHomepageMarketApp(), apiReads = 0
+  let app = createHomepageMarketApp(), apiReads = 0, recoveryHold = null
   const serverErrors = []
   const server = http.createServer(async (request, response) => {
     try {
@@ -39,7 +47,15 @@ async function main() {
       if (url.pathname === "/uno-transparent.png") { response.setHeader("Content-Type", "image/png"); return response.end(fs.readFileSync(path.join(root, "public/uno-transparent.png"))) }
       if (url.pathname === "/favicon.ico") { response.writeHead(204); return response.end() }
       if (url.pathname === "/api/homepage-data") {
-        apiReads++; const result = await app.route.GET()
+        apiReads++
+        if (app.state.recoverOnClientRead) {
+          app.state.recoverOnClientRead = false
+          app.state.fallbackFailure = false
+          const hold = recoveryHold
+          hold.started.resolve()
+          await hold.release.promise
+        }
+        const result = await app.route.GET()
         response.writeHead(result.status, Object.fromEntries(result.headers)); return response.end(await result.text())
       }
       assert.equal(url.pathname, "/")
@@ -113,7 +129,20 @@ async function main() {
             await page.goto(origin); await ready(); await error().waitFor()
             assert.equal(await page.getByText("INVALID", { exact: true }).count(), 0)
             await shot("corrupt-settings-unavailable")
-            app = createHomepageMarketApp(); await page.reload(); await ready(); await select(); await shot("recovered-markers")
+            // A transient initial server failure must recover in the same
+            // mounted page, not only after a user reload. Hold the real GET
+            // while checking the unavailable state and StrictMode cleanup.
+            app = createHomepageMarketApp({ fallbackFailure: true, recoverOnClientRead: true })
+            recoveryHold = { started: Promise.withResolvers(), release: Promise.withResolvers() }
+            const readsBeforeRecovery = apiReads
+            try {
+              await page.goto(origin); await ready(); await bounded(recoveryHold.started.promise, "Cold-failure client retry"); await error().waitFor()
+              assert.equal(apiReads - readsBeforeRecovery, 1, "Queued StrictMode/unmount cleanup prevents duplicate retry requests")
+              await shot("cold-failure-client-retry-pending")
+              recoveryHold.release.resolve()
+              await select(); await shot("recovered-markers")
+              assert.equal(apiReads - readsBeforeRecovery, 1, "Recovery performs one bounded retry, not polling")
+            } finally { recoveryHold.release.resolve(); recoveryHold = null }
             assert.equal(await error().count(), 0)
             assert.deepEqual(errors, []); assert.deepEqual(external, [])
             results.push({ engine, width, scheme, publicSignedOut: true, screenshots, apiStatuses: statuses, pageErrors: errors, externalRequests: external })
@@ -128,6 +157,6 @@ async function main() {
       limits: "Actual components/reader/route and initial server-page data; synthetic SDK/Next cache/rendering primitives, map tiles and overview widget. Not hosted SSR/CDN, real provider or physical-device evidence. Existing homepage night palette exercised under both OS preferences." }
     fs.writeFileSync(path.join(output, "receipt.json"), JSON.stringify(receipt, null, 2) + "\n")
     console.log(JSON.stringify(receipt))
-  } finally { await new Promise(resolve => server.close(resolve)) }
+  } finally { recoveryHold?.release.resolve(); await new Promise(resolve => server.close(resolve)) }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

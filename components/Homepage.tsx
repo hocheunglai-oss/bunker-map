@@ -440,8 +440,12 @@ export default function Homepage({ initialData, onReady }: HomepageProps) {
       refreshTimer = window.setTimeout(() => {
         void loadHomepageData(false)
       }, 60000)
-    } else if (!initialData?.unavailable) {
-      void loadHomepageData(true)
+    } else {
+      // Retain the truthful unavailable state during one client retry. Queue
+      // it so an unmount (including StrictMode's first pass) cancels the work.
+      refreshTimer = window.setTimeout(() => {
+        void loadHomepageData(!initialData?.unavailable)
+      }, 0)
     }
 
     return () => {
