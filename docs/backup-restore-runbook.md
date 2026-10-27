@@ -143,6 +143,31 @@ during export invalidates that attempt. The offline validator checks section
 hashes, references to raw punches and people, resolution links, and that an open
 discrepancy has no confirmed month.
 
+### Separate annual attendance approvals (27 October 2026)
+
+The additive `separate_attendance_annual_confirmations` capability stores annual
+approvals in `attendance_annual_confirmations`, not in December monthly rows.
+Its backup section, `attendanceAnnualConfirmations`, is included only when the
+inventory RPC proves that exact applied migration name and every observed column
+and the existing mutation-fence check passes. A newer, unrelated migration head
+does not enable this section. New artifacts preserve the evidence as
+`databaseInventory.attendanceSchema`; Drive stores the compact
+`attendanceSchemaVersion` (`none` or `annual-v1`) within its private-property limits.
+The schema proof is checked again after export. Historical artifacts without the
+capability or annual table remain readable; missing installed tables, columns,
+fences or claimed evidence fail validation rather than silently omitting records.
+
+Offline validation checks each annual row's person reference, unique person/year,
+year range, status, confirmation fields and nonnegative exact source revision.
+It also rejects a confirmed year with an unresolved correction affecting either
+the original or incoming person/year, or an unresolved missing punch in that year.
+All four private anomaly/resolution sections remain required and unchanged.
+This JSON export does **not** export the private source-revision singleton and is
+not a full PostgreSQL restore. The REST restore remains disabled: do not reconstruct
+confirmation freshness from a row revision or use this extension to reopen it.
+The dated 126-table isolated recovery receipt remains historical evidence, not
+proof that this later annual schema has already been restored or deployed.
+
 Before enabling attendance confirmation after a whole-database restore, check
 that all four private tables and their confirmation guard, source revision
 triggers, and RPC grants were restored. Match their row counts to the chosen

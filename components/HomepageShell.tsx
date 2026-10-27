@@ -4,7 +4,7 @@ import { buildFallbackKey, type FallbackMap } from "@/lib/reportFallbackKeys"
 import { resolvePortFuelValue } from "@/lib/portPricing"
 
 type HomepageShellProps = {
-  initialData: HomepageMarketData
+  initialData: HomepageMarketData & { unavailable?: boolean }
 }
 
 type ShellPort = PublicPort
@@ -209,8 +209,8 @@ export default function HomepageShell({ initialData }: HomepageShellProps) {
               </div>
             ))
           ) : (
-            <div style={{ ...panelSectionStyle, padding: "12px", color: "#abd8ff", fontSize: "13px", fontWeight: 700 }}>
-              Market data is loading.
+            <div role={initialData.unavailable ? "status" : undefined} style={{ ...panelSectionStyle, padding: "12px", color: initialData.unavailable ? "#ffd8a8" : "#abd8ff", fontSize: "13px", fontWeight: 700 }}>
+              {initialData.unavailable ? "Market data is temporarily unavailable." : "Market data is loading."}
             </div>
           )}
         </div>

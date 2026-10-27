@@ -5,6 +5,7 @@ import test from "node:test"
 import { transformSync } from "esbuild"
 import { gapFixtureSql, h1, h2, c1, c2 } from "./fixtures/backup-protection-gaps-sql.mjs"
 import * as pricing from "../lib/backupPricingSchema.mjs"
+import * as attendanceSchema from "../lib/backupAttendanceSchema.mjs"
 import * as mediaHealth from "../lib/storageMediaBackupHealthService.ts"
 import * as mediaSource from "../lib/storageMediaBackupSource.ts"
 import * as attendanceExceptions from "../lib/attendanceAutoConfirmPolicy.ts"
@@ -66,6 +67,7 @@ function actualFileHealth(activeFiles, manifests, now, observer) {
     "@/lib/emailNotice": { getEmailNoticeConfigStatus: () => ({ missing: [] }) },
     "@/lib/googleApis": { loadGoogleApis: async () => ({ google: { drive: () => drive, auth: { OAuth2: class { setCredentials() {} } } } }) },
     "@/lib/driveFileBackupHealth": files, "@/lib/backupProtectionPolicy": policy, "@/lib/backupPricingSchema.mjs": pricing,
+    "@/lib/backupAttendanceSchema.mjs": attendanceSchema,
     "@/lib/storageMediaBackupHealthService": mediaHealth, "@/lib/storageMediaBackupSource": mediaSource,
     "@/config/fcunoConnections": config,
     "@/lib/attendanceAutoConfirmPolicy": attendanceExceptions, "@/lib/attendanceRules": attendanceRules,

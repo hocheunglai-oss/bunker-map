@@ -27,6 +27,7 @@ import {
   saveAttendanceLeaveRange,
   saveAttendanceMonthlyAdjustment,
   saveAttendanceMonthlyConfirmation,
+  saveAttendanceAnnualConfirmation,
   saveAttendanceOverride,
   saveAttendancePerson,
   saveAttendanceRoster,
@@ -168,7 +169,7 @@ export async function POST(request: Request) {
     const client = createAdminAuditedSupabaseClient(context, { useServiceRole: true })
     const canEdit = hasAdminPagePermission(session, ATTENDANCE_PAGE_ID, "edit")
 
-    if (action === "save-confirmation") {
+    if (action === "save-confirmation" || action === "save-annual-confirmation") {
       const confirmationInput = payload.confirmation
       const confirmationRow =
         confirmationInput &&
@@ -188,6 +189,10 @@ export async function POST(request: Request) {
             )
           : false
         if (!ownsPerson) throw new Error("Forbidden")
+      }
+      if (action === "save-annual-confirmation") {
+        const annualConfirmation = await saveAttendanceAnnualConfirmation(client, confirmationInput, actor)
+        return privateJson({ success: true, annualConfirmation })
       }
       const confirmation = await saveAttendanceMonthlyConfirmation(
         client,

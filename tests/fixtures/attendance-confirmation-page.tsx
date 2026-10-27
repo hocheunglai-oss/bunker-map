@@ -7,7 +7,7 @@ import { installAttendanceConfirmationHarness } from "./attendance-confirmation-
 installAttendanceConfirmationHarness()
 createRoot(document.getElementById("root")!).render(
   <>
-    <aside style={{ padding: "8px 18px", background: "#fff7d1", fontSize: "12px" }}>
+    <aside style={{ padding: "8px 18px", background: "#fff7d1", color: "#513f00", fontSize: "12px" }}>
       Synthetic local attendance confirmation test. No production services or attendance records are used.
     </aside>
     <main className="fc-admin-scope">

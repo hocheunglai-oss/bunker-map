@@ -151,22 +151,6 @@ function getSupabaseClient() {
   return cachedSupabaseClient
 }
 
-function parseJson<T>(content: string | null | undefined): T | null {
-  if (!content) return null
-
-  try {
-    return JSON.parse(content) as T
-  } catch {
-    return null
-  }
-}
-
-function parseFallbackMap(content: string | null | undefined): FallbackMap {
-  const parsed = parseJson<FallbackMap>(content)
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {}
-  return parsed
-}
-
 export function isReportSnapshotKey(key: string): key is ReportSnapshotKey {
   return Object.prototype.hasOwnProperty.call(REPORT_SNAPSHOT_IDS, key)
 }
@@ -183,10 +167,21 @@ async function loadHomepageMarketData(): Promise<HomepageMarketData> {
   ])
 
   if (portsResult.error) throw portsResult.error
+  if (fallbackResult.error) throw fallbackResult.error
+  if (!Array.isArray(portsResult.data)
+    || fallbackResult.data !== null && (typeof fallbackResult.data !== "object" || Array.isArray(fallbackResult.data)
+      || !Object.hasOwn(fallbackResult.data, "content")
+      || fallbackResult.data.content !== null && typeof fallbackResult.data.content !== "string")) {
+    throw Error("Public homepage read was incomplete")
+  }
+  // A confirmed absent/empty setting remains empty. An unreadable or damaged
+  // setting must not become a cacheable success with different price markers.
+  const fallbackValue = parsePublicReportJson(fallbackResult.data?.content)
+  const fallbacks = fallbackValue === null ? {} : validatePublicFallbacks(fallbackValue)
 
   return {
-    ports: (portsResult.data || []) as unknown as PublicPort[],
-    fallbacks: fallbackResult.error ? {} : parseFallbackMap(fallbackResult.data?.content),
+    ports: portsResult.data as unknown as PublicPort[],
+    fallbacks,
   }
 }
 

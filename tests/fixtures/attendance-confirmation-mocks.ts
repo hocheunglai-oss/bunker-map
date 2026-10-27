@@ -6,10 +6,13 @@ type Permission = "view" | "edit" | "none"
 type Row = Record<string, unknown>
 type Harness = {
   permission: Permission
+  signedIn: boolean
   currentYear: number
   currentMonth: number
   requests: Array<{ method: string; url: string; body: Row | null }>
   confirmations: Record<string, Row>
+  annualConfirmations: Record<string, Row>
+  annualConfirmationAvailable: boolean
   failNextConfirmation: boolean
   holdNextConfirmation: boolean
   releaseConfirmation: (() => void) | null
@@ -46,8 +49,8 @@ export function installAttendanceConfirmationHarness() {
   const permission: Permission = requested === "edit" || requested === "none" ? requested : "view"
   permissions["attendance-record"] = permission
   const state: Harness = {
-    permission, currentYear: Number(dateParts.year), currentMonth: Number(dateParts.month),
-    requests: [], confirmations: {}, failNextConfirmation: false,
+    permission, signedIn: requested !== "signed-out", currentYear: Number(dateParts.year), currentMonth: Number(dateParts.month),
+    requests: [], confirmations: {}, annualConfirmations: {}, annualConfirmationAvailable: true, failNextConfirmation: false,
     holdNextConfirmation: false, releaseConfirmation: null,
   }
   window.__attendanceConfirmationHarness = state
@@ -61,10 +64,14 @@ export function installAttendanceConfirmationHarness() {
     }
     if (state.permission === "none") return json({ message: "Forbidden" }, 403)
     if (request.method === "POST") {
-      if (body?.action !== "save-confirmation") return json({ message: "Forbidden" }, 403)
+      if (body?.action !== "save-confirmation" && body?.action !== "save-annual-confirmation") return json({ message: "Forbidden" }, 403)
+      const annual = body.action === "save-annual-confirmation"
+      if (annual && !state.annualConfirmationAvailable) return json({ message: "Year-end confirmation is not available yet while an update finishes." }, 400)
       const confirmation = body.confirmation as Row
-      if (confirmation.status !== "confirmed" || (state.permission !== "edit" && confirmation.personId !== ownPersonId)) return json({ message: "Forbidden" }, 403)
-      if (!closed(Number(confirmation.year), Number(confirmation.month))) return json({ message: "Attendance month must be closed." }, 400)
+      if (state.permission !== "edit" && (confirmation.status !== "confirmed" || confirmation.personId !== ownPersonId)) return json({ message: "Forbidden" }, 403)
+      if (annual && Object.hasOwn(confirmation, "month")) return json({ message: "Annual confirmation must not include a month." }, 400)
+      if (confirmation.status === "confirmed" && !(annual ? Number(confirmation.year) < state.currentYear : closed(Number(confirmation.year), Number(confirmation.month)))) return json({ message: "Attendance period must be closed." }, 400)
+      if (confirmation.status === "confirmed" && confirmation.sourceRevision !== 7) return json({ message: "Reload the attendance statement before confirming it." }, 409)
       if (state.holdNextConfirmation) {
         state.holdNextConfirmation = false
         await new Promise<void>((resolve) => { state.releaseConfirmation = resolve })
@@ -74,16 +81,22 @@ export function installAttendanceConfirmationHarness() {
         state.failNextConfirmation = false
         return json({ message: "Synthetic confirmation failure. Please retry." }, 503)
       }
-      const saved = { ...confirmation, id: "synthetic-confirmation", confirmedAt: new Date().toISOString(), confirmedBy: "alice@example.invalid" }
+      const saved = { ...confirmation, id: "synthetic-confirmation", confirmedAt: confirmation.status === "confirmed" ? new Date().toISOString() : null,
+        confirmedBy: confirmation.status === "confirmed" ? "alice@example.invalid" : null,
+        ...(annual ? { confirmedSourceRevision: confirmation.status === "confirmed" ? 7 : null } : {}) }
+      if (annual) {
+        state.annualConfirmations[`${confirmation.personId}:${confirmation.year}`] = saved
+        return json({ success: true, annualConfirmation: saved })
+      }
       state.confirmations[`${confirmation.personId}:${confirmation.year}:${confirmation.month}`] = saved
       return json({ success: true, confirmation: saved })
     }
     const year = Number(url.searchParams.get("year") || state.currentYear)
     const month = Number(url.searchParams.get("month") || state.currentMonth)
-    const common = { year, people, staffOrder: ["AT", "BT"], availableYears: [state.currentYear, state.currentYear - 1] }
+    const common = { year, sourceRevision: 7, people, staffOrder: ["AT", "BT"], availableYears: [state.currentYear, state.currentYear - 1] }
     if (url.searchParams.get("view") === "all-time") return json({
-      ...common, view: "all-time", schedules: [], syncRuns: [], availableUsers: [], allTimeSummaries: [], entitlements: [], monthlyAdjustments: [],
-      annualSummaries: people.map((person) => ({ personId: person.id, codeTotals: {}, canConfirm: closed(year, 12) && (permission === "edit" || person.id === ownPersonId), confirmation: state.confirmations[`${person.id}:${year}:12`] || null })),
+      ...common, view: "all-time", annualConfirmationAvailable: state.annualConfirmationAvailable, schedules: [], syncRuns: [], availableUsers: [], allTimeSummaries: [], entitlements: [], monthlyAdjustments: [],
+      annualSummaries: people.map((person) => ({ personId: person.id, codeTotals: {}, canConfirm: state.annualConfirmationAvailable && year < state.currentYear && (permission === "edit" || person.id === ownPersonId), confirmation: state.annualConfirmationAvailable ? state.annualConfirmations[`${person.id}:${year}`] || null : null })),
     })
     if (url.searchParams.get("scope") === "year") return json({
       ...common, months: Array.from({ length: month }, (_, index) => ({ month: index + 1, periodClosed: closed(year, index + 1), summaries: people.map((person) => summary(year, index + 1, person)) })),
@@ -95,5 +108,5 @@ export function installAttendanceConfirmationHarness() {
 export function usePathname() { return "/admin/attendancerecord" }
 export function useRouter() { return router }
 export function useSimpleAdminAuth() {
-  return { loading: false, authenticated: true, resetRequired: false, role: "VIEW", permissions, pages: ADMIN_PAGE_DEFINITIONS }
+  return { loading: false, authenticated: window.__attendanceConfirmationHarness.signedIn, resetRequired: false, role: "VIEW", permissions, pages: ADMIN_PAGE_DEFINITIONS }
 }

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import path from "node:path"
 import { pricingBackupSchemaFromArtifact, pricingBackupSchemaVersion } from "../lib/backupPricingSchema.mjs"
+import { attendanceBackupSchemaFromArtifact, attendanceBackupSchemaVersion } from "../lib/backupAttendanceSchema.mjs"
 import {
   DiskMap as Map,
   DiskSet as Set,
@@ -249,6 +250,7 @@ const TABLE_SECTIONS = [
     primaryKey: ["id"],
     introducedAt: ATTENDANCE_RECORD_MIGRATION_HEAD,
   },
+  { key: "attendanceAnnualConfirmations", table: "attendance_annual_confirmations", primaryKey: ["id"] },
   {
     key: "attendanceReminderDispatches",
     table: "attendance_reminder_dispatches",
@@ -310,10 +312,10 @@ const EXCLUDED_CREDENTIAL_FIELDS = [
   "spc_users.password_hash",
 ]
 
-function getBackupContract(migrationHead, pricingSchemaVersion = "none") {
+function getBackupContract(migrationHead, pricingSchemaVersion = "none", attendanceSchemaVersion = "none") {
   const tableSections = TABLE_SECTIONS.filter(
     (section) =>
-      section.table === "price_setter_creation_receipts" ? pricingSchemaVersion !== "none" : !section.introducedAt || migrationHead >= section.introducedAt
+      section.table === "price_setter_creation_receipts" ? pricingSchemaVersion !== "none" : section.table === "attendance_annual_confirmations" ? attendanceSchemaVersion === "annual-v1" : !section.introducedAt || migrationHead >= section.introducedAt
   )
   const explicitlyEphemeralTables = [
     ...BASE_EXPLICITLY_EPHEMERAL_TABLES,
@@ -1138,7 +1140,7 @@ function exactObjectCounts(actual, expected) {
 }
 
 function validateDatabaseInventory(backup, errors) {
-  const contract = getBackupContract(String(backup.migrationHead || ""), pricingBackupSchemaVersion(pricingBackupSchemaFromArtifact(backup.databaseInventory)))
+  const contract = getBackupContract(String(backup.migrationHead || ""), pricingBackupSchemaVersion(pricingBackupSchemaFromArtifact(backup.databaseInventory)), attendanceBackupSchemaVersion(attendanceBackupSchemaFromArtifact(backup.databaseInventory)))
   const inventory = backup.databaseInventory
   if (!isPlainObject(inventory)) {
     addError(errors, "databaseInventory: missing or not an object")
@@ -1152,6 +1154,7 @@ function validateDatabaseInventory(backup, errors) {
     "explicitlyEphemeralTables",
     "excludedCredentialFields",
     ...(Object.hasOwn(inventory, "pricingSchema") ? ["pricingSchema"] : []),
+    ...(Object.hasOwn(inventory, "attendanceSchema") ? ["attendanceSchema"] : []),
   ]
   if (JSON.stringify(Object.keys(inventory)) !== JSON.stringify(expectedKeys)) {
     addError(errors, "databaseInventory: unexpected fields or field order")
@@ -1539,6 +1542,38 @@ function validatePriceSetterCreationReceipts(receipts, pricingSchemaVersion = "c
   return errors
 }
 
+function validateAnnualAttendanceConfirmations(confirmations) {
+  const errors = [], personYears = new Set()
+  const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i
+  const nonempty = (value) => typeof value === "string" && value.trim().length > 0
+  const timestamp = (value) => {
+    if (typeof value !== "string") return false
+    const match = /^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,6})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.exec(value)
+    return Boolean(match) && Number.isFinite(Date.parse(value)) && new Date(`${match[1]}T00:00:00Z`).toISOString().slice(0, 10) === match[1]
+  }
+  const revision = (value) => typeof value === "number" ? Number.isSafeInteger(value) && value >= 0
+    : typeof value === "string" && /^(?:0|[1-9]\d{0,18})$/.test(value) && BigInt(value) <= 9223372036854775807n
+  for (const [index, row] of confirmations.entries()) {
+    const label = `attendanceAnnualConfirmations[${index}]`
+    if (!isPlainObject(row) || !uuid.test(String(row.id || "")) || !uuid.test(String(row.person_id || ""))
+      || !Number.isInteger(row.year) || row.year < 2000 || row.year > 2200
+      || Object.hasOwn(row, "month") || !["pending", "confirmed"].includes(row.status)
+      || typeof row.note !== "string" || !nonempty(row.created_by) || !nonempty(row.updated_by)
+      || !timestamp(row.created_at) || !timestamp(row.updated_at)
+      || row.status === "pending" && (row.confirmed_at !== null || row.confirmed_by !== null || row.confirmed_source_revision !== null)
+      || row.status === "confirmed" && (!timestamp(row.confirmed_at) || !nonempty(row.confirmed_by) || !revision(row.confirmed_source_revision))) {
+      addError(errors, `${label}: invalid annual confirmation shape or source revision`)
+      continue
+    }
+    const key = `${row.person_id.toLowerCase()}:${row.year}`
+    if (personYears.has(key)) addError(errors, `${label}: duplicate annual person/year`)
+    personYears.add(key)
+  }
+  // The private live revision singleton is deliberately not reconstructed by
+  // this row export. Structural validation is not a full database restore proof.
+  return errors
+}
+
 function validateAttendanceDingtalkEvidence(data, migrationHead = "") {
   if (String(migrationHead) < ATTENDANCE_DINGTALK_ANOMALY_MIGRATION_HEAD) return []
   const errors = []
@@ -1603,13 +1638,20 @@ function validateAttendanceDingtalkEvidence(data, migrationHead = "") {
     .map((row) => `${row.person_id}:${row.year}:${row.month}`))
   const isConfirmed = (personId, workDate) => date.test(String(workDate || "")) &&
     confirmed.has(`${personId}:${Number(workDate.slice(0, 4))}:${Number(workDate.slice(5, 7))}`)
+  const annualConfirmed = new Set(rows(data, "attendanceAnnualConfirmations")
+    .filter((row) => isPlainObject(row) && row.status === "confirmed")
+    .map((row) => `${row.person_id}:${row.year}`))
+  const isAnnualConfirmed = (personId, workDate) => date.test(String(workDate || "")) &&
+    annualConfirmed.has(`${personId}:${Number(workDate.slice(0, 4))}`)
   for (const row of changed) {
     if (!isPlainObject(row) || changedResolvedIds.has(row.id)) continue
     const raw = rawById.get(row.existing_raw_punch_id)
     if (raw && (isConfirmed(raw.person_id, raw.work_date) ||
       isConfirmed(row.incoming_person_id, row.incoming_work_date))) {
       addError(errors, `attendanceDingtalkPunchAnomalies: an open correction has a confirmed month`)
-      break
+    }
+    if (raw && isAnnualConfirmed(raw.person_id, raw.work_date) || isAnnualConfirmed(row.incoming_person_id, row.incoming_work_date)) {
+      addError(errors, `attendanceDingtalkPunchAnomalies: an open correction has a confirmed year`)
     }
   }
   for (const row of missing) {
@@ -1617,7 +1659,9 @@ function validateAttendanceDingtalkEvidence(data, migrationHead = "") {
     const raw = rawById.get(row.existing_raw_punch_id)
     if (raw && isConfirmed(raw.person_id, raw.work_date)) {
       addError(errors, `attendanceDingtalkMissingPunchAnomalies: an open omission has a confirmed month`)
-      break
+    }
+    if (raw && isAnnualConfirmed(raw.person_id, raw.work_date)) {
+      addError(errors, `attendanceDingtalkMissingPunchAnomalies: an open omission has a confirmed year`)
     }
   }
   return errors
@@ -1625,7 +1669,8 @@ function validateAttendanceDingtalkEvidence(data, migrationHead = "") {
 
 function validateSections(backup, errors, warnings) {
   const pricingSchemaVersion = pricingBackupSchemaVersion(pricingBackupSchemaFromArtifact(backup.databaseInventory))
-  const contract = getBackupContract(String(backup.migrationHead || ""), pricingSchemaVersion)
+  const attendanceSchemaVersion = attendanceBackupSchemaVersion(attendanceBackupSchemaFromArtifact(backup.databaseInventory))
+  const contract = getBackupContract(String(backup.migrationHead || ""), pricingSchemaVersion, attendanceSchemaVersion)
   const data = isPlainObject(backup?.data) ? backup.data : {}
   const counts = isPlainObject(backup?.counts) ? backup.counts : {}
   const dataKeys = Object.keys(data).sort()
@@ -1730,6 +1775,7 @@ function validateSections(backup, errors, warnings) {
 
   const companyIds = idSet(data, "ccCompanies")
   for (const message of validatePriceSetterCreationReceipts(rows(data, "priceSetterCreationReceipts"), pricingSchemaVersion)) addError(errors, message)
+  for (const message of validateAnnualAttendanceConfirmations(rows(data, "attendanceAnnualConfirmations"))) addError(errors, message)
   const countryIds = idSet(data, "ccCountries")
   const portIds = idSet(data, "ports")
   const sharedContactIds = idSet(data, "sharedAddressbookContacts")
@@ -1887,6 +1933,7 @@ function validateSections(backup, errors, warnings) {
     ["attendanceEntitlements", "attendanceEntitlements.person_id"],
     ["attendanceMonthlyAdjustments", "attendanceMonthlyAdjustments.person_id"],
     ["attendanceMonthlyConfirmations", "attendanceMonthlyConfirmations.person_id"],
+    ["attendanceAnnualConfirmations", "attendanceAnnualConfirmations.person_id"],
     ["attendanceReminderDispatches", "attendanceReminderDispatches.person_id"],
   ]) {
     checkReferences(
@@ -2719,7 +2766,7 @@ const warnings = []
 const safeBackup = isPlainObject(backup) ? backup : {}
 let backupContract
 try {
-  backupContract = getBackupContract(String(safeBackup.migrationHead || ""), pricingBackupSchemaVersion(pricingBackupSchemaFromArtifact(safeBackup.databaseInventory)))
+  backupContract = getBackupContract(String(safeBackup.migrationHead || ""), pricingBackupSchemaVersion(pricingBackupSchemaFromArtifact(safeBackup.databaseInventory)), attendanceBackupSchemaVersion(attendanceBackupSchemaFromArtifact(safeBackup.databaseInventory)))
 } catch (error) {
   addError(errors, error instanceof Error ? error.message : "Backup pricing schema is invalid.")
   backupContract = getBackupContract(String(safeBackup.migrationHead || ""))

@@ -360,7 +360,7 @@ export function AdminRouteGuard({ children }: { children: React.ReactNode }) {
           }}
         >
           {page.id === "attendance-record"
-            ? "View-only access. You can confirm your own completed monthly statement. Editing attendance records is disabled."
+            ? "View-only access. You can confirm your own completed monthly or year-end statement. Editing attendance records is disabled."
             : "View-only access. Changes, uploads, syncs, and record actions are disabled."}
         </div>
       ) : null}

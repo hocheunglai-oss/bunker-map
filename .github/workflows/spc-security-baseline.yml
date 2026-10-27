@@ -116,6 +116,7 @@ jobs:
           set -euo pipefail
           npm run test:attendance 2>&1 | tee attendance-tests.tap
           node --test tests/attendance-auto-confirm-route.test.mjs 2>&1 | tee attendance-auto-confirm-route.tap
+          node --test tests/backup-attendance*.test.mjs 2>&1 | tee backup-attendance-schema.tap
 
       - name: Verify calendar saves holidays recovery and reminder delivery
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -144,6 +145,13 @@ jobs:
         run: |
           set -o pipefail
           npx --no-install tsx --test tests/outlook-contact-validation.test.ts tests/outlook-group*.test.ts 2>&1 | tee outlook-contact-tests.tap
+
+      - name: Verify homepage fallback read and failure-cache boundaries
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          node --test tests/homepage-market-data.test.cjs 2>&1 | tee homepage-market-data-tests.tap
 
       - name: Verify atomic SPC STEM fixture application and permissions
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -332,9 +340,11 @@ jobs:
             admin-auth-security.tap
             attendance-tests.tap
             attendance-auto-confirm-route.tap
+            backup-attendance-schema.tap
             calendar-tests.tap
             ccinfo-table-tests.tap
             country-pricing-tests.tap
+            homepage-market-data-tests.tap
             outlook-contact-tests.tap
             spc-stem-tests.tap
             spc-write-conflicts.tap
@@ -406,6 +416,7 @@ jobs:
           ENQUIRY_CORRECTNESS_EVIDENCE="$evidence_dir/enquiry-parser" node tests/enquiry-parser-correctness.browser.test.cjs 2>&1 | tee "$test_runtime/enquiry-parser.log"
           SPC_ENQUIRY_METADATA_EVIDENCE="$evidence_dir/spc-enquiry-metadata" node tests/spc-enquiry-metadata.browser.test.cjs 2>&1 | tee "$test_runtime/spc-enquiry-metadata.log"
           STORAGE_MEDIA_HEALTH_SCREENSHOTS="$evidence_dir/storage-media-health" node tests/storage-media-system-health.browser.test.cjs 2>&1 | tee "$test_runtime/storage-media-health.log"
+          HOMEPAGE_SCREENSHOTS="$evidence_dir/homepage-market" node tests/homepage-market.browser.test.cjs 2>&1 | tee "$test_runtime/homepage-market.log"
 
       - name: Retain synthetic browser verification evidence
         if: always()
@@ -423,6 +434,7 @@ jobs:
             ${{ runner.temp }}/fcuno-report-browser-runtime/enquiry-parser.log
             ${{ runner.temp }}/fcuno-report-browser-runtime/spc-enquiry-metadata.log
             ${{ runner.temp }}/fcuno-report-browser-runtime/storage-media-health.log
+            ${{ runner.temp }}/fcuno-report-browser-runtime/homepage-market.log
           if-no-files-found: warn
           retention-days: 90
 
@@ -565,6 +577,8 @@ jobs:
           SPC_RECORD_PAGES_SCREENSHOTS="$evidence_dir/spc-record-pages" node tests/spc-record-pages-state.browser.test.cjs 2>&1 | tee "$test_runtime/spc-record-pages.log"
           SPC_LOST_DATE_SCREENSHOTS="$evidence_dir/lost-date" node tests/spc-lost-record-date.browser.test.cjs 2>&1 | tee "$test_runtime/lost-date.log"
           AUDIT_BROWSING_SCREENSHOTS="$evidence_dir/audit" node tests/audit-browsing-state.browser.test.cjs 2>&1 | tee "$test_runtime/audit.log"
+          node tests/attendance-confirmation.browser.test.cjs 2>&1 | tee "$test_runtime/attendance-confirmation.log"
+          ATTENDANCE_ANNUAL_SCREENSHOTS="$evidence_dir/annual-attendance" node tests/attendance-annual-confirmation.browser.test.cjs 2>&1 | tee "$test_runtime/annual-attendance.log"
 
       - name: Retain synthetic calendar and session verification evidence
         if: always()
@@ -581,6 +595,8 @@ jobs:
             ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/spc-record-pages.log
             ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/lost-date.log
             ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/audit.log
+            ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/attendance-confirmation.log
+            ${{ runner.temp }}/fcuno-calendar-session-browser-runtime/annual-attendance.log
           if-no-files-found: warn
           retention-days: 90
 
@@ -766,7 +782,9 @@ jobs:
           // Permission groups: two storage-mode concurrency clusters and nine rejected-preflight clusters.
           // Both Outlook renewal/pending-source suites use one owned cluster per case.
           // Actual verifier/realistic-history eligibility cases each own one cluster.
-          const additionalClusters=4+1+1+4+1+5+1+3+4+11+proactiveCases+pendingSourceCases+atomicEligibilityCases+atomicBudgetCases
+          const annualCases=[...readFileSync("tests/attendance-annual-confirmation-native.test.mjs","utf8").matchAll(/^test\(/gm)].length
+          assert.ok(annualCases>=24,"The complete annual source/December/concurrency/restore suite must be present")
+          const additionalClusters=4+1+1+4+1+5+1+3+4+11+proactiveCases+pendingSourceCases+atomicEligibilityCases+atomicBudgetCases+annualCases
           assert.equal(clusters.length,7+sourcePolicyCases+hourlyCases+additionalClusters,"Every record-state, insertion, source-policy, hourly, record-page, canonical, Phonebook/Taiwan, CCINFO, backup, SPC write, permission-group and Outlook renewal/pending-source fixture must execute its owned native test cluster")
           assert.equal(complete,true,"The test must close its owned sessions and cluster itself")
           NODE
@@ -781,7 +799,7 @@ jobs:
           timeout --signal=TERM --kill-after=5s 480s env -i PATH="$PATH" LANG=C LC_ALL=C \
             TMPDIR="$NATIVE_PG_TMP_ROOT" NATIVE_PG_BIN="$NATIVE_PG_BIN" NATIVE_PG_TMP_ROOT="$NATIVE_PG_TMP_ROOT" \
             node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=tap tests/spc-record-state-native.test.mjs tests/outlook-insertion-reservation-native.test.mjs tests/outlook-template-source-policy-native.test.mjs tests/outlook-hourly-verification-native.test.mjs tests/outlook-proactive-refresh-native.test.mjs tests/outlook-source-pending-native.test.mjs tests/outlook-atomic-eligibility-native.test.mjs tests/outlook-atomic-budget-native.test.mjs tests/spc-record-page-conflict-native.test.mjs tests/email-template-cas-native.test.mjs tests/email-template-cas-api.test.mjs tests/phonebook-taiwan-save-conflict-native.test.mjs tests/phonebook-taiwan-save-conflict-api.test.mjs tests/ccinfo-operation-conflicts-native.test.mjs tests/ccinfo-operation-conflicts-api.test.mjs tests/backup-protection-conflicts-native.test.mjs tests/backup-protection-gaps-native.test.mjs tests/spc-write-conflicts-native.test.mjs tests/spc-supplier-native.test.mjs tests/spc-stem-native.test.mjs tests/spc-fixture-native.test.mjs tests/admin-permission-groups-native.test.mjs \
-            2>&1 | tee "$NATIVE_PG_EVIDENCE/native-record-state.tap"
+            tests/attendance-annual-confirmation-native.test.mjs 2>&1 | tee "$NATIVE_PG_EVIDENCE/native-record-state.tap"
           node --input-type=module <<'NODE'
           import assert from "node:assert/strict"
           import {readFileSync} from "node:fs"
@@ -800,7 +818,9 @@ jobs:
           // SPC conflicts/source fence; canonical native/SDK; Phonebook/Taiwan native/SDK;
           // CCINFO native/SDK; backup observation/gaps; SPC write guards/existing native callers.
           // Permission-group native suite includes concurrency, audit-context and rejected-preflight guards.
-          const additionalCases=8+15+45+12+41+27+52+27+20+52+37+proactiveCases+pendingSourceCases+atomicEligibilityCases+atomicBudgetCases
+          const annualCases=[...readFileSync("tests/attendance-annual-confirmation-native.test.mjs","utf8").matchAll(/^test\(/gm)].length
+          assert.ok(annualCases>=24,"The complete annual source/December/concurrency/restore suite must be present")
+          const additionalCases=8+15+45+12+41+27+52+27+20+52+37+proactiveCases+pendingSourceCases+atomicEligibilityCases+atomicBudgetCases+annualCases
           for(const [name,expected] of [["tests",16+sourcePolicyCases+hourlyCases+additionalCases],["pass",16+sourcePolicyCases+hourlyCases+additionalCases],["fail",0],["cancelled",0],["skipped",0]]){
             const values=[...text.matchAll(new RegExp("^# "+name+" (\\d+)","gm"))]
             assert.equal(Number(values.at(-1)?.[1]),expected,name)

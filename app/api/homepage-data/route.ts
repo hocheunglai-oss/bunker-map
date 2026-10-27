@@ -13,6 +13,11 @@ export async function GET() {
     })
   } catch (error) {
     console.error("Homepage data load failed", error)
-    return NextResponse.json({ message: "Unable to load homepage data." }, { status: 502 })
+    return NextResponse.json({ message: "Unable to load homepage data." }, { status: 502, headers: {
+      "Cache-Control": "private, no-store, max-age=0",
+      "CDN-Cache-Control": "no-store",
+      "Vercel-CDN-Cache-Control": "no-store",
+      Pragma: "no-cache",
+    } })
   }
 }

@@ -1,6 +1,6 @@
 /**
  * A client-side usability exception, not authorization. The attendance API must
- * still verify page access, staff ownership and that the month has closed.
+ * still verify page access, staff ownership and that the requested period has closed.
  */
 export async function isViewOnlyAttendanceConfirmation(
   input: RequestInfo | URL,
@@ -28,7 +28,7 @@ export async function isViewOnlyAttendanceConfirmation(
     if (!body || typeof body !== "object" || Array.isArray(body)) return false
     const payload = body as Record<string, unknown>
     const confirmation = payload.confirmation
-    return payload.action === "save-confirmation" &&
+    return (payload.action === "save-confirmation" || payload.action === "save-annual-confirmation") &&
       Boolean(confirmation && typeof confirmation === "object" &&
         !Array.isArray(confirmation) &&
         (confirmation as Record<string, unknown>).status === "confirmed")
