@@ -14,18 +14,20 @@ let cachedHealth: { expiresAt: number; value: Awaited<ReturnType<typeof getSyste
 let healthPromise: Promise<Awaited<ReturnType<typeof getSystemHealth>>> | null = null
 
 async function loadHealth(forceRefresh: boolean) {
+  // A refresh bypasses completed cached data, not an already-running check.
+  if (healthPromise) return healthPromise
   if (!forceRefresh && cachedHealth && cachedHealth.expiresAt > Date.now()) {
     return cachedHealth.value
   }
-  if (!forceRefresh && healthPromise) return healthPromise
 
-  healthPromise = getSystemHealth({ backupGapObserver: createBackupProtectionGapPreviewObserver() })
+  const pendingHealth = getSystemHealth({ backupGapObserver: createBackupProtectionGapPreviewObserver() })
+  healthPromise = pendingHealth
   try {
-    const value = await healthPromise
+    const value = await pendingHealth
     cachedHealth = { expiresAt: Date.now() + HEALTH_CACHE_MS, value }
     return value
   } finally {
-    healthPromise = null
+    if (healthPromise === pendingHealth) healthPromise = null
   }
 }
 

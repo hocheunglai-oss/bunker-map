@@ -88,6 +88,7 @@ async function main() {
             })
             await page.waitForFunction(() => window.__techStackHarness.routes.includes("/admin"))
             assert.equal(await page.getByRole("heading", { name: "CURRENT DEPLOYMENT", exact: true }).count(), 0)
+            assert.equal(await page.getByText("attendance_annual_confirmations", { exact: true }).count(), 0)
             await page.screenshot({ path: path.join(output, label + "-signed-out.png") })
             await page.evaluate(() => {
               const h = window.__techStackHarness
@@ -105,6 +106,17 @@ async function main() {
                 const h = window.__techStackHarness
                 h.auth = { ...h.auth, permissions: { "tech-stack": permission } }; h.render()
               }, permission)
+              const attendance = page.locator("article").filter({ has: page.getByRole("heading", { name: "ATTENDANCE", exact: true }) })
+              const annual = attendance.getByText("attendance_annual_confirmations", { exact: true })
+              assert.equal(await annual.count(), 1, "Static ATTENDANCE summary retains its distinct annual table.")
+              assert.equal(await attendance.getByText("attendance_monthly_confirmations", { exact: true }).count(), 1)
+              const liveInventory = page.locator("section").filter({ has: page.getByRole("heading", { name: "LIVE PUBLIC DATABASE INVENTORY", exact: true }) })
+              assert.equal(await liveInventory.getByText("attendance_annual_confirmations", { exact: true }).count(), 1,
+                "Live provider inventory and source summary both expose the annual table.")
+              await annual.scrollIntoViewIfNeeded()
+              await page.screenshot({ path: path.join(output, label + "-" + permission + "-annual-summary.png") })
+              await liveInventory.scrollIntoViewIfNeeded()
+              await page.screenshot({ path: path.join(output, label + "-" + permission + "-annual-live-inventory.png") })
               const database = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "PRIMARY DATABASE", exact: true }) })
               assert.match(await database.innerText(), /17\.6\.1\.084 VERIFIED 2026-10-22/)
               const archive = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "DATABASE LOGICAL ARCHIVE", exact: true }) })
@@ -160,6 +172,18 @@ async function main() {
               await correspondence.scrollIntoViewIfNeeded()
               await page.screenshot({ path: path.join(output, label + "-" + permission + "-file-correspondence.png") })
             }
+            await page.evaluate(() => {
+              const h = window.__techStackHarness
+              h.auth = { ...h.auth, permissions: { "tech-stack": "none" } }; h.render()
+            })
+            await page.getByRole("heading", { name: "CURRENT DEPLOYMENT", exact: true }).waitFor({ state: "detached" })
+            assert.equal(await page.getByText("attendance_annual_confirmations", { exact: true }).count(), 0)
+            await page.screenshot({ path: path.join(output, label + "-denied-no-annual-inventory.png") })
+            await page.evaluate(() => {
+              const h = window.__techStackHarness
+              h.auth = { ...h.auth, permissions: { "tech-stack": "view" } }; h.render()
+            })
+            await page.getByRole("heading", { name: "CURRENT DEPLOYMENT", exact: true }).waitFor()
             assert.equal(await page.getByRole("heading", { name: "PHONEBOOK SERVER", exact: true }).count(), 0)
             assert.equal(await page.evaluate(() => window.__techStackHarness.configurationReads), 0, "View/Edit permission is not ADMIN authority.")
             const serverPanel = () => page.getByRole("region", { name: "Phonebook server configuration", exact: true })
@@ -248,7 +272,7 @@ async function main() {
             await page.screenshot({ path: path.join(output, label + "-verified.png"), fullPage: true })
             await page.screenshot({ path: path.join(output, label + "-verified-viewport.png") })
             assert.deepEqual(errors, []); assert.deepEqual(unexpected, [])
-            results.push({ engine, width, scheme, sourceTruthCopy: "view/edit pass", networkRecovery: "pass", invalidResponse: "pass", staleResponse: "ignored", signedOut: "no data", phonebookServer: "ADMIN-only; failed refresh clears; late headers/body ignored; same-role actor replacement/downgrade/reset/logout hides", adminDimensions, dimensions })
+            results.push({ engine, width, scheme, sourceTruthCopy: "view/edit pass", annualInventory: "distinct annual and monthly tables in source summary and live inventory; denied and signed-out hidden", networkRecovery: "pass", invalidResponse: "pass", staleResponse: "ignored", signedOut: "no data", phonebookServer: "ADMIN-only; failed refresh clears; late headers/body ignored; same-role actor replacement/downgrade/reset/logout hides", adminDimensions, dimensions })
           } finally { await context.close() }
         }
       } finally { await browser.close() }

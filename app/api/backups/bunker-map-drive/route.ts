@@ -1083,15 +1083,17 @@ async function buildBackupFile(
   let databaseEpochBefore: number
   try {
     databaseEpochBefore = await getBackupExportEpoch(supabase)
-    ;[
-      verificationBeforeExport,
-      checkpointBeforeExport,
-      templateRecipientVerificationBeforeExport,
-    ] = await Promise.all([
-      callTruthRpc(supabase, "verify_outlook_exchange_truth_ledger"),
-      callTruthRpc(supabase, "get_outlook_exchange_truth_checkpoint"),
-      callTruthRpc(supabase, "verify_outlook_template_recipient_truth"),
-    ])
+    // Template truth also performs a complete ledger proof. Keep every existing
+    // check, but do not run the two history-sized proofs at the same time.
+    verificationBeforeExport = await callTruthRpc(
+      supabase, "verify_outlook_exchange_truth_ledger"
+    )
+    checkpointBeforeExport = await callTruthRpc(
+      supabase, "get_outlook_exchange_truth_checkpoint"
+    )
+    templateRecipientVerificationBeforeExport = await callTruthRpc(
+      supabase, "verify_outlook_template_recipient_truth"
+    )
   } catch (error) {
     throw new Error(
       `Backup failed while capturing the Exchange truth checkpoint: ${getErrorMessage(error)}`
@@ -1453,15 +1455,16 @@ async function buildBackupFile(
     let verificationAfterExport: Record<string, unknown>
     let templateRecipientVerificationAfterExport: Record<string, unknown>
     try {
-      [
-        checkpointAfterExport,
-        verificationAfterExport,
-        templateRecipientVerificationAfterExport,
-      ] = await Promise.all([
-        callTruthRpc(supabase, "get_outlook_exchange_truth_checkpoint"),
-        callTruthRpc(supabase, "verify_outlook_exchange_truth_ledger"),
-        callTruthRpc(supabase, "verify_outlook_template_recipient_truth"),
-      ])
+      // Preserve the independent after-export proof and all fences below.
+      checkpointAfterExport = await callTruthRpc(
+        supabase, "get_outlook_exchange_truth_checkpoint"
+      )
+      verificationAfterExport = await callTruthRpc(
+        supabase, "verify_outlook_exchange_truth_ledger"
+      )
+      templateRecipientVerificationAfterExport = await callTruthRpc(
+        supabase, "verify_outlook_template_recipient_truth"
+      )
     } catch (error) {
       throw new Error(
         `Backup failed while rechecking the Exchange truth checkpoint: ${getErrorMessage(error)}`

@@ -15,8 +15,8 @@ const response = (commit = "a".repeat(40)) => ({
     functionRegion: "synthetic", configuredRegions: ["synthetic"],
   },
   databaseInventory: {
-    schema: "bunker-map.backup-inventory/v1", migrationHead: "20261016022343",
-    tables: ["email_templates", "office_calendar_store"], checkedAt: "2026-10-16T03:00:00.000Z",
+    schema: "bunker-map.backup-inventory/v1", migrationHead: "20261027035525",
+    tables: ["attendance_annual_confirmations", "attendance_monthly_confirmations", "email_templates", "office_calendar_store"], checkedAt: "2026-10-27T04:00:00.000Z",
   },
   verification: { responseTimeOnly: true, externalServices: "Synthetic only", environmentValues: "Presence only; not validated." },
   schedules: [{ path: "/api/backups/bunker-map-drive", schedule: "2 19 * * *" }],

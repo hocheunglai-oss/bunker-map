@@ -14,7 +14,8 @@ const vercelConfiguration = JSON.parse(readFileSync(new URL("../vercel.json", im
 type Secret = { name: string; configured: boolean | null; status: string; value: string; storage: string }
 type TestResponse = { body: { secrets: Secret[]; [key: string]: unknown }; init?: ResponseInit }
 
-function loadRoute(environment: Record<string, string> = {}, authorized = true) {
+function loadRoute(environment: Record<string, string> = {}, authorized = true,
+  inventory = { migrationHead: "20260924022019", tables: ["spc_users", "admin_users"] }) {
   const output = ts.transpileModule(routeSource, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
   }).outputText
@@ -30,7 +31,7 @@ function loadRoute(environment: Record<string, string> = {}, authorized = true) 
     "@/vercel.json": vercelConfiguration,
     "@supabase/supabase-js": { createClient: () => ({ rpc: async (name: string) => {
       assert.equal(name, "get_bunker_map_backup_inventory")
-      return { data: { schema: "bunker-map.backup-inventory/v1", migrationHead: "20260924022019", tables: ["spc_users", "admin_users"] }, error: null }
+      return { data: { schema: "bunker-map.backup-inventory/v1", ...inventory }, error: null }
     } }) },
   }
   vm.runInNewContext(output, {
@@ -62,6 +63,35 @@ test("Tech Stack exposes canonical deployment identity and the exact repository 
   assert.deepEqual(body.databaseInventory.tables, ["admin_users", "spc_users"])
   assert.equal((result.init?.headers as Record<string, string>)["Cache-Control"], "private, no-store, max-age=0")
   assert.equal(isTechStackResponse(result.body), true, "The real API response satisfies the client contract.")
+})
+
+test("Tech Stack annual attendance source summary agrees with the additive table and actual live-inventory route", async () => {
+  const migration = readFileSync(new URL("../supabase/migrations/20261027023034_separate_attendance_annual_confirmations.sql", import.meta.url), "utf8")
+  const annualTable = /create table public\.(attendance_annual_confirmations)\s*\(/.exec(migration)?.[1]
+  assert.ok(annualTable, "The additive migration must define the separately stored annual approval.")
+  const source = ts.createSourceFile("techstack.tsx", pageSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const declaration = source.statements.filter(ts.isVariableStatement)
+    .flatMap(statement => statement.declarationList.declarations)
+    .find(item => ts.isIdentifier(item.name) && item.name.text === "DATABASE_GROUPS")
+  assert.ok(declaration?.initializer)
+  const output = ts.transpileModule(`exports.groups = ${declaration.initializer.getText(source)}`, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText
+  const exports: { groups?: Array<{ title: string; tables: string[] }> } = {}
+  vm.runInNewContext(output, { exports })
+  const attendance = exports.groups?.filter(group => group.title === "ATTENDANCE")
+  assert.equal(attendance?.length, 1)
+  assert.equal(attendance[0].tables.filter(table => table === annualTable).length, 1,
+    "The static ATTENDANCE summary must list the annual table exactly once, separately from monthly approvals.")
+  assert.ok(attendance[0].tables.includes("attendance_monthly_confirmations"))
+  const result = await loadRoute({}, true, {
+    migrationHead: "20261027035525", tables: ["attendance_monthly_confirmations", annualTable],
+  })()
+  const body = JSON.parse(JSON.stringify(result.body))
+  assert.equal(isTechStackResponse(body), true)
+  assert.deepEqual(body.databaseInventory.tables, [annualTable, "attendance_monthly_confirmations"],
+    "The actual inventory reader must preserve the provider's table list rather than substitute the static summary.")
+  assert.equal(body.databaseInventory.migrationHead, "20261027035525")
 })
 
 test("Tech Stack presence never certifies credentials or exposes secret values", async () => {
