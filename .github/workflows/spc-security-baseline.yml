@@ -145,6 +145,13 @@ jobs:
           set -o pipefail
           npx --no-install tsx --test tests/outlook-contact-validation.test.ts tests/outlook-group*.test.ts 2>&1 | tee outlook-contact-tests.tap
 
+      - name: Verify homepage fallback read and failure-cache boundaries
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          node --test tests/homepage-market-data.test.cjs 2>&1 | tee homepage-market-data-tests.tap
+
       - name: Verify atomic SPC STEM fixture application and permissions
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
@@ -335,6 +342,7 @@ jobs:
             calendar-tests.tap
             ccinfo-table-tests.tap
             country-pricing-tests.tap
+            homepage-market-data-tests.tap
             outlook-contact-tests.tap
             spc-stem-tests.tap
             spc-write-conflicts.tap
@@ -406,6 +414,7 @@ jobs:
           ENQUIRY_CORRECTNESS_EVIDENCE="$evidence_dir/enquiry-parser" node tests/enquiry-parser-correctness.browser.test.cjs 2>&1 | tee "$test_runtime/enquiry-parser.log"
           SPC_ENQUIRY_METADATA_EVIDENCE="$evidence_dir/spc-enquiry-metadata" node tests/spc-enquiry-metadata.browser.test.cjs 2>&1 | tee "$test_runtime/spc-enquiry-metadata.log"
           STORAGE_MEDIA_HEALTH_SCREENSHOTS="$evidence_dir/storage-media-health" node tests/storage-media-system-health.browser.test.cjs 2>&1 | tee "$test_runtime/storage-media-health.log"
+          HOMEPAGE_SCREENSHOTS="$evidence_dir/homepage-market" node tests/homepage-market.browser.test.cjs 2>&1 | tee "$test_runtime/homepage-market.log"
 
       - name: Retain synthetic browser verification evidence
         if: always()
@@ -423,6 +432,7 @@ jobs:
             ${{ runner.temp }}/fcuno-report-browser-runtime/enquiry-parser.log
             ${{ runner.temp }}/fcuno-report-browser-runtime/spc-enquiry-metadata.log
             ${{ runner.temp }}/fcuno-report-browser-runtime/storage-media-health.log
+            ${{ runner.temp }}/fcuno-report-browser-runtime/homepage-market.log
           if-no-files-found: warn
           retention-days: 90
 
