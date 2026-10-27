@@ -1,49 +1,47 @@
 {
   "schema": "fcuno.exchange-publication-candidate/v1",
-  "preparedAt": "2026-10-23T09:10:23Z",
+  "preparedAt": "2026-10-27T07:11:18Z",
   "reviewState": "independently-reviewed-and-tested",
   "publicationState": "published-byte-verified",
-  "publicationVerifiedAt": "2026-10-23T09:21:45Z",
-  "baseCommit": "727d28f773f378281bdda196b53110633298bdf1",
-  "sourcePreparationCommit": "04c02f10845dc85cd470996767138e728bbfeaaf",
-  "sourcePreparationAndReleaseParentTree": "efb182c5379e3bd8dbc6c438c714808321dbe4aa",
+  "publicationVerifiedAt": "2026-10-27T07:15:37Z",
+  "baseCommit": "0fdd34145d02803314bbccb99370be38d29bb718",
+  "sourcePreparationAndReleaseParentTree": "09728a6063caf2dd3f9d88ee11136fd3ec6d377c",
   "sourcePath": "scripts/azure-automation/sync-fcuno-outlook-addressbook.ps1",
-  "workerVersion": "fcuno-exchange-runbook/2026-10-23.1",
-  "sourceSha256": "bc305c8e399afe1b2194b4e237180bfd51066193e2ec58d2492942f9def8cd4b",
+  "workerVersion": "fcuno-exchange-runbook/2026-10-27.1",
+  "sourceSha256": "6c85d2712d5963beda3095afb9e6cb50300ff7620c215eae70d1e901aace504e",
   "liveBaselinePath": "scripts/azure-automation/exchange-publication-baseline.json",
-  "priorLiveBaselineSha256": "4677dfa52762cdd18d1f8ab1030d6e364305a7df0a90d93038b1365005900bf6",
-  "priorCandidateSha256": "1cfcd5c664660b5becc55fe23ec5690334d7c10cad0c266772eda7f09f6e5a99",
-  "supersedesPublishedWorkerVersion": "fcuno-exchange-runbook/2026-10-22.3",
-  "supersedesPublishedSourceSha256": "ac582ffb551b771b4bec96f6df2fb754884580f81f6054b4193d505beec4d981",
-  "targetIdentitySource": "Unchanged config/fcunoConnections.ts and live-baseline Azure, Supabase and production-origin identities",
+  "priorLiveBaselineSha256": "1fcab685dfa9c3ff7f2a9976196b4a959371ffcc9ba5243b381cacb000e28617",
+  "priorCandidateSha256": "41db6831ba3d561237a6b958c608d72e35d978ff1a93ed508e7ee4757d2fe61b",
+  "supersedesPublishedWorkerVersion": "fcuno-exchange-runbook/2026-10-23.1",
+  "supersedesPublishedSourceSha256": "bc305c8e399afe1b2194b4e237180bfd51066193e2ec58d2492942f9def8cd4b",
+  "targetIdentitySource": "Unchanged config/fcunoConnections.ts and the pinned Azure/Supabase/production baseline identities",
   "changeScope": [
-    "Stop immediate retries only when an actual final hourly or daily certification RPC throws an ErrorRecord with a bounded JSON-object ErrorDetails.Message whose exact string code is 57014",
-    "Track the actual final-RPC in-flight boundary so identical cancellation codes from before/after lease renewal retain original retry and idempotent replay behavior",
-    "Preserve the original exception/details and existing policy for ambiguous transport, lost responses, 503, 55P03, staging and derivative operations"
+    "Preserve the delivered legacy Durable full certification verification key while carrying typed temporary failure metadata",
+    "Do not add an outer service incident for the same typed temporary certification failure",
+    "Escalate genuine typed 401/403 access failures independently, including Forbidden at verification stage",
+    "Keep permanent SQL proof errors distinct and retain verified-recovery/atomic-delivery-claim safeguards"
   ],
   "unchangedContracts": [
-    "Existing date precision, certification UUID, fingerprint, freshness, future-date, boolean, reason, count and receipt guards",
-    "All REST timeouts, source and queue fences, atomic activation and certification TTL rules",
-    "Exchange connection, contact and group mutation ownership, renewable lease, permissions and notification policy",
-    "Previously installed prerequisite migration identities and historical publication evidence in Git"
+    "All contacts, groups, queues, source and recipient insertion fences",
+    "Atomic certification activation, TTL, proof and retry/timeouts",
+    "Installed alert SQL, existing delivered history, browser-role restrictions and service-only RPCs",
+    "Azure schedules, secrets, permissions, runtime/packages and paid capacity"
   ],
   "verification": {
-    "actualHttpCancellationCases": 34,
-    "newWorkerPass": 34,
-    "oldOriginBoundaryExpectedFailures": 4,
     "existingPowerShellPreservationFixtures": 9,
     "existingActualHttpTimeoutCases": 3,
     "existingActualHttpTimestampCases": 31,
-    "azureDraftLibraryOnly": "Observed Queued-to-Completed by 2026-10-23T09:19:13Z on FCUNO-PowerShell-7-6 before publication; LibraryOnly=true, WebhookData empty, runOn=Azure; no Exchange operations",
+    "existingActualHttpCancellationCases": 34,
+    "nativeAlertSqlCases": 21,
+    "actualWorkerHttpNativeSqlCases": 17,
+    "azureDraftLibraryOnly": "Started 2026-10-27T07:11:18Z; Completed observed before publication by 07:13:58Z on FCUNO-PowerShell-7-6; LibraryOnly=true, WebhookData empty, runOn=Azure; same saved exact reviewed source remained unchanged",
     "azureDraftTestJobUuid": null,
-    "azureDraftTestIdentityLimit": "The draft test view exposed no per-execution UUID; exact runbook/runtime/test-view, parameters, observed completion and unchanged saved source are bound in private publication evidence instead. This is an identity-observability limitation, not a waived test.",
-    "publishedExportBytes": 339783,
-    "independentBinaryComparison": "Exact SHA-256 and byte-length equality to reviewed source after independent Azure Portal Export at 2026-10-23T09:21:45Z",
-    "publicationReceiptSha256": "ae6de00c86518e8c358dff04f947c8db6bdfe718b63ebd6357de6af93c324fd6",
-    "runtimeReadbackSha256": "99aa70f5d2bcd7a0a3e941dabf5735c2a2930e7f08fdc4e7aab056ed156fbe25",
-    "realLocalTestReceiptSha256": "28d7e3ae891bb08e5e9440eb0b967394c86b3c69f4ff7025af906c7c11d9d82a",
-    "independentReviewSha256": "fc2e91af9304207cb0232ded79cf60ae44a50d0edec7c62f93157e817db5d072",
-    "liveSyncClaim": "Publication and LibraryOnly compilation do not establish a fresh certificate, successful hosted renewal, sufficient database capacity or the cause/prevention of a database restart. Any live canary is verified separately."
+    "azureDraftTestIdentityLimit": "The draft test view exposed no per-execution UUID; exact runbook/runtime/view, parameters, completion and unchanged source are bound instead. No UUID or duplicate test invented.",
+    "publishedSourceBytes": 344219,
+    "independentSourceComparison": "Signed-in Azure Portal publication followed by independently reopened View Published Source, complete editor copy and exact UTF-8 text, SHA-256 and byte-length comparison",
+    "publicationReceiptSha256": "ca9847a05bebf5f2449da1fb2da667a2b76b20bae05462f4dc5c6f632e361e4a",
+    "crossLayerTestSha256": "677c9af112f46e38e54490aaef34306f74d38e1c7b13d6e779e0f79f6d5ad4cd",
+    "liveSyncClaim": "Publication and compilation are not proof of the next hosted full verification, Microsoft SMTP delivery or prevention/cause of a database restart."
   },
   "testRuntime": {
     "version": "7.6.0",
@@ -51,9 +49,9 @@
     "officialOsxArm64ArchiveSha256": "bb52db90e964ee0b91e93f559b350878c6b27c12fd51830d8eca1793712b9639"
   },
   "requiredBeforeUpdatingLiveBaseline": [
-    "Review and regression-test exact source bytes independently",
+    "Independently review and regression-test exact source bytes",
     "Verify pinned account, tenant, subscription, Automation account, runbook and runtime",
     "Complete the actual LibraryOnly Azure draft test",
-    "Publish then independently export and byte-compare the published source"
+    "Publish then independently reopen published source and verify complete text, SHA-256 and UTF-8 byte length"
   ]
 }

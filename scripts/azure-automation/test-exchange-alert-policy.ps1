@@ -1,6 +1,7 @@
 param()
 
 $ErrorActionPreference = "Stop"
+Import-Module Microsoft.PowerShell.Utility -NoClobber -ErrorAction Stop
 . (Join-Path $PSScriptRoot "sync-fcuno-outlook-addressbook.ps1") -LibraryOnly
 
 function Assert-True([bool]$Condition, [string]$Message) {
@@ -35,6 +36,8 @@ function Reset-TestPolicy {
   $script:SentMail = New-Object System.Collections.ArrayList
   $script:Sleeps = New-Object System.Collections.ArrayList
   $script:ClaimId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+  $script:DeliveredIncidentKeys = @{}
+  $script:ClaimedIncidentKeys = @()
 }
 function Send-ExchangeSmtpMail($From, $To, $Subject, $Html) {
   [void]$script:SentMail.Add([pscustomobject]@{ From = $From; To = @($To); Subject = $Subject; Html = $Html })
@@ -54,6 +57,14 @@ function Invoke-SupabaseRest($Method, $Path, $Body) {
       "unknown_key" { return @{ shouldNotify = $true; claimId = $script:ClaimId; incidentKeys = @("f" * 64) } }
       "empty_keys" { return @{ shouldNotify = $true; claimId = $script:ClaimId; incidentKeys = @() } }
       "duplicate_keys" { return @{ shouldNotify = $true; claimId = $script:ClaimId; incidentKeys = @($Body.p_incidents[0].key, $Body.p_incidents[0].key) } }
+      "history" {
+        # Model only the delivery boundary here. Native SQL fixtures separately
+        # prove leases/persistence/recovery; this verifies the real worker does
+        # not invent a new key when an existing operation reaches outer catch.
+        $keys = @($Body.p_incidents | Where-Object { -not $script:DeliveredIncidentKeys.ContainsKey($_.key) } | ForEach-Object { $_.key })
+        $script:ClaimedIncidentKeys = $keys
+        return @{ shouldNotify = $keys.Count -gt 0; claimId = $(if ($keys.Count) { $script:ClaimId } else { $null }); incidentKeys = $keys; reason = $(if ($keys.Count) { "notification_claimed" } else { "already_notified" }) }
+      }
       "eligible" {
         return @{
           shouldNotify = $true
@@ -78,6 +89,9 @@ function Invoke-SupabaseRest($Method, $Path, $Body) {
     if ($script:CompleteMode -eq "accepted_string") { return @{ accepted = "true"; delivered = $Body.p_delivered } }
     if ($script:CompleteMode -eq "delivered_string") { return @{ accepted = $true; delivered = "true" } }
     if ($script:CompleteMode -eq "delivery_mismatch") { return @{ accepted = $true; delivered = (-not $Body.p_delivered) } }
+    if ($script:ObserveMode -eq "history" -and $Body.p_delivered) {
+      foreach ($key in $script:ClaimedIncidentKeys) { $script:DeliveredIncidentKeys[$key] = $true }
+    }
     return @{ accepted = $true; delivered = [bool]$Body.p_delivered }
   }
   throw "TEST GUARD: unexpected database operation $Path"
@@ -381,5 +395,144 @@ Assert-True $fullIncidents[0].immediate "A failed daily verification cannot wait
 $access = @(Get-ExchangeAlertIncidents "failed" "Access denied." @{ failureStage = "connection" } "incremental")
 Assert-Equal "service_access" $access[0].kind "An access failure must not be hidden as a transient delay"
 Assert-True $access[0].immediate "Access/configuration failures need immediate eligibility"
+
+# Preserve typed full-certification failures. A generic HTTP500 may contain a
+# real SQL proof error, so the typed SQL identity must outrank transport status.
+function New-AlertHttpError([int]$Status, [string]$SqlCode = "") {
+  $response = [System.Net.Http.HttpResponseMessage]::new([Enum]::ToObject([System.Net.HttpStatusCode], $Status))
+  $exception = [Microsoft.PowerShell.Commands.HttpResponseException]::new("Response status code does not indicate success: $Status ().", $response)
+  $record = [System.Management.Automation.ErrorRecord]::new($exception, "SyntheticHttpFailure", [System.Management.Automation.ErrorCategory]::InvalidOperation, $null)
+  if ($SqlCode) { $record.ErrorDetails = [System.Management.Automation.ErrorDetails]::new((@{ code = $SqlCode; message = "Synthetic SQL result" } | ConvertTo-Json -Compress)) }
+  return $record
+}
+function Commit-FullExchangeQueueCertification { throw $script:CertificationError }
+function New-DurableCertificationFailure($ErrorRecord) {
+  $script:CertificationError = $ErrorRecord
+  $stats = New-PolicyDetails "full"
+  $stats.fullCertificationCommitted = $false
+  $stats.templateRecipientTruthReconciled = $false
+  Complete-FullExchangeQueueCertificationIfEligible $stats "10" ("a" * 64) "{}" @{ contacts = 1 } @() | Out-Null
+  Assert-Equal 1 $stats.failedQueueRows "An unconfirmed durable certificate must remain failed"
+  Assert-True (-not $stats.fullCertificationCommitted -and -not $stats.templateRecipientTruthReconciled) "Notification classification must not invent a certificate or activation"
+  return $stats
+}
+$legacyCertificationKey = Get-Sha256Hex "full|verification|Durable full certification"
+foreach ($statusCode in @(408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524)) {
+  $temporaryDetails = New-DurableCertificationFailure (New-AlertHttpError $statusCode)
+  $temporaryIncidents = @(Get-ExchangeAlertIncidents "failed" "Exchange full reconciliation failed with 1 validation or verification error(s)." $temporaryDetails "full")
+  Assert-Equal 1 $temporaryIncidents.Count "Temporary HTTP$statusCode certification must remain one operation"
+  Assert-Equal $legacyCertificationKey $temporaryIncidents[0].key "Temporary classification must retain the delivered legacy operation hash"
+  Assert-Equal "verification" $temporaryIncidents[0].kind "Keeping the legacy history kind prevents re-alerting during upgrade"
+  Assert-True (-not $temporaryIncidents[0].immediate) "A new temporary certification HTTP$statusCode issue must wait for persistence"
+}
+foreach ($failure in @(
+  [System.Management.Automation.ErrorRecord]::new([TimeoutException]::new("Synthetic request exceeded 60 seconds"), "SyntheticTimeout", [System.Management.Automation.ErrorCategory]::OperationTimeout, $null),
+  (New-AlertHttpError 500 "57014"),
+  (New-AlertHttpError 500 "55P03")
+)) {
+  $temporaryDetails = New-DurableCertificationFailure $failure
+  Assert-True (-not @(Get-ExchangeAlertIncidents "failed" "Final certification pending" $temporaryDetails "full")[0].immediate) "Typed timeout/cancellation must retain the persistence window"
+}
+$proofFailure = New-DurableCertificationFailure (New-AlertHttpError 500 "P0001")
+Assert-True @(Get-ExchangeAlertIncidents "failed" "A proof mismatch must not be downgraded" $proofFailure "full")[0].immediate "SQL proof/validation failure must not become temporary merely because HTTP status is500"
+$proofFailure.failureStage = "verification"
+$proofFailure.failureRetryable = $true
+Assert-Equal 2 @(Get-ExchangeAlertIncidents "failed" "Response status code does not indicate success: 521 ()." $proofFailure "full").Count "An outer transport problem must remain independent of a permanent durable proof failure"
+Assert-True (-not (Test-ExchangeAlertTemporaryFailure $null "Immutable projection mismatch in field timeout503")) "Arbitrary mismatch text must not become a transport identity"
+
+foreach ($missingProof in @("truthLedgerCheckpointVerified", "fullCertificationCommitted", "templateRecipientTruthReconciled")) {
+  foreach ($missing in @($true, $false)) {
+    Reset-TestPolicy
+    $noRecovery = New-PolicyDetails "full"
+    $noRecovery.truthLedgerCheckpointVerified = $true
+    $noRecovery.fullCertificationCommitted = $true
+    $noRecovery.templateRecipientTruthReconciled = $true
+    if ($missing) { $noRecovery.Remove($missingProof) } else { $noRecovery[$missingProof] = $false }
+    Invoke-ExchangeSyncNotificationPolicy "completed" "No trusted proof for recovery" $noRecovery $webhook | Out-Null
+    $noRecoveryObservation = @(Get-Calls "observe_outlook_exchange_alert")[0].Body
+    Assert-True (-not $noRecoveryObservation.p_recovery_proven -and -not $noRecoveryObservation.p_observation_complete) "Missing or false $missingProof must not rearm an existing full incident"
+  }
+}
+
+# Exact reported sequence: the existing Durable full certification incident
+# was delivered on23October. Later full runs have the same unresolved operation;
+# on27October a HTTP521 while saving/checkpointing adds failureStage=verification.
+# It must not create verification|service (or a newly re-keyed delayed incident).
+Reset-TestPolicy
+$script:ObserveMode = "history"
+$script:DeliveredIncidentKeys[$legacyCertificationKey] = $true
+foreach ($day in 24..27) {
+  $script:CurrentQueueRunId = [guid]::NewGuid().ToString()
+  $repeat = New-DurableCertificationFailure (New-AlertHttpError $(if ($day -eq 27) { 521 } else { 500 }))
+  if ($day -eq 27) { $repeat.failureStage = "verification"; $repeat.failureRetryable = $true }
+  $outerMessage = if ($day -eq 27) { "Response status code does not indicate success: 521 ()." } else { "Exchange full reconciliation failed with 1 validation or verification error(s)." }
+  $repeatReceipt = Invoke-ExchangeSyncNotificationPolicy "failed" $outerMessage $repeat @{ requestedAt = "2026-10-${day}T22:24:00Z" }
+  Assert-Equal "not_required" $repeatReceipt.Status "An unchanged delivered operation must stay silent on day$day"
+  Assert-Equal "already_notified" $repeat.notificationDecisionReason "The same operation must use existing delivery history on day$day"
+  $observation = @(Get-Calls "observe_outlook_exchange_alert")[-1].Body
+  Assert-Equal 1 @($observation.p_incidents).Count "The outer catch must not invent a second incident on day$day"
+  Assert-Equal $legacyCertificationKey $observation.p_incidents[0].key "The operation hash must remain stable across dates and failure locations"
+  Assert-True (-not $observation.p_recovery_proven) "An incomplete full proof must never rearm delivery history"
+}
+Assert-Equal 0 $script:SentMail.Count "Repeated unresolved daily checks must not send a new email"
+
+foreach ($accessStatus in @(401, 403)) {
+  Reset-TestPolicy
+  $script:ObserveMode = "history"
+  $script:DeliveredIncidentKeys[$legacyCertificationKey] = $true
+  $typedAccess = New-DurableCertificationFailure (New-AlertHttpError $accessStatus)
+  $accessIncidents = @(Get-ExchangeAlertIncidents "failed" "Generic full failure summary" $typedAccess "full")
+  Assert-Equal "service_access" $accessIncidents[0].kind "A typed HTTP$accessStatus inside durable certification is a genuine access escalation"
+  Assert-True $accessIncidents[0].immediate "A typed access escalation must not wait for persistence"
+  Assert-True ($accessIncidents[0].key -ne $legacyCertificationKey) "A new access escalation must not reuse the delivered verification key"
+  Assert-Equal "delivered" (Invoke-ExchangeSyncNotificationPolicy "failed" "Generic full failure summary" $typedAccess $webhook).Status "New typed HTTP$accessStatus must alert even if the older operation was delivered"
+  $script:CurrentQueueRunId = [guid]::NewGuid().ToString()
+  Assert-Equal "not_required" (Invoke-ExchangeSyncNotificationPolicy "failed" "Generic full failure summary" $typedAccess $webhook).Status "An unchanged access escalation must alert only once"
+  Assert-True $script:DeliveredIncidentKeys[$legacyCertificationKey] "Escalation must preserve the old delivered operation history"
+  Assert-Equal 1 $script:SentMail.Count "The same typed access problem must not repeat an email"
+
+  # The reported extra verification|service email is also already delivered.
+  # A later typed access denial in the outer catch must still be a NEW access
+  # incident, not silently reuse that old generic verification service key.
+  Reset-TestPolicy
+  $script:ObserveMode = "history"
+  $script:DeliveredIncidentKeys[$legacyCertificationKey] = $true
+  $script:DeliveredIncidentKeys[(Get-Sha256Hex "full|verification|service")] = $true
+  $outerAccessError = New-AlertHttpError $accessStatus
+  $outerAccess = New-DurableCertificationFailure (New-AlertHttpError 521)
+  $outerAccess.failureStage = "verification"
+  $outerAccess.failureServiceAccess = Test-ExchangeAlertServiceAccessFailure $outerAccessError
+  $outerAccess.failureRetryable = Test-ExchangeAlertTemporaryFailure $outerAccessError
+  Assert-Equal "delivered" (Invoke-ExchangeSyncNotificationPolicy "failed" $outerAccessError.Exception.Message $outerAccess $webhook).Status "A typed outer HTTP$accessStatus must not be hidden by an older generic verification service email"
+  Assert-Equal "service_access" $outerAccess.notificationIssueKind "The typed outer denial must retain its access category"
+  $script:CurrentQueueRunId = [guid]::NewGuid().ToString()
+  Assert-Equal "not_required" (Invoke-ExchangeSyncNotificationPolicy "failed" $outerAccessError.Exception.Message $outerAccess $webhook).Status "An unchanged outer access denial must not notify twice"
+  Assert-Equal 1 $script:SentMail.Count "The same outer access denial must send once"
+}
+Assert-True (-not (Test-ExchangeAlertTemporaryFailure (New-AlertHttpError 401 "57014"))) "A typed401 must outrank a contradictory temporary SQL body"
+Reset-TestPolicy
+$script:ObserveMode = "history"
+$script:DeliveredIncidentKeys[$legacyCertificationKey] = $true
+
+# An independent auth failure or newly affected contact still warrants its own
+# incident, even while the known certification operation remains unresolved.
+$newAccess = New-DurableCertificationFailure (New-AlertHttpError 521)
+$newAccess.failureStage = "verification"
+$newAccess.failureRetryable = $false
+$script:CurrentQueueRunId = [guid]::NewGuid().ToString()
+Assert-Equal "delivered" (Invoke-ExchangeSyncNotificationPolicy "failed" "Access denied during final check." $newAccess $webhook).Status "New access failures must not be hidden behind an older operation"
+Assert-Equal "service_access" $newAccess.notificationIssueKind "Independent access trouble must retain its clear category"
+$newContact = New-DurableCertificationFailure (New-AlertHttpError 521)
+$newContact.changeDetails += New-ContactFailure "New terminal contact" "33333333-3333-4333-8333-333333333333" $true
+$newContact.failedQueueRows = 2
+$script:CurrentQueueRunId = [guid]::NewGuid().ToString()
+Assert-Equal "delivered" (Invoke-ExchangeSyncNotificationPolicy "failed" "Final check has an independent contact failure" $newContact $webhook).Status "A new terminal contact must still notify"
+Assert-True ($script:SentMail[-1].Html -match "New terminal contact") "The independent affected contact must remain visible"
+$independentProof = New-DurableCertificationFailure (New-AlertHttpError 521)
+$independentProof.failureStage = "verification"
+$independentProof.failureRetryable = $false
+$proofIncidents = @(Get-ExchangeAlertIncidents "failed" "Immutable truth-ledger proof does not match" $independentProof "full")
+Assert-Equal 2 $proofIncidents.Count "A genuine independent proof failure must not be absorbed by the known durable-certification incident"
+Assert-True ($proofIncidents.key -contains (Get-Sha256Hex "full|verification|service")) "Independent proof failures must retain their service incident"
 
 Write-Output "Exchange alert policy tests passed."

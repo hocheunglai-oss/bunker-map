@@ -12,8 +12,8 @@ test("preserved runbook exactly matches independently retrieved live publication
   const result = checkExchangePublication()
   assert.equal(result.verified, true)
   assert.equal(result.offlineOnly, true)
-  assert.equal(result.workerVersion, "fcuno-exchange-runbook/2026-10-23.1")
-  assert.equal(result.sourceSha256, "bc305c8e399afe1b2194b4e237180bfd51066193e2ec58d2492942f9def8cd4b")
+  assert.equal(result.workerVersion, "fcuno-exchange-runbook/2026-10-27.1")
+  assert.equal(result.sourceSha256, "6c85d2712d5963beda3095afb9e6cb50300ff7620c215eae70d1e901aace504e")
   assert.equal(result.migrationAlreadyInstalled, true)
 })
 

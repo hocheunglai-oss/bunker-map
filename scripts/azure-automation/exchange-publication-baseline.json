@@ -1,9 +1,9 @@
 {
   "schema": "fcuno.exchange-publication-baseline/v1",
-  "verifiedAt": "2026-10-23T09:21:45Z",
-  "retrievedAt": "2026-10-23T09:21:45Z",
-  "workerVersion": "fcuno-exchange-runbook/2026-10-23.1",
-  "sourceSha256": "bc305c8e399afe1b2194b4e237180bfd51066193e2ec58d2492942f9def8cd4b",
+  "verifiedAt": "2026-10-27T07:15:37Z",
+  "retrievedAt": "2026-10-27T07:15:37Z",
+  "workerVersion": "fcuno-exchange-runbook/2026-10-27.1",
+  "sourceSha256": "6c85d2712d5963beda3095afb9e6cb50300ff7620c215eae70d1e901aace504e",
   "sourcePath": "scripts/azure-automation/sync-fcuno-outlook-addressbook.ps1",
   "productionOrigin": "https://fcuno.com",
   "supabaseProject": "gglyugbrnyvyfktgwert",
@@ -18,41 +18,26 @@
     "exchangeModuleVersion": "3.10.1"
   },
   "publicationEvidence": {
-    "method": "Signed-in Azure Portal publication followed by independent published-source Export and exact binary comparison",
-    "sourceBytes": 339783,
-    "libraryOnlyDraftTest": "Started 2026-10-23T09:15:53Z; observed Queued then Completed by 09:19:13Z on FCUNO-PowerShell-7-6 with LibraryOnly=true, WebhookData empty and runOn=Azure; unchanged saved reviewed draft published afterwards",
+    "method": "Signed-in Azure Portal publication followed by independently reopened View Published Source, complete editor copy and exact UTF-8 text, SHA-256 and byte-length comparison",
+    "sourceBytes": 344219,
+    "libraryOnlyDraftTest": "Started 2026-10-27T07:11:18Z; Completed observed before publication by 07:13:58Z on FCUNO-PowerShell-7-6; LibraryOnly=true, WebhookData empty, runOn=Azure; same saved exact reviewed source remained unchanged",
     "libraryOnlyJobUuid": null,
-    "libraryOnlyJobIdentityLimit": "Azure's draft test view did not expose a per-execution UUID. Evidence binds the exact runbook/runtime/test-view route, parameters, observed Queued-to-Completed transition and unchanged saved source; no UUID or duplicate test was invented.",
-    "runtimePackageReadback": "Fresh 2026-10-23T09:07:22Z: PowerShell 7.6; ExchangeOnlineManagement 3.10.1 Available",
-    "publicationReceiptSha256": "ae6de00c86518e8c358dff04f947c8db6bdfe718b63ebd6357de6af93c324fd6",
-    "runtimeReadbackSha256": "99aa70f5d2bcd7a0a3e941dabf5735c2a2930e7f08fdc4e7aab056ed156fbe25",
-    "previousWorkerVersion": "fcuno-exchange-runbook/2026-10-22.3",
-    "previousSourceSha256": "ac582ffb551b771b4bec96f6df2fb754884580f81f6054b4193d505beec4d981",
-    "previousBaselineSha256": "4677dfa52762cdd18d1f8ab1030d6e364305a7df0a90d93038b1365005900bf6",
-    "scope": "Published source exported independently and byte-compared exactly after the pinned runtime's completed LibraryOnly test. Only typed SQL cancellation from either final certification RPC stops immediate retries; ambiguous response and lease-origin failures retain the existing retry policy. This publication/compilation evidence does not establish a new certificate, successful live renewal, database capacity or cause/prevention of a restart.",
-    "historicalPreviousPublication": {
-      "verifiedAt": "2026-10-22T11:24:52Z",
-      "sourceBytes": 338577,
-      "previousWorkerVersion": "fcuno-exchange-runbook/2026-10-22.2",
-      "previousSourceSha256": "2ce967e49af37e6513efa00c054793328888a5b031d06c66fd0b3fa0243c43ae",
-      "oldJobReadback": "18:35 HKT incremental job failed on valid PowerShell-native certifiedAt dates; no active lease or outstanding queue rows at 11:23:14 UTC before the separate post-publication incremental verification"
+    "libraryOnlyJobIdentityLimit": "The draft test view exposed no per-execution UUID; exact runbook/runtime/view, parameters, completion and unchanged source are bound instead. No UUID or duplicate test invented.",
+    "runtimePackageReadback": "Fresh 27 October 2026 readback: PowerShell 7.6; ExchangeOnlineManagement 3.10.1 Available; no configuration changes",
+    "publicationReceiptSha256": "ca9847a05bebf5f2449da1fb2da667a2b76b20bae05462f4dc5c6f632e361e4a",
+    "previousWorkerVersion": "fcuno-exchange-runbook/2026-10-23.1",
+    "previousSourceSha256": "bc305c8e399afe1b2194b4e237180bfd51066193e2ec58d2492942f9def8cd4b",
+    "previousBaselineSha256": "1fcab685dfa9c3ff7f2a9976196b4a959371ffcc9ba5243b381cacb000e28617",
+    "historicalEvidenceCommit": "0fdd34145d02803314bbccb99370be38d29bb718",
+    "scope": "Notification-only repair preserves already delivered operation identity/history and prevents a duplicate outer temporary-failure incident. Typed 401/403 still escalates independently; permanent proof failures remain actionable. Does not change sync retries, mutation boundaries, certification proof, timeouts, schedules, credentials, runtime, capacity or restart policy.",
+    "verification": {
+      "existingPowerShellFixtures": 9,
+      "existingActualHttpCases": 68,
+      "nativeAlertSqlCases": 21,
+      "actualWorkerHttpNativeSqlCases": 17,
+      "allPassed": true
     },
-    "historicalPreviousPublicationIncrementalVerification": {
-      "checkedAt": "2026-10-22T11:26:17Z",
-      "azureJobId": "52c288cd-0a1d-431f-8a1e-39c0912a5a35",
-      "runId": "bf810225-7b71-49f0-b92f-d03ea54c78a6",
-      "status": "completed",
-      "statusSavedAt": "2026-10-22T11:25:21.905686Z",
-      "azureErrorCount": 0,
-      "outstandingQueueRows": 0,
-      "recipientRefreshMode": "none",
-      "recipientRefreshStatus": "not-required",
-      "checkpointSequence": "8899",
-      "checkpointVerified": true,
-      "exchangeContactOrGroupMutations": 0,
-      "notificationDeliveryAttempted": false,
-      "newCertificationIssued": false
-    }
+    "limits": "No new hosted full certification or restart-cause claim. Export produced no download; the independent published-source UI readback, not Export, establishes equality. Previous publication/recovery evidence remains in Git."
   },
   "prerequisiteMigrations": [
     {

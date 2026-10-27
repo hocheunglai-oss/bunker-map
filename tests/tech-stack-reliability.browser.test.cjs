@@ -8,6 +8,7 @@ const postcss = require("postcss")
 const tailwind = require("@tailwindcss/postcss")
 const { chromium, webkit } = require("playwright")
 const root = path.resolve(__dirname, "..")
+const exchangePublication = require("../scripts/azure-automation/exchange-publication-baseline.json")
 const partialResults = []
 const mocks = {
   "@/lib/useSimpleAdminAuth": "export const useSimpleAdminAuth=()=>window.__techStackHarness.auth; export const clearAdminClientSessionCache=()=>{};",
@@ -18,6 +19,7 @@ const mocks = {
 async function main() {
   const output = process.env.TECH_STACK_SCREENSHOTS
   assert.ok(output && path.isAbsolute(output), "An owned absolute evidence directory is required.")
+  assert.equal(exchangePublication.workerVersion, "fcuno-exchange-runbook/2026-10-27.1")
   fs.mkdirSync(output, { recursive: true })
   const bundle = await build({
     absWorkingDir: root, entryPoints: ["tests/fixtures/tech-stack-reliability.tsx"],
@@ -89,6 +91,7 @@ async function main() {
             await page.waitForFunction(() => window.__techStackHarness.routes.includes("/admin"))
             assert.equal(await page.getByRole("heading", { name: "CURRENT DEPLOYMENT", exact: true }).count(), 0)
             assert.equal(await page.getByText("attendance_annual_confirmations", { exact: true }).count(), 0)
+            assert.equal(await page.getByText(/^EXCHANGE DATED LIVE CHECK —/).count(), 0)
             await page.screenshot({ path: path.join(output, label + "-signed-out.png") })
             await page.evaluate(() => {
               const h = window.__techStackHarness
@@ -153,6 +156,23 @@ async function main() {
               assert.match(correspondenceText, /OLDER DATABASE SNAPSHOTS, NEW UPLOADS AFTER V9 AND HISTORICAL FILE-VERSION RECOVERY REMAIN UNPROVED/)
               assert.match(correspondenceText, /THAT METADATA-ONLY CHECK DID NOT ADD RECURRING MEDIA BACKUP OR SYSTEM HEALTH MONITORING/)
               assert.match(await page.getByText(/^EXCHANGE RENEWAL —/).innerText(), /24 HOURS[\s\S]*UNCHANGED 36-HOUR ACCEPTANCE LIMIT[\s\S]*NOT A TIMESTAMP-ONLY RENEWAL/)
+              const exchangeWorker = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "EXCHANGE WORKER", exact: true }) })
+              assert.ok((await exchangeWorker.innerText()).includes(exchangePublication.workerVersion.toUpperCase()))
+              assert.ok((await exchangeWorker.innerText()).includes(exchangePublication.verifiedAt))
+              const exchangeCheck = page.getByText(/^EXCHANGE DATED LIVE CHECK —/)
+              const exchangeCheckText = await exchangeCheck.innerText()
+              assert.ok(exchangeCheckText.includes(exchangePublication.workerVersion.toUpperCase()))
+              assert.ok(exchangeCheckText.includes(exchangePublication.verifiedAt))
+              assert.match(exchangeCheckText, /WAS INDEPENDENTLY READ BACK AND MATCHED THE REVIEWED REPOSITORY BYTES/)
+              assert.doesNotMatch(exchangeCheckText, /WAS EXPORTED/)
+              assert.match(exchangeCheckText, /POWERSHELL 7\.6 \/ EXCHANGEONLINEMANAGEMENT 3\.10\.1[\s\S]*NOT A SUBSEQUENT LIVE FULL EXCHANGE VERIFICATION[\s\S]*DOES NOT RECHECK AZURE AT LOAD TIME/)
+              await exchangeWorker.scrollIntoViewIfNeeded()
+              await page.screenshot({ path: path.join(output, label + "-" + permission + "-exchange-worker.png") })
+              await exchangeCheck.scrollIntoViewIfNeeded()
+              const exchangeBounds = await exchangeCheck.boundingBox()
+              assert.ok(exchangeBounds && exchangeBounds.x >= -1 && exchangeBounds.x + exchangeBounds.width <= width + 1,
+                "Dated Exchange evidence must wrap inside the viewport: " + JSON.stringify(exchangeBounds))
+              await page.screenshot({ path: path.join(output, label + "-" + permission + "-exchange-readback.png") })
               await media.scrollIntoViewIfNeeded()
               await page.screenshot({ path: path.join(output, label + "-" + permission + "-media.png") })
               await media.getByRole("cell").last().scrollIntoViewIfNeeded()
@@ -178,6 +198,7 @@ async function main() {
             })
             await page.getByRole("heading", { name: "CURRENT DEPLOYMENT", exact: true }).waitFor({ state: "detached" })
             assert.equal(await page.getByText("attendance_annual_confirmations", { exact: true }).count(), 0)
+            assert.equal(await page.getByText(/^EXCHANGE DATED LIVE CHECK —/).count(), 0)
             await page.screenshot({ path: path.join(output, label + "-denied-no-annual-inventory.png") })
             await page.evaluate(() => {
               const h = window.__techStackHarness
@@ -272,7 +293,7 @@ async function main() {
             await page.screenshot({ path: path.join(output, label + "-verified.png"), fullPage: true })
             await page.screenshot({ path: path.join(output, label + "-verified-viewport.png") })
             assert.deepEqual(errors, []); assert.deepEqual(unexpected, [])
-            results.push({ engine, width, scheme, sourceTruthCopy: "view/edit pass", annualInventory: "distinct annual and monthly tables in source summary and live inventory; denied and signed-out hidden", networkRecovery: "pass", invalidResponse: "pass", staleResponse: "ignored", signedOut: "no data", phonebookServer: "ADMIN-only; failed refresh clears; late headers/body ignored; same-role actor replacement/downgrade/reset/logout hides", adminDimensions, dimensions })
+            results.push({ engine, width, scheme, sourceTruthCopy: "view/edit pass", exchangePublication: { workerVersion: exchangePublication.workerVersion, verifiedAt: exchangePublication.verifiedAt, sourceEvidence: "independent readback, not Export or a new full certification; wraps within viewport; signed-out/denied hidden" }, annualInventory: "distinct annual and monthly tables in source summary and live inventory; denied and signed-out hidden", networkRecovery: "pass", invalidResponse: "pass", staleResponse: "ignored", signedOut: "no data", phonebookServer: "ADMIN-only; failed refresh clears; late headers/body ignored; same-role actor replacement/downgrade/reset/logout hides", adminDimensions, dimensions })
           } finally { await context.close() }
         }
       } finally { await browser.close() }
