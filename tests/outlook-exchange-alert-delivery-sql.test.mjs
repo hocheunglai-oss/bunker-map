@@ -1,21 +1,63 @@
 import assert from "node:assert/strict"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
-// In-memory PostgreSQL; no cloud access or production data. Match the existing
-// optional SQL-test convention without adding a production dependency.
+// No cloud access or production data. Native mode uses the existing owned
+// PostgreSQL 17.6 Unix-socket fixture; normal optional runs retain PGlite.
+const nativeRequested = Boolean(process.env.NATIVE_PG_BIN)
 const modulePath = process.env.PGLITE_MODULE_PATH || "@electric-sql/pglite"
-const pglite = await import(modulePath).catch((error) => {
+const pglite = nativeRequested ? null : await import(modulePath).catch((error) => {
   if (!process.env.PGLITE_MODULE_PATH && error.code === "ERR_MODULE_NOT_FOUND") return null
   throw error
 })
 
-test("Exchange email delivery policy in isolated PostgreSQL", {
-  skip: pglite ? false : "Set PGLITE_MODULE_PATH to run optional SQL integration tests",
+async function database() {
+  if (!nativeRequested) return new pglite.PGlite()
+  const { setupNativeCcinfo, literal } = await import("./fixtures/native-postgres-ccinfo.mjs")
+  const fixture = await setupNativeCcinfo("")
+  let role = null
+  let sequence = 0
+  const execute = async (sql, rows = false) => {
+    // A rejected query ends its psql connection. Give every operation its own
+    // real backend so rejection tests cannot leave a broken owner session or
+    // silently skip the role checks which follow it.
+    const session = await fixture.session(`exchange-alert-${++sequence}`, false)
+    try {
+      if (role) await session.query(`set role ${role};`)
+      return rows
+        ? await session.one(`select coalesce(jsonb_agg(to_jsonb(r)), '[]'::jsonb) from (${sql}) r;`)
+        : await session.query(sql)
+    } finally { await session.close() }
+  }
+  return {
+    native: { root: fixture.root, version: fixture.version, runtimeSha256: fixture.runtimeSha256 },
+    async exec(sql) {
+      const set = sql.match(/^set role (service_role|anon|authenticated)$/)
+      if (set) { role = set[1]; return }
+      if (sql === "reset role") { role = null; return }
+      await execute(sql)
+    },
+    async query(sql, parameters = []) {
+      const bound = sql.replace(/\$(\d+)\b/g, (_, index) => {
+        const value = parameters[Number(index) - 1]
+        assert.notEqual(value, undefined, `Missing native SQL parameter ${index}`)
+        return value === null ? "null" : typeof value === "boolean" ? String(value) : literal(value)
+      })
+      return { rows: await execute(bound, /^\s*select\b/i.test(bound)) }
+    },
+    close: () => fixture.close(),
+  }
+}
+
+test(`Exchange email delivery policy in isolated ${nativeRequested ? "native PostgreSQL 17.6" : "PostgreSQL"}`, {
+  skip: nativeRequested || pglite ? false : "Set PGLITE_MODULE_PATH or NATIVE_PG_BIN to run SQL integration tests",
+  timeout: 120000,
 }, async (t) => {
-  const db = new pglite.PGlite()
+  const db = await database()
+  if (db.native) t.diagnostic(`Owned native cluster: ${JSON.stringify(db.native)}`)
   const sql = readFileSync(new URL("../supabase/migrations/20261007065554_outlook_exchange_alert_delivery.sql", import.meta.url), "utf8")
+  t.diagnostic(`Exact production alert SQL SHA-256: ${createHash("sha256").update(sql).digest("hex")}`)
   const key = "a".repeat(64)
   const keyB = "b".repeat(64)
   const incident = (immediate = true, id = key, kind = "service_access") => ({ key: id, kind, immediate })
@@ -82,6 +124,64 @@ test("Exchange email delivery policy in isolated PostgreSQL", {
       assert.deepEqual(next.incidentKeys, [keyB])
       assert.ok((await state()).incidents[key].notifiedAt)
       assert.equal((await state()).incidents[keyB].notifiedAt, undefined)
+    })
+
+    await t.test("a delivered full-sync incident stays silent across calendar days and new run IDs", async () => {
+      await reset()
+      const originalRun = randomUUID()
+      const fullIncident = incident(true, key, "verification")
+      const first = await observe([fullIncident], { run: originalRun, scope: "full" })
+      await complete(first.claimId, true, "full")
+      // Move only synthetic retained history into the past; no real clock,
+      // delivery state or production setting is changed by this fixture.
+      await db.query(`update public.office_calendar_store set payload =
+        jsonb_set(jsonb_set(jsonb_set(payload,
+          array['incidents', $2, 'firstSeen'], to_jsonb(clock_timestamp() - interval '4 days')),
+          array['incidents', $2, 'lastSeen'], to_jsonb(clock_timestamp() - interval '3 days')),
+          array['incidents', $2, 'notifiedAt'], to_jsonb(clock_timestamp() - interval '3 days'))
+        where key = $1`, [storeKey("full"), key])
+      const notifiedAt = (await state("full")).incidents[key].notifiedAt
+      for (const run of [originalRun, randomUUID(), randomUUID()]) {
+        const next = await observe([fullIncident], { run, scope: "full" })
+        assert.deepEqual(next, { shouldNotify: false, claimId: null, incidentKeys: [], reason: "already_notified" })
+        assert.equal((await state("full")).incidents[key].notifiedAt, notifiedAt)
+      }
+      assert.equal((await state("full")).incidents[key].distinctRuns, 2)
+      assert.equal((await state("full")).incidents[key].firstRunId, originalRun)
+      assert.equal((await state("full")).claim, undefined)
+    })
+
+    await t.test("missing full-sync proof does not rearm yesterday's incident, but verified recovery does", async () => {
+      await reset()
+      const fullIncident = incident(true, key, "verification")
+      const first = await observe([fullIncident], { scope: "full" })
+      await complete(first.claimId, true, "full")
+      await ageIncident(key, "3 days", "full")
+      assert.equal((await observe([], { scope: "full" })).reason, "no_current_issue")
+      assert.ok((await state("full")).incidents[key].notifiedAt)
+      assert.equal((await observe([fullIncident], { scope: "full" })).reason, "already_notified")
+      // A healthy incremental observation cannot prove full reconciliation.
+      await observe([], { recovered: true, scope: "incremental" })
+      assert.equal((await observe([fullIncident], { scope: "full" })).shouldNotify, false)
+      await observe([], { recovered: true, scope: "full" })
+      const recurrence = await observe([fullIncident], { scope: "full" })
+      assert.equal(recurrence.shouldNotify, true)
+      assert.deepEqual(recurrence.incidentKeys, [key])
+      assert.notEqual(recurrence.claimId, first.claimId)
+      assert.equal((await state("full")).incidents[key].distinctRuns, 1)
+    })
+
+    await t.test("a previously delivered verification issue cannot hide a separate new access failure", async () => {
+      await reset()
+      const verification = incident(true, key, "verification")
+      const first = await observe([verification], { scope: "full" })
+      await complete(first.claimId, true, "full")
+      await ageIncident(key, "3 days", "full")
+      const independent = await observe([verification, incident(true, keyB, "service_access")], { scope: "full" })
+      assert.equal(independent.shouldNotify, true)
+      assert.deepEqual(independent.incidentKeys, [keyB])
+      await complete(independent.claimId, true, "full")
+      assert.equal((await observe([verification, incident(true, keyB, "service_access")], { scope: "full" })).reason, "already_notified")
     })
 
     await t.test("temporary failures need two distinct runs and at least 45 minutes", async () => {

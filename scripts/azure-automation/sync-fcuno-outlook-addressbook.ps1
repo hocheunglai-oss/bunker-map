@@ -18,7 +18,7 @@ $ExchangeTemporaryErrorMaxAttempts = 3
 $ExchangeTemporaryErrorRetryDelaySeconds = 5
 $IncrementalSyncLockLeaseMinutes = 30
 $FullSyncLockLeaseMinutes = 180
-$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-10-23.1"
+$ExchangeTruthWorkerVersion = "fcuno-exchange-runbook/2026-10-27.1"
 # Generated from config/fcunoConnections.ts; validate before Azure publication.
 $ExchangeNotificationAddressBookUrl = "https://fcuno.com/admin/outlookaddressbook"
 $script:ExchangeNotificationRunReceipts = @{}
@@ -5635,8 +5635,49 @@ function Set-ExchangeNotificationDeliveryStats([hashtable]$Details, $Delivery) {
   $Details["notificationError"] = Clean-Text (Get-DetailValue $Delivery "Error")
 }
 
+function Test-ExchangeAlertServiceAccessFailure($ErrorRecord) {
+  if (-not $ErrorRecord) { return $false }
+  foreach ($statusCode in @($ErrorRecord.Exception.StatusCode, $ErrorRecord.Exception.Response.StatusCode)) {
+    try {
+      if ($null -ne $statusCode -and [Convert]::ToInt32($statusCode) -in @(401, 403)) { return $true }
+    } catch { }
+  }
+  return $false
+}
+
+function Test-ExchangeAlertTemporaryFailure($ErrorRecord, $Message = "") {
+  if ($ErrorRecord) {
+    if (Test-ExchangeAlertServiceAccessFailure $ErrorRecord) { return $false }
+    # An HTTP500 can carry a permanent SQL proof/validation error. Prefer its
+    # typed SQL identity over the outer transport status; never weaken proof.
+    $errorDetails = Clean-Text $ErrorRecord.ErrorDetails.Message
+    if ($errorDetails -and $errorDetails.Length -le 16384) {
+      try {
+        $sqlError = $errorDetails | ConvertFrom-Json -AsHashtable -NoEnumerate -Depth 16 -ErrorAction Stop
+        if ($sqlError -is [System.Collections.IDictionary] -and $sqlError.Contains('code')) {
+          if ($sqlError.code -isnot [string]) { return $false }
+          if ($sqlError.code -cin @('55P03', '57014')) { return $true }
+          if ($sqlError.code -cmatch '^[0-9A-Z]{5}$') { return $false }
+        }
+      } catch { }
+    }
+    if (Test-ExchangeTemporaryServerError $ErrorRecord) { return $true }
+    foreach ($statusCode in @($ErrorRecord.Exception.StatusCode, $ErrorRecord.Exception.Response.StatusCode)) {
+      try {
+        if ($null -ne $statusCode -and [Convert]::ToInt32($statusCode) -in @(408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524)) { return $true }
+      } catch { }
+    }
+    if (-not $Message) { $Message = Clean-Text $ErrorRecord.Exception.Message }
+  }
+  $text = Clean-Text $Message
+  # These are transport-generated messages, not arbitrary occurrences of a
+  # status number or the word 'timeout' inside a validation/mismatch result.
+  return $text -match '(?i)^(?:Response status code does not indicate success:\s*(?:408|429|500|502|503|504|520|521|522|523|524)\s*\([^\r\n]*\)\.?|HTTP\s*(?:408|429|500|502|503|504|520|521|522|523|524)(?:\s*\([^\r\n]*\))?\.?|The request was canceled due to the configured HttpClient\.Timeout of [0-9.]+ seconds elapsing\.|The operation has timed out(?: after [0-9.]+ seconds)?\.?|canceling statement due to (?:lock|statement) timeout)\s*$'
+}
+
 function Get-ExchangeAlertIncidents($Status, $Message, $Details, [string]$Scope) {
   $incidents = @{}
+  $hasTemporaryDurableFullCertificationIncident = $false
   # Historical per-change failures may have been repaired later in the same
   # job. A final verified, empty backlog supersedes those historical details.
   if ((Clean-Text $Status) -eq "completed" -and
@@ -5657,12 +5698,24 @@ function Get-ExchangeAlertIncidents($Status, $Message, $Details, [string]$Scope)
 
     $terminal = (Get-DetailValue $change "terminal") -eq $true
     $retryable = (Get-DetailValue $change "retryable") -eq $true
+    $serviceAccessFailure = (Get-DetailValue $change "serviceAccessFailure") -eq $true
     # Retry exhaustion is not proof of bad contact details. Use neutral admin
     # review advice rather than asking staff to edit a potentially valid entry.
-    $kind = if ($terminal) { "sync_issue" } elseif ($Scope -eq "full") { "verification" } else { "sync_delayed" }
-    $immediate = $terminal -or ($Scope -eq "full" -and -not $retryable)
+    $kind = if ($terminal) { "sync_issue" } elseif ($serviceAccessFailure) { "service_access" } elseif ($Scope -eq "full") { "verification" } else { "sync_delayed" }
+    $immediate = $terminal -or $serviceAccessFailure -or ($Scope -eq "full" -and -not $retryable)
     $identity = Clean-Text (Get-DetailValue $change "queueRowId")
     $entityType = (Clean-Text (Get-DetailValue $change "entityType")).ToLowerInvariant()
+    $isDurableFullCertification = $Scope -eq "full" -and $entityType -eq "full address book" -and
+      (Clean-Text (Get-DetailValue $change "action")) -eq "full_sync" -and
+      (Clean-Text (Get-DetailValue $change "displayName")) -ceq "Durable full certification"
+    if ($isDurableFullCertification) {
+      # Retain the existing verification kind and stable operation hash: a
+      # new classification must not resend an already delivered incident.
+      if ($retryable) {
+        $hasTemporaryDurableFullCertificationIncident = $true
+        $immediate = $false
+      }
+    }
     if (-not $identity -and $entityType -notin @("contact", "group")) {
       # Full-run operational identifiers include advancing queue positions;
       # use the stable operation label, not those per-run diagnostics.
@@ -5691,12 +5744,18 @@ function Get-ExchangeAlertIncidents($Status, $Message, $Details, [string]$Scope)
     $kind = "sync_issue"
     $immediate = $true
     $errorText = Clean-Text $Message
-    if ($errorText -match '(?i)(Module could not be correctly formed|timeout|timed out|temporar|throttl|429|503|connection.*(?:closed|reset)|network|mutation lease)') {
+    $explicitAccessFailure = (Get-DetailValue $Details "failureServiceAccess") -eq $true -or
+      $errorText -match '(?i)(unauthori[sz]ed|access denied|authentication|certificate.*expir|invalid.client)'
+    $temporaryFailure = if (Has-MapKey $Details "failureRetryable") {
+      (Get-DetailValue $Details "failureRetryable") -eq $true
+    } else { Test-ExchangeAlertTemporaryFailure $null $errorText }
+    if ($explicitAccessFailure) {
+      $kind = "service_access"
+    } elseif ($temporaryFailure -or $errorText -match '(?i)(Module could not be correctly formed|timeout|timed out|temporar|throttl|429|503|connection.*(?:closed|reset)|network|mutation lease)') {
       $kind = "sync_delayed"
       # A failed nightly full check needs attention before its next daily run.
       $immediate = $Scope -eq "full"
-    } elseif ($failureStage -in @("startup", "configuration", "connection") -or
-              $errorText -match '(?i)(unauthori[sz]ed|access denied|authentication|certificate.*expir|invalid.client)') {
+    } elseif ($failureStage -in @("startup", "configuration", "connection")) {
       $kind = "service_access"
     } elseif ($failureStage -eq "verification" -or $Scope -eq "full") {
       $kind = "verification"
@@ -5704,8 +5763,15 @@ function Get-ExchangeAlertIncidents($Status, $Message, $Details, [string]$Scope)
       $kind = "sync_delayed"
       $immediate = $false
     }
-    $key = Get-Sha256Hex "$Scope|$kind|service"
-    $incidents[$key] = [pscustomobject]@{ key = $key; kind = $kind; immediate = [bool]$immediate; name = "" }
+    # A failed final status/checkpoint request can report the same temporary
+    # database interruption already represented by Durable full certification.
+    # Do not turn that outer catch into a second 'service' incident/email.
+    # Access failures and genuine proof/mismatch errors remain independent.
+    if (-not ($hasTemporaryDurableFullCertificationIncident -and $failureStage -eq "verification" -and
+        $temporaryFailure -and -not $explicitAccessFailure)) {
+      $key = Get-Sha256Hex "$Scope|$kind|service"
+      $incidents[$key] = [pscustomobject]@{ key = $key; kind = $kind; immediate = [bool]$immediate; name = "" }
+    }
   }
   if ($incidents.Count -gt 1000) {
     # A widespread outage must not disable notification by exceeding the RPC
@@ -6030,8 +6096,9 @@ function Complete-IncrementalSyncOutcomeWithCheckpoint([hashtable]$Details) {
   throw "The incremental queue changed repeatedly while final status was being checkpointed; no stable success outcome was published."
 }
 
-function Add-FullSyncFailure([hashtable]$Stats, $EntityType, $DisplayName, $Identifier, $Result) {
+function Add-FullSyncFailure([hashtable]$Stats, $EntityType, $DisplayName, $Identifier, $Result, $ErrorRecord = $null) {
   Increment-Stat $Stats "failedQueueRows"
+  $serviceAccessFailure = Test-ExchangeAlertServiceAccessFailure $ErrorRecord
   $Stats["changeDetails"] = @($Stats["changeDetails"]) + [pscustomobject]@{
     status = "failed"
     action = "full_sync"
@@ -6046,6 +6113,8 @@ function Add-FullSyncFailure([hashtable]$Stats, $EntityType, $DisplayName, $Iden
     requestedBy = ""
     queuedAt = ""
     attempt = 1
+    retryable = [bool](Test-ExchangeAlertTemporaryFailure $ErrorRecord)
+    serviceAccessFailure = $serviceAccessFailure
     fieldChanges = @()
   }
 }
@@ -6132,7 +6201,8 @@ function Complete-FullExchangeQueueCertificationIfEligible(
       "Full address book" `
       "Durable full certification" `
       "queue $InitialQueueHighWater" `
-      ("Final Exchange projection verification succeeded, but the source-fenced durable queue certification was not confirmed: " + $_.Exception.Message)
+      ("Final Exchange projection verification succeeded, but the source-fenced durable queue certification was not confirmed: " + $_.Exception.Message) `
+      $_
     return $null
   }
 }
@@ -6998,6 +7068,8 @@ try {
 } catch {
   $syncError = $_
   $details["failureStage"] = $script:ExchangeSyncStage
+  $details["failureServiceAccess"] = [bool](Test-ExchangeAlertServiceAccessFailure $syncError)
+  $details["failureRetryable"] = [bool](Test-ExchangeAlertTemporaryFailure $syncError)
   try {
     Save-SyncStatus "failed" $syncError.Exception.Message $details
   } catch {
