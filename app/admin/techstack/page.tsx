@@ -121,6 +121,7 @@ const DATABASE_GROUPS = [
       "attendance_entitlements",
       "attendance_monthly_adjustments (legacy opening records)",
       "attendance_monthly_confirmations",
+      "attendance_annual_confirmations",
       "attendance_reminder_dispatches",
       "attendance_sync_runs",
     ],
