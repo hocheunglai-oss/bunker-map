@@ -6,6 +6,7 @@ import { transformSync } from "esbuild"
 import * as policy from "../lib/backupProtectionPolicy"
 import * as files from "../lib/driveFileBackupHealth"
 import * as pricing from "../lib/backupPricingSchema.mjs"
+import * as attendanceSchema from "../lib/backupAttendanceSchema.mjs"
 import * as mediaHealth from "../lib/storageMediaBackupHealthService"
 import * as mediaSource from "../lib/storageMediaBackupSource"
 import * as connections from "../config/fcunoConnections"
@@ -37,6 +38,7 @@ function fixture(options: { active?: boolean; driveError?: boolean; verified?: R
     "@/lib/emailNotice": { getEmailNoticeConfigStatus: () => ({ missing: [] }) },
     "@/lib/googleApis": { loadGoogleApis: async () => ({ google: { drive: () => drive, auth: { OAuth2: class { setCredentials() {} } } } }) },
     "@/lib/driveFileBackupHealth": files, "@/lib/backupProtectionPolicy": policy, "@/lib/backupPricingSchema.mjs": pricing,
+    "@/lib/backupAttendanceSchema.mjs": attendanceSchema,
     "@/lib/storageMediaBackupHealthService": mediaHealth, "@/lib/storageMediaBackupSource": mediaSource,
     "@/config/fcunoConnections": connections,
     "@/lib/attendanceAutoConfirmPolicy": attendanceExceptions, "@/lib/attendanceRules": attendanceRules,

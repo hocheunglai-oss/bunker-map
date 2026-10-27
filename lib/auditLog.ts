@@ -222,6 +222,7 @@ const TABLE_PAGE_IDS: Record<string, string> = {
   attendance_entitlements: "attendance-record",
   attendance_monthly_adjustments: "attendance-record",
   attendance_monthly_confirmations: "attendance-record",
+  attendance_annual_confirmations: "attendance-record",
   attendance_reminder_dispatches: "attendance-record",
 }
 
@@ -292,6 +293,7 @@ const ENTITY_NAMES: Record<string, string> = {
   attendance_entitlements: "attendance entitlement",
   attendance_monthly_adjustments: "attendance opening record",
   attendance_monthly_confirmations: "attendance monthly confirmation",
+  attendance_annual_confirmations: "attendance annual confirmation",
   attendance_reminder_dispatches: "attendance reminder dispatch",
 }
 

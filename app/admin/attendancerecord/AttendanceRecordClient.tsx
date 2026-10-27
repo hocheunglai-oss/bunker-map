@@ -9,8 +9,8 @@ import styles from "./attendanceRecord.module.css"
 import type {
   ApiAllTimeSummary,
   ApiAttendanceAnnualSummary,
+  ApiAttendanceAnnualConfirmation,
   ApiAttendanceCalendarDay,
-  ApiAttendanceConfirmation,
   ApiAttendanceDailyItem,
   ApiAttendanceEntitlement,
   ApiAttendanceHoliday,
@@ -131,6 +131,7 @@ const EMPTY_MONTH: AttendanceMonthData = {
 const EMPTY_SETTINGS: ApiSettingsResponse = {
   view: "settings",
   year: 0,
+  annualConfirmationAvailable: false,
   people: [],
   schedules: [],
   syncRuns: [],
@@ -204,7 +205,19 @@ function parseHoliday(value: unknown): ApiAttendanceHoliday | null {
   }
 }
 
-function parseAnnualSummary(value: unknown): ApiAttendanceAnnualSummary | null {
+function parseAnnualConfirmation(value: unknown, personId: string, year: number): ApiAttendanceAnnualConfirmation | null {
+  if (value === null || value === undefined) return null
+  if (!isObject(value) || Object.hasOwn(value, "month") || value.personId !== personId || value.year !== year ||
+      (value.status !== "confirmed" && value.status !== "pending") ||
+      typeof value.id !== "string" || !value.id ||
+      (value.status === "confirmed" && (sourceRevision(value.confirmedSourceRevision) === undefined ||
+        typeof value.confirmedAt !== "string" || typeof value.confirmedBy !== "string"))) {
+    throw new Error("The year-end confirmation is invalid. Reload the attendance statement.")
+  }
+  return value as ApiAttendanceAnnualConfirmation
+}
+
+function parseAnnualSummary(value: unknown, year: number): ApiAttendanceAnnualSummary | null {
   if (!isObject(value)) return null
   const personId = String(value.personId || value.person_id || "").trim()
   if (!personId) return null
@@ -237,9 +250,7 @@ function parseAnnualSummary(value: unknown): ApiAttendanceAnnualSummary | null {
       Number(value.closingBalanceUnits ?? value.closing_balance_units) || 0,
     codeTotals,
     codeDates,
-    confirmation: isObject(value.confirmation)
-      ? (value.confirmation as ApiAttendanceConfirmation)
-      : null,
+    confirmation: parseAnnualConfirmation(value.confirmation, personId, year),
     canConfirm: value.canConfirm === true,
     leavePaidUnits:
       leavePaidRaw === null || leavePaidRaw === undefined || leavePaidRaw === ""
@@ -374,8 +385,9 @@ function parseYearResponse(value: unknown, fallbackYear: number) {
 
 function parseSettingsResponse(value: unknown, year: number): ApiSettingsResponse {
   const source = responseSource(value)
+  const annualConfirmationAvailable = source.annualConfirmationAvailable === true
   const annualSummaries = arrayValue<unknown>(source.annualSummaries ?? source.annual_summaries)
-    .map(parseAnnualSummary)
+    .map((item) => parseAnnualSummary(item, year))
     .filter((item): item is ApiAttendanceAnnualSummary => Boolean(item))
   const entitlements = arrayValue<unknown>(source.entitlements)
     .map(parseEntitlement)
@@ -387,6 +399,7 @@ function parseSettingsResponse(value: unknown, year: number): ApiSettingsRespons
     view: "settings",
     sourceRevision: sourceRevision(source.sourceRevision),
     year: Number(source.year) || year,
+    annualConfirmationAvailable,
     people: arrayValue<ApiAttendancePerson>(source.people),
     schedules: arrayValue(source.schedules),
     syncRuns: arrayValue(source.syncRuns),
@@ -1439,25 +1452,32 @@ export default function AttendanceRecordClient() {
     }
   }
 
-  async function confirmAnnualSummary(personId: string) {
+  async function confirmAnnualSummary(personId: string, status: "confirmed" | "pending" = "confirmed") {
     if (confirmationPendingRef.current || pendingAction) return
+    const year = selectedAllTimeYear
+    const annual = annualByPerson.get(personId)
+    if (settings.year !== year || settingsLoading || !settings.annualConfirmationAvailable ||
+        (status === "pending" ? !canEdit : !annual?.canConfirm)) return
     confirmationPendingRef.current = true
-    setPendingAction(`save-annual-confirmation:${personId}:${selectedAllTimeYear}`)
+    setPendingAction(`save-annual-confirmation:${personId}:${year}`)
     setNotice("")
     try {
       const revision = settings.sourceRevision
-      if (revision === undefined) throw new Error("Reload the attendance statement before confirming it.")
-      const payload = await postAttendance("save-confirmation", {
+      if (status === "confirmed" && revision === undefined) throw new Error("Reload the attendance statement before confirming it.")
+      const payload = await postAttendance("save-annual-confirmation", {
         confirmation: {
           personId,
-          year: selectedAllTimeYear,
-          month: 12,
-          status: "confirmed",
-          note: "annual-summary",
-          sourceRevision: revision,
+          year,
+          status,
+          ...(status === "confirmed" ? { sourceRevision: revision } : {}),
         },
       })
-      setNotice(getErrorMessage(payload, `${selectedAllTimeYear} year-end summary confirmed.`))
+      const saved = parseAnnualConfirmation(isObject(payload) ? payload.annualConfirmation : null, personId, year)
+      if (!saved || saved.status !== status ||
+          (status === "confirmed" && saved.confirmedSourceRevision !== revision)) {
+        throw new Error("The year-end confirmation could not be verified. Reload the attendance statement.")
+      }
+      setNotice(`${year} year-end summary ${status === "confirmed" ? "confirmed" : "reset to pending"}.`)
       await loadAllTime()
     } catch (error) {
       const message = error instanceof Error ? error.message : "Year-end summary confirmation could not be saved."
@@ -1927,7 +1947,23 @@ export default function AttendanceRecordClient() {
               <div className={styles.inlineLoading}><span className={styles.spinner} aria-hidden="true" />Loading attendance users…</div>
             ) : (
               <>
-              <div className={`${styles.tablePanel} ${styles.allTimePanel}`}>
+              {!settings.annualConfirmationAvailable && settings.people.length ? (
+                <div className={styles.notice} role="status">
+                  <span>Year-end confirmation is temporarily unavailable while an update finishes. Monthly confirmations are unchanged.</span>
+                </div>
+              ) : null}
+              <div className={`${styles.tablePanel} ${styles.allTimePanel}`} role="region"
+                aria-label="Annual attendance totals; scroll horizontally on small screens" tabIndex={0}
+                onKeyDown={(event) => {
+                  const region = event.currentTarget
+                  if (event.target !== region || region.scrollWidth <= region.clientWidth) return
+                  if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                    region.scrollLeft += event.key === "ArrowRight" ? 120 : -120
+                  } else if (event.key === "Home" || event.key === "End") {
+                    region.scrollLeft = event.key === "End" ? region.scrollWidth : 0
+                  } else return
+                  event.preventDefault()
+                }}>
                 <table className={styles.allTimeTable}>
                   <thead>
                     <tr>
@@ -1937,7 +1973,7 @@ export default function AttendanceRecordClient() {
                       <th colSpan={1} className={styles.closingGroup}>
                         {selectedAllTimeYear < currentYear ? "CLOSING POSITION" : "CURRENT BALANCE"}
                       </th>
-                      <th rowSpan={2}>YEAR-END<br />CONFIRMATION</th>
+                      <th rowSpan={2} className={styles.confirmationCell}>YEAR-END<br />CONFIRMATION</th>
                     </tr>
                     <tr>
                       <th>BALANCE B/F<br />31 DEC {selectedAllTimeYear - 1}</th>
@@ -1984,20 +2020,34 @@ export default function AttendanceRecordClient() {
                           ))}
                           <td className={styles.closingBalanceCell}>{displaySummaryDays(annual?.closingBalanceUnits || 0)}</td>
                           <td className={styles.confirmationCell}>
-                            {annual?.confirmation?.status === "confirmed" ? (
-                              <span className={styles.confirmedBadge}>CONFIRMED</span>
+                            {!settings.annualConfirmationAvailable ? (
+                              <span className={styles.openBadge}>NOT AVAILABLE</span>
+                            ) : annual?.confirmation?.status === "confirmed" ? (
+                              <>
+                                <span className={styles.confirmedBadge} title={displayDateTime(annual.confirmation.confirmedAt)}>CONFIRMED</span>
+                                {canEdit ? (
+                                  <button type="button" className={styles.confirmButton}
+                                    aria-label={`Reset ${person.staffCode} ${selectedAllTimeYear} year-end confirmation`}
+                                    onClick={() => void confirmAnnualSummary(person.id, "pending")}
+                                    disabled={Boolean(pendingAction) || settingsLoading}>
+                                    {pendingAction === `save-annual-confirmation:${person.id}:${selectedAllTimeYear}` ? "SAVING…" : "RESET"}
+                                  </button>
+                                ) : null}
+                              </>
                             ) : annual?.canConfirm ? (
                               <button
                                 type="button"
                                 className={styles.confirmButton}
                                 data-admin-view-safe="true"
                                 onClick={() => void confirmAnnualSummary(person.id)}
-                                disabled={Boolean(pendingAction)}
+                                disabled={Boolean(pendingAction) || settingsLoading}
                               >
                                 {pendingAction === `save-annual-confirmation:${person.id}:${selectedAllTimeYear}` ? "SAVING…" : "CONFIRM YEAR"}
                               </button>
                             ) : (
-                              <span className={styles.openBadge} title={`${selectedAllTimeYear} year in progress`}>IN PROGRESS</span>
+                              <span className={styles.openBadge} title={`${selectedAllTimeYear} ${selectedAllTimeYear < currentYear ? "year-end summary not confirmed" : "year in progress"}`}>
+                                {selectedAllTimeYear < currentYear ? "NOT CONFIRMED" : "IN PROGRESS"}
+                              </span>
                             )}
                           </td>
                         </tr>

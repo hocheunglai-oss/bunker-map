@@ -1,6 +1,7 @@
 import "server-only"
 
 import { randomUUID } from "node:crypto"
+import { attendanceBackupSchemaFromInventory, attendanceBackupSchemaVersion } from "@/lib/backupAttendanceSchema.mjs"
 import { DINGTALK_ATTENDANCE_MAX_USERS } from "@/lib/dingTalkAttendance"
 import { DINGTALK_ATTENDANCE_IMPORT_CUTOFF } from "@/lib/attendanceSyncRecords"
 import { inferUnclassifiedAttendanceDirections } from "@/lib/attendanceUnclassifiedPunches"
@@ -176,6 +177,11 @@ export type AttendanceMonthlyConfirmation = {
   updatedAt: string
 }
 
+// A year-end approval is independent of every monthly approval, including December.
+export type AttendanceAnnualConfirmation = Omit<AttendanceMonthlyConfirmation, "month"> & {
+  confirmedSourceRevision: number | null
+}
+
 export class AttendanceSourceChangedError extends Error {
   constructor() {
     super("Attendance records changed while this statement was open. Reload and review the current record before confirming.")
@@ -184,15 +190,15 @@ export class AttendanceSourceChangedError extends Error {
 }
 
 export class AttendanceAlreadyConfirmedError extends Error {
-  constructor() {
-    super("This attendance month was already confirmed. Reload and review the current confirmation.")
+  constructor(period: "month" | "year" = "month") {
+    super(`This attendance ${period} was already confirmed. Reload and review the current confirmation.`)
     this.name = "AttendanceAlreadyConfirmedError"
   }
 }
 
 export class AttendancePunchReviewRequiredError extends Error {
-  constructor() {
-    super("A DingTalk punch discrepancy needs administrator review before this month can be confirmed.")
+  constructor(period: "month" | "year" = "month") {
+    super(`A DingTalk punch discrepancy needs administrator review before this ${period} can be confirmed.`)
     this.name = "AttendancePunchReviewRequiredError"
   }
 }
@@ -479,6 +485,33 @@ function mapConfirmation(value: unknown): AttendanceMonthlyConfirmation {
   }
 }
 
+function mapAnnualConfirmation(value: unknown): AttendanceAnnualConfirmation {
+  const row = asRow(value)
+  if (Object.hasOwn(row, "month") || typeof row.id !== "string" || !row.id ||
+      (row.status !== "confirmed" && row.status !== "pending") ||
+      (row.status === "confirmed" && (!stringOrNull(row.confirmed_at) || !stringOrNull(row.confirmed_by)))) {
+    throw new Error("Annual confirmation record is invalid.")
+  }
+  const revision = row.confirmed_source_revision === null || row.confirmed_source_revision === undefined
+    ? null : Number(row.confirmed_source_revision)
+  if ((row.status === "confirmed" && revision === null) ||
+      (revision !== null && (!Number.isSafeInteger(revision) || revision < 0))) {
+    throw new Error("Annual confirmation source revision is invalid.")
+  }
+  return {
+    id: String(row.id),
+    personId: String(row.person_id),
+    year: numberValue(row.year),
+    status: String(row.status) as "pending" | "confirmed",
+    confirmedAt: stringOrNull(row.confirmed_at),
+    confirmedBy: stringOrNull(row.confirmed_by),
+    confirmedSourceRevision: revision,
+    note: String(row.note || ""),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  }
+}
+
 function mapSyncRun(value: unknown): AttendanceSyncRun {
   const row = asRow(value)
   return {
@@ -498,6 +531,14 @@ function mapSyncRun(value: unknown): AttendanceSyncRun {
 
 function throwIfError(error: { message?: string } | null, fallback: string) {
   if (error) throw new Error(error.message || fallback)
+}
+
+async function annualConfirmationAvailable(client: SupabaseClient) {
+  const { data, error } = await client.rpc("get_bunker_map_backup_inventory")
+  throwIfError(error, "Could not verify annual attendance confirmation availability.")
+  // Only exact migration/table/physical-column evidence enables the additive
+  // feature. A proven pre-migration inventory is not an error or a December fallback.
+  return attendanceBackupSchemaVersion(attendanceBackupSchemaFromInventory(data)) === "annual-v1"
 }
 
 async function loadAttendancePunchRows(
@@ -1553,6 +1594,7 @@ export async function getAllTimeAttendance(
   const yearStart = `${year}-01-01`
   const yearEnd = `${year}-12-31`
   const supabase = getAttendanceServiceClient()
+  const canUseAnnualConfirmations = await annualConfirmationAvailable(supabase)
   const [
     peopleResult,
     entitlementResult,
@@ -1615,11 +1657,10 @@ export async function getAllTimeAttendance(
     loadAttendanceCalendarContext(supabase),
     loadAttendanceAvailableYears(supabase),
     managedAdminUsersById(),
-    supabase
-      .from("attendance_monthly_confirmations")
+    canUseAnnualConfirmations ? supabase
+      .from("attendance_annual_confirmations")
       .select("*")
-      .eq("year", year)
-      .eq("month", 12),
+      .eq("year", year) : Promise.resolve({ data: [], error: null }),
   ])
   throwIfError(peopleResult.error, "Could not load attendance people.")
   throwIfError(entitlementResult.error, "Could not load entitlements.")
@@ -1699,7 +1740,7 @@ export async function getAllTimeAttendance(
   )
   const entitlements = (entitlementResult.data || []).map(mapEntitlement)
   const monthlyAdjustments = (adjustmentResult.data || []).map(mapAdjustment)
-  const yearEndConfirmations = (confirmationResult.data || []).map(mapConfirmation)
+  const yearEndConfirmations = (confirmationResult.data || []).map(mapAnnualConfirmation)
   const currentHktYear = Number(hktDateFromTimestamp(new Date()).slice(0, 4))
   const allTimeSummaries = activePeople.map((person) => {
     const dates = [
@@ -1828,9 +1869,7 @@ export async function getAllTimeAttendance(
     const confirmation =
       yearEndConfirmations.find(
         (entry) =>
-          entry.personId === person.id &&
-          entry.status === "confirmed" &&
-          entry.note === "annual-summary",
+          entry.personId === person.id && entry.status === "confirmed",
       ) || null
     return {
       personId: person.id,
@@ -1839,8 +1878,8 @@ export async function getAllTimeAttendance(
       closingBalanceUnits,
       confirmation,
       canConfirm:
-        year < currentHktYear &&
-        (Boolean(options.canEdit) || person.adminUserId === options.adminUserId),
+        canUseAnnualConfirmations && year < currentHktYear &&
+        (Boolean(options.canEdit) || (Boolean(options.adminUserId) && person.adminUserId === options.adminUserId)),
       leavePaidUnits: null,
       codeTotals,
       codeDates,
@@ -1849,6 +1888,7 @@ export async function getAllTimeAttendance(
   return {
     view: "all-time" as const,
     year,
+    annualConfirmationAvailable: canUseAnnualConfirmations,
     people: activePeople,
     availableUsers,
     allTimeSummaries,
@@ -2495,6 +2535,9 @@ export async function saveAttendanceMonthlyConfirmation(
   actor: string,
 ) {
   const row = asRow(input)
+  if (optionalText(row.note).trim() === "annual-summary") {
+    throw new AttendanceValidationError("Year-end confirmation must use the separate annual confirmation action. Reload the attendance page.")
+  }
   const personId = requireUuid(row.personId, "Person id")
   const year = requireYear(row.year)
   const month = requireMonth(row.month)
@@ -2540,6 +2583,59 @@ export async function saveAttendanceMonthlyConfirmation(
   const confirmation = Array.isArray(data) ? data[0] : data
   if (!confirmation) throw new Error("Monthly confirmation did not return a record.")
   return mapConfirmation(confirmation)
+}
+
+export async function saveAttendanceAnnualConfirmation(
+  client: SupabaseClient,
+  input: unknown,
+  actor: string,
+) {
+  const row = asRow(input)
+  const personId = requireUuid(row.personId, "Person id").toLowerCase()
+  if (row.year === null || row.year === undefined || row.year === "") {
+    throw new AttendanceValidationError("Annual confirmation year is required.")
+  }
+  const year = requireYear(row.year)
+  if (Object.hasOwn(row, "month")) {
+    throw new AttendanceValidationError("Annual confirmation must not include a month.")
+  }
+  if (row.status !== "pending" && row.status !== "confirmed") {
+    throw new AttendanceValidationError("Confirmation status is invalid.")
+  }
+  const confirmed = row.status === "confirmed"
+  if (confirmed && year >= hktYearMonth().year) {
+    throw new AttendanceValidationError("Annual attendance can be confirmed only after the Hong Kong year has closed.")
+  }
+  const sourceRevision = Number(row.sourceRevision)
+  if (confirmed && (typeof row.sourceRevision !== "number" ||
+      !Number.isSafeInteger(sourceRevision) || sourceRevision < 0)) {
+    throw new AttendanceValidationError("Reload the attendance statement before confirming it.")
+  }
+  if (!(await annualConfirmationAvailable(client))) {
+    throw new AttendanceValidationError("Year-end confirmation is not available yet while an update finishes. Monthly confirmations are unchanged. Reload the attendance page shortly.")
+  }
+  const { data, error } = await client.rpc("save_attendance_annual_confirmation_checked", {
+    p_person_id: personId,
+    p_year: year,
+    p_status: row.status,
+    p_note: optionalText(row.note),
+    p_actor: actor,
+    p_expected_revision: confirmed ? sourceRevision : null,
+  })
+  if (error?.message?.includes("ATTENDANCE_SOURCE_CHANGED:")) throw new AttendanceSourceChangedError()
+  if (error?.message?.includes("ATTENDANCE_ALREADY_CONFIRMED:")) throw new AttendanceAlreadyConfirmedError("year")
+  if (error?.message?.includes("ATTENDANCE_DINGTALK_ANOMALY_OPEN:")) throw new AttendancePunchReviewRequiredError("year")
+  if (error?.message?.includes("ATTENDANCE_SYNC_INCOMPLETE:")) throw new AttendanceSyncReviewRequiredError()
+  if (error?.message?.includes("ATTENDANCE_DINGTALK_IDENTITY_MISMATCH:")) throw new AttendanceIdentityReviewRequiredError()
+  throwIfError(error, confirmed ? "Could not save annual confirmation." : "Could not reset annual confirmation.")
+  const result = Array.isArray(data) ? data[0] : data
+  if (!result) throw new Error("Annual confirmation did not return a record.")
+  const confirmation = mapAnnualConfirmation(result)
+  if (confirmation.personId !== personId || confirmation.year !== year || confirmation.status !== row.status ||
+      (confirmed && confirmation.confirmedSourceRevision !== sourceRevision)) {
+    throw new Error("Annual confirmation returned a mismatched record.")
+  }
+  return confirmation
 }
 
 export async function attendancePersonBelongsToAdminUser(

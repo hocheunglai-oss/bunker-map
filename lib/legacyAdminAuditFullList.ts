@@ -44,6 +44,7 @@ const PAGE_TABLES: Record<string, string[]> = {
     "attendance_entitlements",
     "attendance_monthly_adjustments",
     "attendance_monthly_confirmations",
+    "attendance_annual_confirmations",
     "attendance_reminder_dispatches",
   ],
 }

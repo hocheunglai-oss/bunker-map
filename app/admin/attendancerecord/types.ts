@@ -80,6 +80,10 @@ export type ApiAttendanceConfirmation = {
   note: string | null
 }
 
+export type ApiAttendanceAnnualConfirmation = Omit<ApiAttendanceConfirmation, "month"> & {
+  confirmedSourceRevision: number | null
+}
+
 export type ApiAttendanceDailyItem = {
   person: ApiAttendancePerson
   schedule: ApiAttendanceSchedule
@@ -199,7 +203,7 @@ export type ApiAttendanceAnnualSummary = {
   closingBalanceUnits: number
   codeTotals: Record<string, number>
   codeDates?: Record<string, string[]>
-  confirmation?: ApiAttendanceConfirmation | null
+  confirmation?: ApiAttendanceAnnualConfirmation | null
   canConfirm?: boolean
   leavePaidUnits?: number | null
 }
@@ -223,6 +227,7 @@ export type ApiSettingsResponse = {
   view: "settings"
   sourceRevision?: number
   year: number
+  annualConfirmationAvailable: boolean
   people: ApiAttendancePerson[]
   schedules: ApiAttendanceSchedule[]
   syncRuns: ApiAttendanceSyncRun[]

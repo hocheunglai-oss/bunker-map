@@ -15,6 +15,16 @@ test("View attendance confirmation reaches the server for its ownership and clos
   assert.equal(await allowed(path, { ...options(), method: "post" }), true)
 })
 
+test("View annual confirmation uses only the same-origin confirmed-only attendance exception", async () => {
+  const annual = { action: "save-annual-confirmation", confirmation: { personId: "own-person", year: 2025, status: "confirmed", sourceRevision: 7 } }
+  assert.equal(await allowed(path, options(annual)), true)
+  assert.equal(await allowed("https://example.com/api/admin/attendance", options(annual)), false)
+  assert.equal(await allowed(path, options(annual), "user-management"), false)
+  assert.equal(await allowed(path, options(annual), "attendance-record", false), false)
+  assert.equal(await allowed(path, options({ ...annual, confirmation: { ...annual.confirmation, status: "pending" } })), false)
+  assert.equal(await allowed(path, options({ action: "save-annual-confirmation", confirmation: [] })), false)
+})
+
 test("the exception is restricted to the attendance page with View access and its same-origin POST endpoint", async () => {
   for (const url of ["https://example.com/api/admin/attendance", "/api/admin/attendance/other", "/api/admin/users", "/api/admin/attendance/"]) {
     assert.equal(await allowed(url), false, url)

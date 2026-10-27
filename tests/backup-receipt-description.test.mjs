@@ -17,7 +17,7 @@ const constant = name => {
 const code = ts.transpileModule(fn.getText(tree), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText
 const markBackupVerified = new Function("BACKUP_FILE_SCHEMA", "BACKUP_STREAM_VERIFICATION_SCHEMA", `${code}; return markBackupVerified;`)(constant("BACKUP_FILE_SCHEMA"), constant("BACKUP_STREAM_VERIFICATION_SCHEMA"))
 const prepared = { artifactPrefix: { deploymentCommit: "synthetic-commit", backupRunId: "synthetic-run", source: "admin-manual" },
-  truthHeadSequence: 7, truthHeadSha256: "a".repeat(64), migrationHead: "20261022092121", pricingSchemaVersion: "synthetic-pricing", databaseEpoch: 4,
+  truthHeadSequence: 7, truthHeadSha256: "a".repeat(64), migrationHead: "20261022092121", pricingSchemaVersion: "synthetic-pricing", attendanceSchemaVersion: "annual-v1", databaseEpoch: 4,
   inventorySha256: "b".repeat(64), catalogSha256: "c".repeat(64), liveTableCount: 12, sectionCount: 15, totalRecordCount: 27,
   generatedAt: "2026-10-22T01:02:03.000Z", latestCertificationRunId: "synthetic-certification", latestProjectionSnapshotSha256: "d".repeat(64) }
 const streamed = { artifactSha256: "e".repeat(64), uploadedFileSha256: "f".repeat(64), fileByteLength: 12345 }
@@ -46,6 +46,7 @@ test("description correction preserves every backup receipt property, predecesso
         backupSchema: constant("BACKUP_FILE_SCHEMA"), verificationContract: constant("BACKUP_STREAM_VERIFICATION_SCHEMA"), verificationStatus: "complete",
         artifactSha256: streamed.artifactSha256, uploadedFileSha256: streamed.uploadedFileSha256, fileByteLength: "12345",
         truthHeadSequence: "7", truthHeadSha256: prepared.truthHeadSha256, migrationHead: prepared.migrationHead, pricingSchemaVersion: prepared.pricingSchemaVersion,
+        attendanceSchemaVersion: prepared.attendanceSchemaVersion,
         databaseEpoch: "4", inventorySha256: prepared.inventorySha256, catalogSha256: prepared.catalogSha256, liveTableCount: "12", sectionCount: "15", totalRecordCount: "27",
         backupRunId: "synthetic-run", generatedAt: prepared.generatedAt, deploymentCommit: "synthetic-commit", source: "admin-manual",
         latestCertificationRunId: prepared.latestCertificationRunId, latestProjectionSnapshotSha256: prepared.latestProjectionSnapshotSha256,

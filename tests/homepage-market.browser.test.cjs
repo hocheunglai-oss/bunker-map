@@ -94,6 +94,13 @@ async function main() {
             app.state.fallbackFailure = true
             await page.evaluate(() => window.__homepageHarness.refresh())
             await error().waitFor(); assert.ok(await page.getByText("SE", { exact: true }).count() > 0)
+            if (width < 500) await page.waitForFunction(() => {
+              const popup = document.querySelector(".leaflet-popup")
+              const warning = document.querySelector('[role="status"]')
+              if (!popup || !warning) return false
+              const bounds = popup.getBoundingClientRect(), panel = warning.parentElement.getBoundingClientRect()
+              return bounds.top >= panel.bottom + 10 && bounds.bottom <= innerHeight
+            })
             assert.equal(statuses.at(-1), 502); await shot("refresh-failure-retains-markers")
             await page.reload(); await ready(); await error().waitFor()
             assert.equal(await page.getByText("SE", { exact: true }).count(), 0)

@@ -799,6 +799,10 @@
   overflow: visible;
 }
 
+.allTimeTable .confirmationCell {
+  width: 120px;
+}
+
 .allTimeTable th {
   position: sticky;
   z-index: 2;
@@ -1344,6 +1348,24 @@
 }
 
 @media (max-width: 760px) {
+  /* Keep year-end actions readable and reachable inside the table, rather
+     than compressing sixteen columns or overflowing the phone viewport. */
+  .allTimePanel {
+    overflow: auto;
+  }
+
+  .allTimeTable {
+    min-width: 1100px;
+  }
+
+  .allTimeTable .confirmButton {
+    min-height: 40px;
+  }
+
+  .rosterFilters .compactYearSelector select {
+    height: 36px;
+  }
+
   .yearSummaryTable thead th:nth-child(1),
   .yearSummaryTable .monthCell {
     width: 60px;

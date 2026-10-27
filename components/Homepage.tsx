@@ -108,6 +108,52 @@ function MapController({ mapRef }: { mapRef: React.MutableRefObject<L.Map | null
   return null
 }
 
+// Leaflet cannot see the floating search panel. Keep an open mobile popup
+// below its measured edge, including when a refresh warning makes it taller.
+function MobilePopupVisibility({ panelRef, enabled }: {
+  panelRef: React.RefObject<HTMLDivElement | null>
+  enabled: boolean
+}) {
+  const map = useMap()
+  useEffect(() => {
+    const panel = panelRef.current
+    if (!enabled || !panel) return
+    let popup: L.Popup | null = null
+    map.eachLayer(layer => { if (layer instanceof L.Popup && layer.isOpen()) popup = layer })
+    let frame: number | null = null
+    const schedule = () => {
+      if (frame !== null) cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        frame = null
+        const element = popup?.getElement()
+        if (!element || !popup?.isOpen()) return
+        const occupied = panel.getBoundingClientRect()
+        const bounds = element.getBoundingClientRect()
+        const displacement = occupied.bottom + 12 - bounds.top
+        if (bounds.right > occupied.left && bounds.left < occupied.right && displacement > 1) {
+          map.panBy([0, -displacement], { animate: false })
+        }
+      })
+    }
+    const opened = (event: L.PopupEvent) => { popup = event.popup; schedule() }
+    const closed = () => { popup = null }
+    const observer = new ResizeObserver(schedule)
+    observer.observe(panel)
+    map.on("popupopen", opened)
+    map.on("popupclose", closed)
+    map.on("moveend resize", schedule)
+    schedule()
+    return () => {
+      observer.disconnect()
+      map.off("popupopen", opened)
+      map.off("popupclose", closed)
+      map.off("moveend resize", schedule)
+      if (frame !== null) cancelAnimationFrame(frame)
+    }
+  }, [enabled, map, panelRef])
+  return null
+}
+
 function BaseMapLayer() {
   const map = useMap()
 
@@ -336,6 +382,7 @@ export default function Homepage({ initialData, onReady }: HomepageProps) {
   )
 
   const mapRef = useRef<L.Map | null>(null)
+  const popupPanelRef = useRef<HTMLDivElement | null>(null)
   const markerRefs = useRef<Record<number, L.CircleMarker>>({})
   const reportsCloseTimeoutRef = useRef<number | null>(null)
   const router = useRouter()
@@ -515,6 +562,7 @@ export default function Homepage({ initialData, onReady }: HomepageProps) {
           style={{ height: "100%", width: "100%" }}
         >
           <MapController mapRef={mapRef} />
+          <MobilePopupVisibility panelRef={popupPanelRef} enabled={isMobile} />
 
           <BaseMapLayer />
 
@@ -757,6 +805,7 @@ export default function Homepage({ initialData, onReady }: HomepageProps) {
       )}
 
       <div
+        ref={popupPanelRef}
         style={{
           position: "absolute",
           top: panelInset,
@@ -849,6 +898,7 @@ export default function Homepage({ initialData, onReady }: HomepageProps) {
 
         {marketDataStatus === "error" && (
           <div
+            role="status"
             style={{
               ...panelSectionStyle,
               marginBottom: isMobile ? "10px" : "14px",

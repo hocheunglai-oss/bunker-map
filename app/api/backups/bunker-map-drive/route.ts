@@ -16,6 +16,7 @@ import {
 import { loadGoogleApis } from "@/lib/googleApis"
 import { buildGoogleDriveFolderLookupQuery } from "@/lib/queryEscaping"
 import { pricingBackupSchemaFromInventory, pricingBackupSchemaVersion, type PricingBackupSchemaVersion } from "@/lib/backupPricingSchema.mjs"
+import { attendanceBackupSchemaFromInventory, attendanceBackupSchemaVersion, parseAttendanceBackupSchemaVersion, type AttendanceBackupSchemaVersion } from "@/lib/backupAttendanceSchema.mjs"
 import { streamReferencedTruthSnapshots } from "@/lib/backupTruthSnapshotExport"
 
 export const dynamic = "force-dynamic"
@@ -111,6 +112,7 @@ type PreparedBackupData = {
   databaseEpoch: number
   migrationHead: string
   pricingSchemaVersion: PricingBackupSchemaVersion
+  attendanceSchemaVersion: AttendanceBackupSchemaVersion
   inventorySha256: string
   catalogSha256: string
   liveTableCount: number
@@ -222,6 +224,7 @@ const TABLES: TableConfig[] = [
   { key: "attendanceEntitlements", table: "attendance_entitlements", order: [{ column: "id", ascending: true }] },
   { key: "attendanceMonthlyAdjustments", table: "attendance_monthly_adjustments", order: [{ column: "id", ascending: true }] },
   { key: "attendanceMonthlyConfirmations", table: "attendance_monthly_confirmations", order: [{ column: "id", ascending: true }] },
+  { key: "attendanceAnnualConfirmations", table: "attendance_annual_confirmations", order: [{ column: "id", ascending: true }] },
   { key: "attendanceReminderDispatches", table: "attendance_reminder_dispatches", order: [{ column: "id", ascending: true }] },
   { key: "attendanceSyncRuns", table: "attendance_sync_runs", order: [{ column: "id", ascending: true }] },
 ]
@@ -250,9 +253,9 @@ const FCUNO_IDENTITY_EPHEMERAL_TABLES = [
   "oidc_token_revocations",
 ]
 
-function getApplicableTableConfigs(migrationHead: string, pricingSchemaVersion: PricingBackupSchemaVersion = "none") {
+function getApplicableTableConfigs(migrationHead: string, pricingSchemaVersion: PricingBackupSchemaVersion = "none", attendanceSchemaVersion: AttendanceBackupSchemaVersion = "none") {
   return TABLES.filter(
-    (config) => config.table === "price_setter_creation_receipts" ? pricingSchemaVersion !== "none" : !config.introducedAt || migrationHead >= config.introducedAt
+    (config) => config.table === "price_setter_creation_receipts" ? pricingSchemaVersion !== "none" : config.table === "attendance_annual_confirmations" ? attendanceSchemaVersion === "annual-v1" : !config.introducedAt || migrationHead >= config.introducedAt
   )
 }
 
@@ -674,7 +677,8 @@ async function getBackupInventory(
 
   const liveTables = new Set(inventory.tables as string[])
   const pricingSchema = pricingBackupSchemaFromInventory(inventory)
-  const tableConfigs = getApplicableTableConfigs(migrationHead, pricingBackupSchemaVersion(pricingSchema))
+  const attendanceSchema = attendanceBackupSchemaFromInventory(inventory)
+  const tableConfigs = getApplicableTableConfigs(migrationHead, pricingBackupSchemaVersion(pricingSchema), attendanceBackupSchemaVersion(attendanceSchema))
   const catalogSha256 = requiredSha256(
     inventory.catalogSha256,
     "Backup database catalog SHA-256"
@@ -714,6 +718,7 @@ async function getBackupInventory(
     catalogSha256,
     liveTables,
     pricingSchema,
+    attendanceSchema,
     tableConfigs,
     registeredTables: [...registeredTables].sort(),
     explicitlyEphemeralTables: [...explicitlyEphemeralTables].sort(),
@@ -1133,6 +1138,7 @@ async function buildBackupFile(
         "spc_users.password_hash",
       ],
       pricingSchema: inventory.pricingSchema,
+      attendanceSchema: inventory.attendanceSchema,
     },
   }
   const stage = createCompressedBackupStage(
@@ -1480,6 +1486,7 @@ async function buildBackupFile(
       inventoryAfter.migrationHead !== inventory.migrationHead ||
       inventoryAfter.catalogSha256 !== inventory.catalogSha256 ||
       JSON.stringify(inventoryAfter.pricingSchema) !== JSON.stringify(inventory.pricingSchema) ||
+      JSON.stringify(inventoryAfter.attendanceSchema) !== JSON.stringify(inventory.attendanceSchema) ||
       JSON.stringify([...inventoryAfter.liveTables].sort()) !==
         JSON.stringify([...inventory.liveTables].sort())
     ) {
@@ -1554,6 +1561,7 @@ async function buildBackupFile(
       databaseEpoch: databaseEpochBefore,
       migrationHead: inventory.migrationHead,
       pricingSchemaVersion: pricingBackupSchemaVersion(inventory.pricingSchema),
+      attendanceSchemaVersion: attendanceBackupSchemaVersion(inventory.attendanceSchema),
       inventorySha256,
       catalogSha256: inventory.catalogSha256,
       liveTableCount: inventory.liveTables.size,
@@ -1718,6 +1726,7 @@ async function inspectDriveFileBytes(
 
 function validateStreamReceiptProperties(file: drive_v3.Schema$File) {
   const properties = file.appProperties || {}
+  parseAttendanceBackupSchemaVersion(properties.attendanceSchemaVersion)
   const artifactSha256 = requiredSha256(
     properties.artifactSha256,
     "Verified backup artifact SHA-256"
@@ -1869,6 +1878,7 @@ async function markBackupVerified(
         truthHeadSha256: prepared.truthHeadSha256,
         migrationHead: prepared.migrationHead,
         pricingSchemaVersion: prepared.pricingSchemaVersion,
+        attendanceSchemaVersion: prepared.attendanceSchemaVersion,
         databaseEpoch: String(prepared.databaseEpoch),
         inventorySha256: prepared.inventorySha256,
         catalogSha256: prepared.catalogSha256,
@@ -2102,6 +2112,7 @@ async function createBackup(provenance: BackupProvenance) {
       previousFile?.appProperties?.migrationHead === inventory.migrationHead &&
       previousFile?.appProperties?.inventorySha256 === currentInventorySha256 &&
       previousFile?.appProperties?.catalogSha256 === inventory.catalogSha256 &&
+      parseAttendanceBackupSchemaVersion(previousFile?.appProperties?.attendanceSchemaVersion) === attendanceBackupSchemaVersion(inventory.attendanceSchema) &&
       previousFile?.appProperties?.liveTableCount ===
         String(inventory.liveTables.size)
 
