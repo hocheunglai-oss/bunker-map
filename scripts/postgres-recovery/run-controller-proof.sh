@@ -31,6 +31,9 @@ docker run --name "$recovery_name" --platform linux/amd64 --network none --read-
   --user 1000:1000 --memory 2g --memory-swap 2g --cpus 2 --pids-limit 96 --shm-size 128m \
   --mount "type=bind,src=$proof_root/input,dst=/input,readonly" --mount "type=bind,src=$proof_root/scratch,dst=/recovery" \
   --mount "type=bind,src=$proof_root/output,dst=/output" "fcuno-recovery:$proof_id"
-test -s "$proof_root/output/recovery.json"
 docker inspect --format '{{json .}}' "$recovery_name" > "$proof_root/host-inspection.json"
+# The sealed process owns this private 0700 directory as uid 1000. GitHub's
+# host runner may be uid 1001, so regain host ownership only AFTER the container
+# has exited, before inspecting its proof. Do not weaken container permissions.
 sudo chown -R "$(id -u):$(id -g)" "$proof_root/output"
+test -s "$proof_root/output/recovery.json"

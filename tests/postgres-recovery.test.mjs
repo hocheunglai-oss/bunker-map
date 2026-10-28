@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { createHash, generateKeyPairSync, sign } from "node:crypto"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fcunoConnectionPolicy as pins } from "../config/fcunoConnections.ts"
@@ -73,6 +73,17 @@ test("cloud recovery build uses pinned images, existing identity, no logs and no
   assert.equal(build.steps[0].args.at(-1), "download"); assert.equal(build.steps[3].args.at(-1), "publish")
   assert.doesNotMatch(JSON.stringify(build), /PGPASSWORD|SOURCE_CREDENTIAL|SIGNING_KEY|SERVICE_ROLE_KEY|DATABASE_URL/)
   assert.throws(() => createRecoveryBuild({ manifestReceipt, verificationKeyPem: publicPem, budgetConfigJson: "{}", sourceCommit: "main; malicious" }))
+})
+test("CI host checks private proof only after the sealed container exits and ownership returns", async () => {
+  const script = await readFile(new URL("../scripts/postgres-recovery/run-controller-proof.sh", import.meta.url), "utf8")
+  const restore = script.lastIndexOf('docker run --name "$recovery_name"')
+  const inspect = script.lastIndexOf('docker inspect --format \'{{json .}}\' "$recovery_name"')
+  const reclaim = script.lastIndexOf('sudo chown -R "$(id -u):$(id -g)" "$proof_root/output"')
+  const check = script.lastIndexOf('test -s "$proof_root/output/recovery.json"')
+  assert.ok(restore > 0 && inspect > restore && reclaim > inspect && check > reclaim)
+  assert.match(script, /--user 1000:1000 --memory 2g --memory-swap 2g/)
+  assert.match(script, /mkdir -m 700/)
+  assert.doesNotMatch(script, /chmod.*(?:777|755)/)
 })
 test("sealed restore host evidence accepts only the exact containment boundary", () => {
   assert.equal(validateRecoveryHostInspection(host()).HostConfig.NetworkMode, "none")
