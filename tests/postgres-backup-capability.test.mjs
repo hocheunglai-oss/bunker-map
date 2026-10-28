@@ -150,6 +150,47 @@ test("budget pause occurs before source or credential opening", async () => {
   assert.equal((await receivePostgresBackup(fixture.input, context())).status, "budget-paused")
   assert.equal(fixture.opens(), 0); assert.equal(fixture.current(), null)
 })
+test("denied, malformed or unavailable budget prevents all previous-archive reads even for same-week reuse", async () => {
+  for (const offset of [0, 7 * 86400000]) for (const mode of ["denied", "malformed", "unavailable"]) {
+    const fixture = receiverSetup()
+    await receivePostgresBackup(fixture.input, context())
+    const before = structuredClone(fixture.current())
+    const objectBytes = [...fixture.objects].map(([name, object]) => [name, Buffer.from(object.bytes)])
+    let budgetCalls = 0, fullReads = 0, writes = 0
+    fixture.gcs.readTarget = async () => { fullReads++; assert.fail("No previous archive or manifest body before fresh budget approval") }
+    fixture.gcs.control.compareAndSwap = async () => { writes++; assert.fail("Budget denial cannot mutate the lease or last-good pointer") }
+    fixture.input.budget.checkOptionalWork = async () => {
+      budgetCalls++
+      if (mode === "unavailable") throw Error("Synthetic authentic billing feed unavailable")
+      return mode === "denied" ? { allowed: false, reason: "budget_near_limit" } : { allowed: "true", reason: "malformed" }
+    }
+    const observedAt = time + offset, ctx = { now: () => observedAt, signal: AbortSignal.timeout(5000), deadline: observedAt + 5000 }
+    const operation = receivePostgresBackup({ ...fixture.input, week: offset ? "2026-11-02" : fixture.input.week }, ctx)
+    if (mode === "denied") assert.equal((await operation).status, "budget-paused")
+    else await assert.rejects(operation)
+    assert.equal(budgetCalls, 1); assert.equal(fullReads, 0); assert.equal(writes, 0)
+    assert.equal(fixture.opens(), 1, "Only the initial known-good fixture copy opened a source")
+    assert.deepEqual(fixture.current(), before)
+    assert.deepEqual([...fixture.objects].map(([name, object]) => [name, object.bytes]), objectBytes)
+  }
+})
+test("approved budget does not bypass an active lease or old-archive corruption", async () => {
+  const leased = receiverSetup()
+  await receivePostgresBackup(leased.input, context())
+  const nextWeek = time + 7 * 86400000
+  leased.current().record.lease = { owner: "other-owner", expiresAt: nextWeek + 5000 }
+  const before = structuredClone(leased.current())
+  const result = await receivePostgresBackup({ ...leased.input, week: "2026-11-02" },
+    { now: () => nextWeek, deadline: nextWeek + 5000, signal: AbortSignal.timeout(5000) })
+  assert.equal(result.status, "already-running"); assert.equal(leased.opens(), 1)
+  assert.deepEqual(leased.current(), before)
+  const corrupt = receiverSetup()
+  await receivePostgresBackup(corrupt.input, context())
+  const entry = [...corrupt.objects].find(([name]) => name.includes("/archive/"))[1]
+  entry.bytes = Buffer.from(entry.bytes); entry.bytes[10] ^= 1
+  await assert.rejects(receivePostgresBackup(corrupt.input, context()))
+  assert.equal(corrupt.opens(), 1, "Budget approval must not weaken same-week complete archive verification")
+})
 for (const options of [{ corruptRead: true }, { stream: () => encoded({ finish: async () => 1 }) }]) test("bad copy or native failure cannot replace last-good pointer", async () => {
   const fixture = receiverSetup(options)
   await assert.rejects(receivePostgresBackup(fixture.input, context()))

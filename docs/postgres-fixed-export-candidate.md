@@ -105,8 +105,14 @@ Activation requires all of these concrete steps, not a general permission loop:
 4. Verify the current plan/runtime supports the actual streamed response and
    source deadline. Standard streaming bypasses the 4.5 MB buffered response
    cap, but native source plus transfer still must finish within the configured
-   limit. Direct host connectivity (including IPv6) is unproved; do not silently
-   substitute an unpinned pooler, disable certificates or enable paid services.
+   limit. The reviewed connection candidate uses the project's independently
+   verified session pooler pinned in `config/fcunoConnections.ts`,
+   `aws-1-ap-south-1.pooler.supabase.com:5432`, rather than its IPv6-only direct
+   endpoint. Session mode preserves the snapshot-owning connection; transaction
+   mode and caller-selected destinations are not allowed. Preserve the pinned
+   Supabase CA, `verify-full`, and actual backend-TLS proof. Local/CI success does
+   not prove production native compatibility: the deployed metadata-only probe
+   must verify that separately before any source export or weekly activation.
 5. Complete production-scope catalog/role-settings restoration and a contained
    cloud restore proof, then a bounded current source export and independent
    GCS readback. Only this establishes current full recovery coverage. Bind
@@ -150,8 +156,27 @@ Source Vercel only, exact pinned production project:
 - `POSTGRES_BACKUP_SOURCE_CREDENTIAL_JSON`: exact object with `password`,
   `issuedAt` and `expiresAt` (integer UTC milliseconds, lifetime at most 90 days).
   Password must be random base64url, 43–128 characters; platform `sbp_` tokens are
-  rejected. Fixed direct destination `db.gglyugbrnyvyfktgwert.supabase.co:5432`,
-  database `postgres`, role/session role `fcuno_backup_export_login`.
+  rejected. The fixed session-pooler destination is
+  `aws-1-ap-south-1.pooler.supabase.com:5432`; its qualified connection login is
+  `fcuno_backup_export_login.gglyugbrnyvyfktgwert`. The actual source database
+  remains `postgres`, and both current/session roles must independently verify
+  as `fcuno_backup_export_login`, not the qualified routing login. The public
+  hostname and role policy come only from `config/fcunoConnections.ts`; they are
+  not configurable by an export caller. The existing Supabase CA and strict
+  certificate verification are unchanged.
+- `POSTGRES_BACKUP_MAINTENANCE_EMAIL_RECIPIENTS`: an explicit list of plain
+  administrator email addresses, separated by commas, semicolons or newlines.
+  There is no System Health or calendar staff-list fallback. Before activation,
+  verify that each selected address belongs to an active, email-verified FCUNO
+  `ADMIN`; the notifier checks the canonical account directory again each run.
+- `POSTGRES_BACKUP_RECOVERY_MAINTENANCE_JSON`: optional source-owned renewal
+  advice record installed only after the operator has independently verified the
+  actual cloud recovery and immutable acceptance. Its exact fields are `schema`
+  (`fcuno.recovery-maintenance-attestation/v1`), pinned `projectRef`, canonical
+  UTC `checkedAt`, the exact acceptance `descriptor`, and `acceptanceBase64`
+  containing the exact acceptance JSON bytes. Maximum configuration size is
+  32 KiB; the acceptance remains bounded to 16 KiB. This is not the Google
+  job's separate `POSTGRES_BACKUP_RECOVERY_ACCEPTANCE_JSON` authorization input.
 - Existing `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` stay only
   source-side; used for the two fixed admission RPCs, never passed to subprocesses.
 
@@ -172,3 +197,54 @@ after-hours bounded source export/independent readback/recovery comparison →
 enable weekly schedule only upon verified success. Never use a scheduler dispatch
 or native exit alone as proof of a recoverable GCS copy. Current source window is
 02:00–06:00 HKT; no office-hour export is supported by this implementation.
+
+## Source-access renewal monitoring
+
+When the source is enabled, System Health adds one cheap configuration-only
+check for its credential expiry. It does not connect to PostgreSQL, invoke native
+tools, read archives or query users while building dashboard health. This is
+maintenance advice from the source-owned configuration, not proof of a current
+backup, actual database-role expiry or successful recovery. The configured role
+and expiry still require independent provisioning/native verification.
+
+The existing authenticated System Health notifier delivers this check separately
+to the explicit, freshly verified administrator list. It uses the existing
+durable per-recipient claim/acknowledgement mechanism. Renewal becomes actionable
+14 days before expiry; passing the expiry date retains the same incident level,
+so it does not cause another daily or escalation reminder. A genuine renewal
+rearms a later new incident. Failed mail is not acknowledged; unavailable account
+verification or deduplication fails closed. As with existing alerts, SMTP
+acceptance followed by an acknowledgement crash can still cause a later retry.
+
+Both source-access and future recovery-renewal incident IDs are excluded entirely
+from ordinary staff notification observations. Missing dedicated recipient
+configuration appears as an error only while the source is enabled, without a
+staff fallback or repeated warning email. Disabling the source produces no
+maintenance check, account-directory read or maintenance delivery and does not
+clear existing maintenance incident history.
+
+The recovery-renewal check can read the source-owned operator advice record.
+Before installing it, independently complete `requireCloudRecoveryAcceptance`
+against the real private GCS generation and public verification key, and verify
+the actual build, containment and result. Copy that exact checked acceptance
+body and descriptor, not a hand-written date or a caller-supplied HTTP report.
+Source configuration is the trust boundary for this one-time operator attestation;
+the byte hash alone does not authenticate a document chosen by an attacker who
+can also alter the configured descriptor.
+
+Dashboard evaluation checks the cached bytes' size, SHA-256 and CRC32C, scope and
+recovery shape, then derives the renewal deadline exclusively from the receipt's
+`result.verifiedAt` plus 90 days. Updating `checkedAt` or reinstalling the same
+record never extends it. This is labelled as a previously operator-verified
+receipt copy, not fresh GCS readback, current backup success or weekly permission.
+It makes no network/archive reads and requires no GCS or administrator credential
+inside Vercel. Missing or invalid advice remains visible and preserves the
+incident, without fabricating recovery or sending an unverified warning email.
+
+The Google weekly command remains unchanged: it must independently reread its
+own exact immutable acceptance and source-signed manifest through
+`requireCloudRecoveryAcceptance` on each operation. A maintenance record cannot
+unlock it. Nothing here renews credentials automatically, adds a schedule,
+publishes recovery acceptance or activates/deletes retained backups. The real
+first cloud proof, installation of its advice record and four-week retention
+remain separate operational acceptance work.

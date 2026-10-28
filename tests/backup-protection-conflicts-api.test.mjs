@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs"
 import test from "node:test"
 import { transformSync } from "esbuild"
 import { createClient } from "@supabase/supabase-js"
+import { createHash } from "node:crypto"
+import * as recoveryAcceptance from "../lib/postgresRecoveryAcceptance.mjs"
+import * as backupReceipt from "../lib/postgresBackupReceipt.mjs"
+import * as recoveryEvidence from "../lib/postgresRecoveryEvidence.mjs"
 
 function load(relative, modules = {}, environment = {}) {
   const loaded = { exports: {} }
@@ -13,6 +17,13 @@ function load(relative, modules = {}, environment = {}) {
   return loaded.exports
 }
 const config = load("config/fcunoConnections.ts")
+const backupMaintenance = load("lib/postgresBackupMaintenance.ts", {
+  "node:crypto": { createHash }, "@/lib/postgresRecoveryAcceptance.mjs": recoveryAcceptance,
+  "@/lib/postgresBackupReceipt.mjs": backupReceipt, "@/lib/postgresRecoveryEvidence.mjs": recoveryEvidence,
+  "@/config/fcunoConnections": config, "@/lib/adminPages": load("lib/adminPages.ts"),
+  "@/lib/emailAddress": load("lib/emailAddress.ts"),
+  "@/lib/systemHealthAlerts": load("lib/systemHealthAlerts.ts", { "@/config/fcunoConnections": config }),
+})
 const policy = load("lib/backupProtectionPolicy.ts")
 const input = { domain: "drive-file", observedAt: "2026-10-14T01:00:00Z", complete: true,
   gaps: [{ key: "opaque-file", dueAt: "2026-10-13T18:00:00Z", requiredSinceAt: "2026-10-14T00:00:00Z" }] }
@@ -50,6 +61,8 @@ function fixture(error, reply = good) {
     "@/lib/systemHealthAlerts": { buildHealthAlertHtml: () => assert.fail("No error may become an email"), deliverHealthAlerts: async value => { alerts.push(value); assert.fail("No alert may be claimed from an unaccepted observation") } },
     "@/lib/systemHealthAlertStore": { createHealthAlertStore: () => assert.fail("No alert store may be created from an unaccepted observation") },
     "@/lib/backupProtectionGapStore": store,
+    "@/lib/postgresBackupMaintenance": backupMaintenance,
+    "@/lib/adminUsers": { listManagedAdminUsers: () => assert.fail("Disabled maintenance must not read the directory") },
   }, { CRON_SECRET: "synthetic-cron" })
   return { requests, accepted, alerts, emails, observe: () => store.createBackupProtectionGapObserver()(input),
     notify: () => route.GET(new Request("https://fixture.invalid/api/admin/system-health/notify", { headers: { authorization: "Bearer synthetic-cron" } })) }

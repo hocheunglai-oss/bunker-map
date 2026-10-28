@@ -69,15 +69,16 @@ export async function receivePostgresBackup({ source, gcs, budget, publicKey, ru
     assertExportContext(context)
     await guardedExport(gcs.validateBucket(context), context)
     const initial = await readControl(gcs, context)
+    // Authentic fresh budget evidence gates full archive reads too, including
+    // same-week reuse. Only bounded bucket/control metadata is read beforehand.
+    const decision = await guardedExport(budget.checkOptionalWork({ plannedWriteBytes: policy.maximumArchiveBytes }, context), context)
+    if (!decision || typeof decision.allowed !== "boolean" || typeof decision.reason !== "string") fail()
+    if (!decision.allowed) return { status: "budget-paused", reason: decision.reason }
     if (initial?.record.latestSuccess) {
       const old = await readPostgresManifest(gcs, initial.record.latestSuccess.manifest, publicKey, context)
       if (old.runId !== initial.record.latestSuccess.runId || old.week !== initial.record.latestSuccess.week) fail()
       if (old.week === week) return { status: "already-copied", runId: old.runId }
     }
-    // Authenticate fresh budget evidence BEFORE opening a source connection.
-    const decision = await guardedExport(budget.checkOptionalWork({ plannedWriteBytes: policy.maximumArchiveBytes }, context), context)
-    if (!decision || typeof decision.allowed !== "boolean" || typeof decision.reason !== "string") fail()
-    if (!decision.allowed) return { status: "budget-paused", reason: decision.reason }
     if (initial?.record.lease?.expiresAt > context.now()) return { status: "already-running" }
     const record = { schema: POSTGRES_CONTROL_SCHEMA, fence: (initial?.record.fence || 0) + 1,
       lease: { owner: runId, expiresAt: context.deadline }, latestSuccess: initial?.record.latestSuccess || null }

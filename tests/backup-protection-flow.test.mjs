@@ -10,6 +10,9 @@ import * as mediaHealth from "../lib/storageMediaBackupHealthService.ts"
 import * as mediaSource from "../lib/storageMediaBackupSource.ts"
 import * as attendanceExceptions from "../lib/attendanceAutoConfirmPolicy.ts"
 import * as attendanceRules from "../lib/attendanceRules.ts"
+import * as recoveryAcceptance from "../lib/postgresRecoveryAcceptance.mjs"
+import * as backupReceipt from "../lib/postgresBackupReceipt.mjs"
+import * as recoveryEvidence from "../lib/postgresRecoveryEvidence.mjs"
 
 // Required local PostgreSQL runtime: fail clearly if missing, never contact a
 // hosted database or quietly skip the notification/clock integration boundary.
@@ -24,6 +27,12 @@ const policy = load("lib/backupProtectionPolicy.ts")
 const files = load("lib/driveFileBackupHealth.ts", { "./backupProtectionPolicy": policy })
 const config = load("config/fcunoConnections.ts")
 const alerts = load("lib/systemHealthAlerts.ts", { "@/config/fcunoConnections": config })
+const backupMaintenance = load("lib/postgresBackupMaintenance.ts", {
+  "node:crypto": { createHash }, "@/lib/postgresRecoveryAcceptance.mjs": recoveryAcceptance,
+  "@/lib/postgresBackupReceipt.mjs": backupReceipt, "@/lib/postgresRecoveryEvidence.mjs": recoveryEvidence,
+  "@/config/fcunoConnections": config, "@/lib/adminPages": load("lib/adminPages.ts"),
+  "@/lib/emailAddress": load("lib/emailAddress.ts"), "@/lib/systemHealthAlerts": alerts,
+})
 const key = id => createHash("sha256").update(id).digest("hex")
 const day = 86_400_000
 const at = value => Date.parse(value)
@@ -71,6 +80,7 @@ function actualFileHealth(activeFiles, manifests, now, observer) {
     "@/lib/storageMediaBackupHealthService": mediaHealth, "@/lib/storageMediaBackupSource": mediaSource,
     "@/config/fcunoConnections": config,
     "@/lib/attendanceAutoConfirmPolicy": attendanceExceptions, "@/lib/attendanceRules": attendanceRules,
+    "@/lib/postgresBackupMaintenance": backupMaintenance,
   }
   const loaded = { exports: {} }
   const code = transformSync(readFileSync(new URL("../lib/systemHealth.ts", import.meta.url), "utf8"), { loader: "ts", format: "cjs", target: "node24" }).code
