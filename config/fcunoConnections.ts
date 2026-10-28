@@ -19,6 +19,14 @@ export const fcunoConnectionPolicy = Object.freeze({
     projectRef: "gglyugbrnyvyfktgwert",
     presentationMediaBucket,
   },
+  exchangeAddressBook: {
+    tenantId: "70011d0d-19b4-4a61-8195-ab1fd987c20f",
+    appId: "1bf8841e-99a9-43fe-a8f7-85aedbd7bdc1",
+    organization: "cosulich1.onmicrosoft.com",
+    addressBookDomain: "cosulich1.onmicrosoft.com",
+    runtimeVersion: "7.6",
+    exchangeModuleVersion: "3.10.1",
+  },
   storageMediaBackup: {
     sourcePath: "/api/backups/storage-media",
     sourceBucket: presentationMediaBucket,
