@@ -18,7 +18,7 @@ const mode=new URLSearchParams(location.search).get("mode"), area=location.pathn
 const permission=mode==="none"?"none":mode==="view"?"view":"edit";
 const h=window.__auditHarness={requests:[],pending:[],routes:[],listMode:"normal",detailMode:"normal",undoMode:"normal",undoneIds:new Set(),owner:"VERIFIED USER",
  auth:{loading:false,authenticated:mode!=="signed-out",actorKey:"a".repeat(64),username:"VERIFIED USER",displayName:"Verified user",role:"USER",resetRequired:false,mustChangePassword:false,permissions:{"audit-log":permission,"spc-audit-log":permission},pages:[{id:"audit-log",label:"Audit Log",group:"management",path:"/admin/auditlog"}]},
- log(id,loaded=false){return {id,occurredAt:"2026-10-20T01:02:03.123456Z",actorId:"verified",actorName:this.owner,operation:"UPDATE",displayOperation:"UPDATE",pageId:area==="spc"?"spc-suppliers":"event-calendar",pageLabel:"Calendar",recordLabel:"SYNTHETIC ONLY",summary:id==="first"?"FIRST VERIFIED CHANGE":id==="second"?"SECOND VERIFIED CHANGE":id==="third"?"OLDER VERIFIED CHANGE":"PAGED CHANGE "+id,details:loaded?["VERIFIED DETAIL "+id+" / "+this.owner]:[],detailsLoaded:loaded,undoable:!this.undoneIds.has(id),undoOfLogId:null,undoneAt:this.undoneIds.has(id)?"2026-10-20T03:00:00Z":null}},
+ log(id,loaded=false){if(this.certificationRefreshMode)return {...__CERTIFICATION_REFRESH_RECORD__,id,detailsLoaded:loaded,details:loaded?__CERTIFICATION_REFRESH_RECORD__.details:[]};return {id,occurredAt:"2026-10-20T01:02:03.123456Z",actorId:"verified",actorName:this.owner,operation:"UPDATE",displayOperation:"UPDATE",pageId:area==="spc"?"spc-suppliers":"event-calendar",pageLabel:"Calendar",recordLabel:"SYNTHETIC ONLY",summary:id==="first"?"FIRST VERIFIED CHANGE":id==="second"?"SECOND VERIFIED CHANGE":id==="third"?"OLDER VERIFIED CHANGE":"PAGED CHANGE "+id,details:loaded?["VERIFIED DETAIL "+id+" / "+this.owner]:[],detailsLoaded:loaded,undoable:!this.undoneIds.has(id),undoOfLogId:null,undoneAt:this.undoneIds.has(id)?"2026-10-20T03:00:00Z":null}},
  payload(url){const cursor=url.searchParams.get("cursor");let logs,cursorNext,state;if(this.listMode==="many"){const n=Number(cursor?.slice(4)||0);logs=[this.log("many-"+n)];cursorNext="many"+(n+1);state="more";}else if(cursor==="cursor1"){logs=[];cursorNext="cursor2";state="scan-pending";}else if(cursor==="cursor2"){logs=[this.log("third")];cursorNext=null;state="exhausted";}else{logs=[this.log("first"),this.log("second")];cursorNext="cursor1";state="more";}return {logs,pages:[{id:area==="spc"?"spc-suppliers":"event-calendar",label:"Calendar"}],users:cursor?[]:[{value:"verified",label:"Verified user"}],totalMatches:null,pageInfo:{pageSize:150,returnedMatches:logs.length,state,hasMoreMatches:state==="more"?true:state==="exhausted"?false:null,nextCursor:cursorNext,consistency:"live-keyset"}}},
  release(kind,body,status=200){const index=this.pending.findIndex(item=>item.kind===kind);if(index<0)throw new Error("No pending "+kind);const [item]=this.pending.splice(index,1);if(kind==="undo"&&status===200)this.undoneIds.add(item.id);item.resolve(Response.json(body??item.body,{status}));},
 };
@@ -37,8 +37,20 @@ const guardedEntry = entry.replace('import Admin from "./app/admin/auditlog/page
   const output = process.env.AUDIT_BROWSING_SCREENSHOTS
   assert.ok(output && path.isAbsolute(output), "Use an owned absolute screenshot directory")
   fs.mkdirSync(output, { recursive: true })
+  // Render actual route/presenter output, not manually copied UI prose. The
+  // native test separately supplies a real trigger-produced record to this API.
+  const {createAuditConsumers,supplierAuditRow}=await import("./fixtures/audit-log-consumers.mjs")
+  const refreshRow={...supplierAuditRow("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),actor_id:"system:outlook-template-recipient-truth",actor_name:"Outlook Template Recipient Truth",
+    table_name:"email_templates",record_pk:{id:"synthetic-template"},changed_fields:["recipient_resolution","revision"],
+    before_row:{id:"synthetic-template",title:"SYNTHETIC TEMPLATE",revision:1,recipient_resolution:{certificationRunId:"previous"}},
+    after_row:{id:"synthetic-template",title:"SYNTHETIC TEMPLATE",revision:2,recipient_resolution:{certificationRunId:"current"}},
+    request_context:{pageId:"email-templates",action:"certified-projection-reconcile",auditRepresentation:{kind:"outlook-certification-refresh-v1",undoable:false}}}
+  const refreshResponse=await createAuditConsumers({rows:[refreshRow]}).request("www","?table=outlooktemplates&details=1")
+  assert.equal(refreshResponse.status,200);assert.equal(refreshResponse.body.logs.length,1)
+  const refreshRecord=refreshResponse.body.logs[0]
+  assert.equal(refreshRecord.undoable,false)
   const makeBundle = (guarded = false, removeViewMarkers = false) => build({
-    absWorkingDir: root, stdin: { contents: guarded ? guardedEntry : entry, resolveDir: root, loader: "tsx" },
+    absWorkingDir: root, stdin: { contents: (guarded ? guardedEntry : entry).replaceAll("__CERTIFICATION_REFRESH_RECORD__",JSON.stringify(refreshRecord)), resolveDir: root, loader: "tsx" },
     bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic",
     define: { "process.env.NODE_ENV": '"development"' },
     plugins: [{ name: "synthetic-auth", setup(builder) {
@@ -128,6 +140,16 @@ const guardedEntry = entry.replace('import Admin from "./app/admin/auditlog/page
             await page.goto(route)
             await page.getByText("VERIFIED DETAIL first / VERIFIED USER", { exact: true }).waitFor()
             await screenshot("initial")
+
+            if(area==="admin"){
+              await page.evaluate(()=>{window.__auditHarness.certificationRefreshMode=true})
+              await refresh.click()
+              await page.getByText("This automatic certificate refresh cannot be undone independently. Template content was not changed.",{exact:true}).waitFor()
+              assert.equal(await page.getByRole("button",{name:"Undo",exact:true}).first().isDisabled(),true)
+              await screenshot("certification-refresh")
+              await page.goto(route)
+              await page.getByText("VERIFIED DETAIL first / VERIFIED USER",{exact:true}).waitFor()
+            }
 
             // A legacy same-ID detail response may use an old actor map. It
             // owns only detail text/Undo status, never the verified list labels.
