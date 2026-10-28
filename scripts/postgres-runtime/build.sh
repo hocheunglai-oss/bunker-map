@@ -6,7 +6,7 @@ test "$(node -p 'process.versions.node.split(".")[0]')" = 24
 # Lock the package repository to the base image's release, not the moving latest.
 release_version="$(rpm -q system-release --qf '%{VERSION}')"
 [[ "$release_version" =~ ^2023\.[0-9]+\.[0-9]+$ ]]
-dnf install -y --releasever="$release_version" gcc make tar bzip2 binutils findutils gzip openssl openssl-devel zlib-devel ca-certificates
+dnf install -y --releasever="$release_version" gcc make bison flex perl tar bzip2 binutils findutils gzip openssl openssl-devel zlib-devel ca-certificates
 mkdir -p /opt/fcuno-build/source /opt/fcuno-output/postgres/{bin,lib,licenses} /opt/fcuno-test-tls
 curl --fail --silent --show-error --proto '=https' --tlsv1.2 --retry 2 \
   https://ftp.postgresql.org/pub/source/v17.11/postgresql-17.11.tar.bz2 \
