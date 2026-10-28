@@ -3,7 +3,7 @@ import { fcunoConnectionPolicy } from "../../config/fcunoConnections.ts"
 import { evaluateOptionalBackupBudget, validateBackupBudgetObservation } from "../../lib/backupOperatingPolicy.mjs"
 import { createBackupBudgetGuard } from "./backup-budget-guard.mjs"
 import { parseBackupBudgetPubsubMessage, chooseNewerBackupBudgetObservation } from "./backup-budget-pubsub.mjs"
-import { requireStorageMediaJobRuntime } from "./storage-media-job-auth.mjs"
+import { requireBackupRuntime } from "./storage-media-job-auth.mjs"
 
 const pinned = fcunoConnectionPolicy.storageMediaBackup
 const MAX_CONTROL = 16 * 1024, MAX_JSON = 2 * 1024 * 1024
@@ -31,8 +31,8 @@ function normalTime(value) { if (typeof value !== "string" || !Number.isFinite(D
 // "verified" boolean. Runtime below independently checks the resource-local
 // publisher/writer boundaries. Trusted project administrators and this existing
 // job remain trusted; this is not a defense against their compromise.
-export function readStorageMediaBudgetRuntimeConfig(runtime) {
-  requireStorageMediaJobRuntime(runtime)
+export function readStorageMediaBudgetRuntimeConfig(runtime, runtimeMode = "cloud-run") {
+  requireBackupRuntime(runtime, runtimeMode)
   const text = runtime.STORAGE_MEDIA_BACKUP_BUDGET_CONFIG_JSON
   if (typeof text !== "string" || Buffer.byteLength(text) > 16 * 1024) fail()
   const value = JSON.parse(text)
@@ -95,8 +95,8 @@ function verifyResourceIam(value, kind, trusted) {
   if (!expected) fail()
 }
 
-export function createStorageMediaBudgetRuntime({ runtime, getAccessToken, fetch: fetchImpl = fetch, now = Date.now } = {}) {
-  const config = readStorageMediaBudgetRuntimeConfig(runtime)
+export function createStorageMediaBudgetRuntime({ runtime, getAccessToken, fetch: fetchImpl = fetch, now = Date.now, runtimeMode = "cloud-run" } = {}) {
+  const config = readStorageMediaBudgetRuntimeConfig(runtime, runtimeMode)
   if (typeof getAccessToken !== "function" || typeof fetchImpl !== "function" || typeof now !== "function") fail()
   let state = null
   function operation(context) {

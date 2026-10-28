@@ -6,6 +6,11 @@ on:
       - 'scripts/postgres-recovery/Dockerfile'
       - 'scripts/postgres-recovery/compatibility-proof.mjs'
       - 'scripts/postgres-recovery/run-synthetic-proof.sh'
+      - 'scripts/postgres-recovery/**'
+      - 'lib/postgresBackup*.mjs'
+      - 'lib/postgresRecovery*.mjs'
+      - 'scripts/lib/postgres-backup-native.mjs'
+      - 'tests/postgres-backup-native.test.mjs'
   workflow_dispatch:
 permissions:
   contents: read
@@ -32,5 +37,27 @@ jobs:
             ${{ runner.temp }}/fcuno-recovery-image-proof.*/host-config.json
             ${{ runner.temp }}/fcuno-recovery-image-proof.*/image.json
             ${{ runner.temp }}/fcuno-recovery-image-proof.*/source.txt
+          if-no-files-found: warn
+          retention-days: 14
+  controller-recovery:
+    name: Fixed exporter and actual sealed recovery controller
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Prove signed native export through production recovery controller
+        run: bash scripts/postgres-recovery/run-controller-proof.sh
+      - name: Retain nonsecret controller proof only
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: postgres-recovery-controller-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/fcuno-recovery-controller-proof.*/output/recovery.json
+            ${{ runner.temp }}/fcuno-recovery-controller-proof.*/host-inspection.json
+            ${{ runner.temp }}/fcuno-recovery-controller-proof.*/source.txt
           if-no-files-found: warn
           retention-days: 14

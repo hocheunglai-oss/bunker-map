@@ -1,0 +1,25 @@
+# Never send downloaded private backups, runtime credentials or unrelated files
+# into Docker's build context, including when Cloud Build already downloaded one.
+**
+!config/
+!config/fcunoConnections.ts
+!lib/
+!lib/postgresBackupReceipt.mjs
+!lib/postgresBackupProtocol.mjs
+!lib/postgresBackupCapability.mjs
+!lib/postgresRecoveryCatalog.mjs
+!lib/storageMediaBackup.mjs
+!scripts/
+!scripts/lib/
+!scripts/lib/postgres-backup-native.mjs
+!scripts/postgres-recovery/
+!scripts/postgres-recovery/Dockerfile
+!scripts/postgres-recovery/Dockerfile.dockerignore
+!scripts/postgres-recovery/compatibility-proof.mjs
+!scripts/postgres-recovery/offline.mjs
+!tests/
+!tests/postgres-backup-native.test.mjs
+!supabase/
+!supabase/migrations/
+!supabase/migrations/20260723080340_backup_reliability_guards.sql
+!supabase/migrations/*_fixed_postgresql_export_admission.sql

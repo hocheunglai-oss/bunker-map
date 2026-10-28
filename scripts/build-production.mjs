@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { installPostgresRuntime } from "./install-postgres-runtime.mjs"
 
 const root = fileURLToPath(new URL("../", import.meta.url))
 const nextCli = fileURLToPath(new URL("../node_modules/next/dist/bin/next", import.meta.url))
@@ -43,7 +44,7 @@ export async function runProductionBuild({ spawn: spawnImpl = spawn, stdout = pr
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  runProductionBuild().then(result => { process.exitCode = result.exitCode }).catch(() => {
+  installPostgresRuntime().then(() => runProductionBuild()).then(result => { process.exitCode = result.exitCode }).catch(() => {
     console.error("Production compiler failed before completion.")
     process.exitCode = 1
   })

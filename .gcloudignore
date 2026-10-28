@@ -8,8 +8,12 @@
 !scripts/
 !scripts/backup-google-drive-files-to-gcs.mjs
 !scripts/backup-storage-media-to-gcs.mjs
+!scripts/backup-postgres-to-gcs.mjs
+!scripts/probe-postgres-backup.mjs
 !scripts/lib/
 !scripts/lib/storage-media-*.mjs
+!scripts/lib/postgres-backup-source-adapter.mjs
+!scripts/lib/postgres-backup-receiver.mjs
 !scripts/lib/backup-budget-*.mjs
 !config/
 !config/fcunoConnections.ts
@@ -19,3 +23,12 @@
 !lib/storageMediaBackupHealth.mjs
 !lib/backupOperatingPolicy.mjs
 !lib/backupValidationSpool.mjs
+!lib/postgresBackupProtocol.mjs
+!lib/postgresBackupProbeCapability.mjs
+!lib/postgresBackupReceipt.mjs
+!lib/postgresRecoveryCatalog.mjs
+!lib/postgresRecoveryAcceptance.mjs
+!lib/postgresRecoveryEvidence.mjs
+!lib/postgresRecoveryBuild.mjs
+!scripts/postgres-recovery/
+!scripts/postgres-recovery/**

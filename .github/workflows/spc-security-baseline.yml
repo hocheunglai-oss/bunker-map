@@ -43,10 +43,13 @@ jobs:
         run: npm run contract:verify
 
       - name: Verify compiler import-error release guard
-        run: node --test tests/production-build-guard.test.mjs
+        run: node --test tests/production-build-guard.test.mjs tests/postgres-runtime-bundle.test.mjs tests/postgres-runtime-install.test.mjs
 
       - name: Build the production application
         run: npm run build
+
+      - name: Verify native assets in all three compiled backup function traces
+        run: node --test tests/postgres-runtime-trace.production.test.cjs
 
       - name: Verify pinned font assets and routing boundaries
         run: npx --no-install tsx --test tests/roboto-self-hosting.test.ts
@@ -97,6 +100,22 @@ jobs:
         run: |
           set -o pipefail
           npx --no-install tsx --test tests/daily-backup-provider-receipt-route.test.ts 2>&1 | tee daily-backup-provider-receipt.tap
+
+      - name: Verify fixed PostgreSQL export and recovery admission boundaries
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap tests/postgres-backup-capability.test.mjs tests/postgres-backup-adapters.test.mjs tests/postgres-backup-probe.test.mjs tests/postgres-google-probe.test.mjs tests/postgres-recovery.test.mjs tests/postgres-runtime-bundle.test.mjs tests/postgres-runtime-install.test.mjs 2>&1 | tee postgres-fixed-export-tests.tap
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict"
+          import {readFileSync} from "node:fs"
+          const text=readFileSync("postgres-fixed-export-tests.tap","utf8")
+          for(const [name,expected] of [["tests",174],["pass",174],["fail",0],["cancelled",0],["skipped",0]]){
+            const values=[...text.matchAll(new RegExp("^# "+name+" (\\d+)","gm"))]
+            assert.equal(Number(values.at(-1)?.[1]),expected,name)
+          }
+          NODE
 
       - name: Verify canonical conflicts and versioned permission-group save ownership
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -347,6 +366,7 @@ jobs:
             security-tests.tap
             federation-tests.tap
             daily-backup-provider-receipt.tap
+            postgres-fixed-export-tests.tap
             canonical-template-conflicts.tap
             admin-role-default-save.tap
             admin-auth-security.tap

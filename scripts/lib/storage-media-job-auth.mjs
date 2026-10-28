@@ -9,6 +9,18 @@ export function requireStorageMediaJobRuntime(runtime) {
       (runtime.GCP_PROJECT_ID && runtime.GCP_PROJECT_ID !== policy.googleProjectId) ||
       (runtime.GCS_BACKUP_BUCKET && runtime.GCS_BACKUP_BUCKET !== policy.targetBucket)) fail()
 }
+export function requirePostgresRecoveryBuildRuntime(runtime) {
+  if (runtime.GOOGLE_CLOUD_PROJECT !== policy.googleProjectId || runtime.GCS_BACKUP_BUCKET !== policy.targetBucket ||
+      runtime.FCUNO_POSTGRES_RECOVERY_BUILD !== "1" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(runtime.FCUNO_POSTGRES_RECOVERY_BUILD_ID || "") ||
+      runtime.CLOUD_RUN_JOB || runtime.GOOGLE_APPLICATION_CREDENTIALS || runtime.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY) fail()
+  for (const name of ["PGPASSWORD", "DATABASE_URL", "SUPABASE_DB_PASSWORD", "SUPABASE_ACCESS_TOKEN", "SUPABASE_SERVICE_ROLE_KEY",
+    "POSTGRES_BACKUP_SOURCE_CREDENTIAL_JSON", "POSTGRES_BACKUP_SIGNING_KEY_PEM"]) if (runtime[name]) fail()
+}
+export function requireBackupRuntime(runtime, mode = "cloud-run") {
+  if (mode === "cloud-run") requireStorageMediaJobRuntime(runtime)
+  else if (mode === "postgres-recovery-build") requirePostgresRecoveryBuildRuntime(runtime)
+  else fail()
+}
 function signalFor(context) {
   context.signal.throwIfAborted()
   const remaining = context.deadline - Date.now()
@@ -46,10 +58,10 @@ function access(value) {
 
 // Existing Cloud Run metadata ADC only: never key files or developer gcloud
 // credentials. Email is checked before issuing the opaque access token.
-export function createMetadataAccessTokenProvider({ runtime, fetch: fetchImpl = fetch, now = Date.now }) {
+export function createMetadataAccessTokenProvider({ runtime, fetch: fetchImpl = fetch, now = Date.now, runtimeMode = "cloud-run" }) {
   let cached = null
   return async context => {
-    requireStorageMediaJobRuntime(runtime)
+    requireBackupRuntime(runtime, runtimeMode)
     const signal = signalFor(context)
     if (cached && cached.expiresAt > now() + 60_000) return cached.token
     const headers = { "Metadata-Flavor": "Google" }
