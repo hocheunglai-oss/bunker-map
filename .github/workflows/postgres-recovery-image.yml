@@ -1,0 +1,36 @@
+name: PostgreSQL isolated recovery image
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/postgres-recovery-image.yml'
+      - 'scripts/postgres-recovery/Dockerfile'
+      - 'scripts/postgres-recovery/compatibility-proof.mjs'
+      - 'scripts/postgres-recovery/run-synthetic-proof.sh'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  synthetic-recovery:
+    name: Official PostgreSQL image isolated synthetic recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Build and prove fixed image without network or credentials
+        id: proof
+        run: bash scripts/postgres-recovery/run-synthetic-proof.sh
+      - name: Retain nonsecret synthetic compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: postgres-recovery-image-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/fcuno-recovery-image-proof.*/output/compatibility-proof.json
+            ${{ runner.temp }}/fcuno-recovery-image-proof.*/host-config.json
+            ${{ runner.temp }}/fcuno-recovery-image-proof.*/image.json
+            ${{ runner.temp }}/fcuno-recovery-image-proof.*/source.txt
+          if-no-files-found: warn
+          retention-days: 14
