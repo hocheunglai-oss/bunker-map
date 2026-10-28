@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 022
+# Lambda's Node layer prepends its own OpenSSL to LD_LIBRARY_PATH. Native tools
+# must link and run against the RPM-owned libraries we explicitly bundle.
+unset LD_LIBRARY_PATH LD_PRELOAD LD_AUDIT
 test "$(uname -m)" = x86_64
 test "$(node -p 'process.versions.node.split(".")[0]')" = 24
 # Lock the package repository to the base image's release, not the moving latest.
