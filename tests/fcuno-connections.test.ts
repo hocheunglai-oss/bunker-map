@@ -12,6 +12,8 @@ test("FCUNO pins the approved external targets and fallback order", () => {
   assert.equal(policy.github.repository, "hocheunglai-oss/bunker-map")
   assert.equal(policy.vercel.projectId, "prj_8OifIFDF7Gcpd2i4VSRJOHjL3A9Q")
   assert.equal(policy.supabase.projectRef, "gglyugbrnyvyfktgwert")
+  assert.equal(policy.dailyBackupReceipt.googleAccount, "wider.custom@gmail.com")
+  assert.equal(policy.dailyBackupReceipt.dailyFolderId, "1-JU5aMyzGpC6tBDbhe_fBN1EmXpOpf1F")
   assert.equal(policy.browser.fallbackProfile, "Otto")
   assert.equal(policy.policyVersion, 2)
   assert.equal(policy.ecosystem.productionOrigin, "https://eco.fcuno.com")
