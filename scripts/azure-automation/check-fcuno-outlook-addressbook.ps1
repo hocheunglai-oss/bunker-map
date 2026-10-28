@@ -22,7 +22,7 @@ $script:CurrentCheckMaxRows = 100000
 # Offline AST-selected pure helpers; exact bodies retain worker projection semantics.
 $CurrentCheckVersion = 'fcuno-current-addressbook-check/2026-10-28.1'
 $CurrentCheckWorkerSourceSha256 = '6c85d2712d5963beda3095afb9e6cb50300ff7620c215eae70d1e901aace504e'
-$CurrentCheckConfigSha256 = '543e13e66d7b47f478738034ed9cc07b8327ec575537c7b83d9771b95a8ba9fb'
+$CurrentCheckConfigSha256 = 'c13810d8e3e57415d8783c22b4f151b18699b06cba597003b1a5036323b9b08f'
 $CurrentCheckSupabaseOrigin = 'https://gglyugbrnyvyfktgwert.supabase.co'
 $CurrentCheckExpectedAppId = '1bf8841e-99a9-43fe-a8f7-85aedbd7bdc1'
 $CurrentCheckTenantId = '70011d0d-19b4-4a61-8195-ab1fd987c20f'

@@ -19,6 +19,10 @@ export const fcunoConnectionPolicy = Object.freeze({
     projectRef: "gglyugbrnyvyfktgwert",
     presentationMediaBucket,
   },
+  dailyBackupReceipt: {
+    googleAccount: "wider.custom@gmail.com",
+    dailyFolderId: "1-JU5aMyzGpC6tBDbhe_fBN1EmXpOpf1F",
+  },
   exchangeAddressBook: {
     tenantId: "70011d0d-19b4-4a61-8195-ab1fd987c20f",
     appId: "1bf8841e-99a9-43fe-a8f7-85aedbd7bdc1",
@@ -97,6 +101,8 @@ export function validateFcunoConnectionPolicy(
   requireNonEmpty(policy.vercel.teamId, "vercel.teamId")
   requireNonEmpty(policy.vercel.projectId, "vercel.projectId")
   requireNonEmpty(policy.supabase.projectRef, "supabase.projectRef")
+  requireNonEmpty(policy.dailyBackupReceipt.googleAccount, "dailyBackupReceipt.googleAccount")
+  requireNonEmpty(policy.dailyBackupReceipt.dailyFolderId, "dailyBackupReceipt.dailyFolderId")
   requireNonEmpty(policy.storageMediaBackup.sourceBucket, "storageMediaBackup.sourceBucket")
   requireNonEmpty(policy.storageMediaBackup.googleServiceAccount, "storageMediaBackup.googleServiceAccount")
   requireNonEmpty(policy.storageMediaBackup.targetBucket, "storageMediaBackup.targetBucket")

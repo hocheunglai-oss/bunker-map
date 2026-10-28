@@ -91,6 +91,13 @@ jobs:
           set -o pipefail
           npm run test:federation 2>&1 | tee federation-tests.tap
 
+      - name: Verify metadata-only daily backup receipt route
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npx --no-install tsx --test tests/daily-backup-provider-receipt-route.test.ts 2>&1 | tee daily-backup-provider-receipt.tap
+
       - name: Verify canonical conflicts and versioned permission-group save ownership
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
@@ -339,6 +346,7 @@ jobs:
           path: |
             security-tests.tap
             federation-tests.tap
+            daily-backup-provider-receipt.tap
             canonical-template-conflicts.tap
             admin-role-default-save.tap
             admin-auth-security.tap
