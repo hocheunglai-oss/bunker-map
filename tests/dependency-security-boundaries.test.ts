@@ -44,6 +44,7 @@ test("installed and locked dependencies retain their security fixes", () => {
   const floors: Record<string, string> = {
     next: "16.4.1",
     nodemailer: "10.1.4",
+    qs: "6.16.1",
     sharp: "0.35.5",
     "source-map-js": "1.2.2",
     uuid: "11.1.1",
@@ -61,7 +62,7 @@ test("installed and locked dependencies retain their security fixes", () => {
   }
 
   for (const [packagePath, locked] of Object.entries(lock.packages)) {
-    const name = packagePath.match(/(?:^|\/)node_modules\/(next|nodemailer|sharp|source-map-js|uuid|zod|brace-expansion|@img\/sharp-[^/]+)$/)?.[1]
+    const name = packagePath.match(/(?:^|\/)node_modules\/(next|nodemailer|qs|sharp|source-map-js|uuid|zod|brace-expansion|@img\/sharp-[^/]+)$/)?.[1]
     if (!name) continue
     const braceFloors: Record<string, string> = { 1: "1.1.21", 2: "2.1.7", 3: "3.0.9", 5: "5.0.12" }
     const minimum = name === "brace-expansion"
@@ -85,6 +86,23 @@ test("installed and locked dependencies retain their security fixes", () => {
   if (sharp.versions.heif) {
     assertVersionFloor(sharp.versions.heif, "1.23.2", "loaded libheif")
   }
+})
+
+test("comma query serialization safely handles non-callable toString elements", () => {
+  const qs = require("qs") as {
+    stringify: (value: unknown, options: { arrayFormat: string; encodeValuesOnly?: boolean }) => string
+  }
+  const hostile = JSON.parse('{"a":[{"toString":"x"}]}')
+  for (const options of [
+    { arrayFormat: "comma" },
+    { arrayFormat: "comma", encodeValuesOnly: true },
+  ]) {
+    assert.equal(qs.stringify(hostile, options), "a=%5Bobject%20Object%5D")
+  }
+  assert.equal(
+    qs.stringify({ a: ["one", "two"], search: "a+b & c" }, { arrayFormat: "comma" }),
+    "a=one%2Ctwo&search=a%2Bb%20%26%20c",
+  )
 })
 
 test("framework manifest, tooling and all platform compilers retain the October security patch", () => {
