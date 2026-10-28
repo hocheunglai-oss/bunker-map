@@ -8,9 +8,10 @@ source_name="fcuno-source-$proof_id"
 recovery_name="fcuno-restore-$proof_id"
 mkdir -m 700 "$proof_root/source" "$proof_root/input" "$proof_root/scratch" "$proof_root/output" "$proof_root/tls"
 # Synthetic one-use key only, never a production credential or uploaded artifact.
+fixture_tls_host="$(node --input-type=module -e 'import { fcunoConnectionPolicy as p } from "./config/fcunoConnections.ts"; process.stdout.write(p.postgresBackup.sessionPoolerHost)')"
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
-  -subj '/CN=db.gglyugbrnyvyfktgwert.supabase.co' \
-  -addext 'subjectAltName=DNS:db.gglyugbrnyvyfktgwert.supabase.co' \
+  -subj "/CN=$fixture_tls_host" \
+  -addext "subjectAltName=DNS:$fixture_tls_host" \
   -keyout "$proof_root/tls/server.key" -out "$proof_root/tls/server.crt" >/dev/null 2>&1
 sudo chown -R 1000:1000 "$proof_root/source" "$proof_root/input" "$proof_root/scratch" "$proof_root/output" "$proof_root/tls"
 cleanup() {

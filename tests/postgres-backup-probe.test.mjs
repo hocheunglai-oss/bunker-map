@@ -9,6 +9,7 @@ import { PassThrough } from "node:stream"
 import vm from "node:vm"
 import ts from "typescript"
 import { validatePostgresProbe, POSTGRES_PROBE_SQL, probePostgresBackupRuntime } from "../lib/postgresBackupProbe.mjs"
+import { postgresProbeFailure, postgresProbeFailureResult } from "../lib/postgresBackupProbeCapability.mjs"
 import { fcunoConnectionPolicy as pins } from "../config/fcunoConnections.ts"
 import { isAdminRole } from "../lib/adminPages.ts"
 const time = Date.parse("2026-10-28T05:00:00.000Z")
@@ -72,6 +73,7 @@ function loadRoute({ auth = async () => ({ role: "ADMIN" }), environment = { POS
     "@/lib/postgresBackupProbe.mjs": { probePostgresBackupRuntime: options => {
       calls.probe++; assert.equal(options.runtime, environment); assert.equal(options.verifyBundle, verifier); return probe()
     } },
+    "@/lib/postgresBackupProbeCapability.mjs": { postgresProbeFailureResult },
   }
   vm.runInNewContext(routeCode, { exports, URL, process: { env: environment }, require: name => {
     assert.ok(Object.hasOwn(dependencies, name), `Unexpected dependency: ${name}`); return dependencies[name]
@@ -143,7 +145,7 @@ test("concurrent native failures are redacted and clear the in-flight promise fo
   for (const response of await Promise.all([first, second])) {
     assert.equal(response.status, 503); noCache(response)
     const text = await response.text(); assert.ok(!text.includes(secret))
-    assert.deepEqual(JSON.parse(text), { status: "unknown", scope: "native-runtime-and-read-only-metadata", exportPerformed: false, recoveryVerified: false })
+    assert.deepEqual(JSON.parse(text), postgresProbeFailureResult(null))
   }
   assert.equal(route.calls.probe, 1)
   assert.equal((await route.GET(new Request(probeUrl))).status, 503)
@@ -165,7 +167,8 @@ async function nativeFixture(t, overrides = {}) {
   const verified = []
   return { root, runtime, bundle, verified, now: () => time, verifyBundle: async (...args) => { verified.push(args); return bundle } }
 }
-function spawnFixture({ metadata = JSON.stringify(fixture()), exitCode = 0, stdinFailure = false, hang = false, neverClose = false, version = "17.11", onMetadata = () => {} } = {}) {
+function spawnFixture({ metadata = JSON.stringify(fixture()), exitCode = 0, stdinFailure = false, hang = false, neverClose = false, version = "17.11", onMetadata = () => {},
+  failSpawnAt = -1, clientExitCode = 0, stderr = "" } = {}) {
   const calls = []
   const spawnImpl = (executable, args, options) => {
     const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() })
@@ -175,10 +178,13 @@ function spawnFixture({ metadata = JSON.stringify(fixture()), exitCode = 0, stdi
     child.kill = signal => { call.signals.push(signal); if (!neverClose || isVersion) close(null); else child.emit("error", Error("Synthetic failed signal")); return !neverClose }
     child.stdin.on("data", bytes => { call.input += bytes })
     child.stdin.on("finish", () => queueMicrotask(() => {
+      if (calls.indexOf(call) === failSpawnAt) { child.emit("error", Error("Synthetic private spawn path")); close(null); return }
+      child.emit("spawn")
+      child.stderr.write(stderr)
       if (!isVersion) onMetadata()
       if (!isVersion && hang) return
       child.stdout.write(isVersion ? `${executable.split("/").at(-1)} (PostgreSQL) ${version}\n` : metadata)
-      close(isVersion ? 0 : exitCode)
+      close(isVersion ? clientExitCode : exitCode)
     }))
     if (!isVersion && stdinFailure) child.stdin.end = () => { onMetadata(); throw Error("Synthetic stdin failure") }
     return child
@@ -197,8 +203,8 @@ test("injected native execution checks three pinned versions and only the fixed 
   const call = process.calls[3], env = call.options.env
   assert.equal(call.input, POSTGRES_PROBE_SQL + "\n"); assert.equal(call.options.shell, false)
   assert.deepEqual(call.args, ["-X", "-q", "-A", "-t", "--no-readline", "--no-password", "--set=ON_ERROR_STOP=1"])
-  assert.equal(env.PGHOST, `db.${pins.supabase.projectRef}.supabase.co`); assert.equal(env.PGPORT, "5432")
-  assert.equal(env.PGUSER, pins.postgresBackup.databaseLogin); assert.equal(env.PGDATABASE, pins.postgresBackup.databaseName)
+  assert.equal(env.PGHOST, pins.postgresBackup.sessionPoolerHost); assert.equal(env.PGPORT, "5432")
+  assert.equal(env.PGUSER, `${pins.postgresBackup.databaseLogin}.${pins.supabase.projectRef}`); assert.equal(env.PGDATABASE, pins.postgresBackup.databaseName)
   assert.equal(env.PGSSLMODE, "verify-full"); assert.equal(env.PGSSLROOTCERT, join(options.root, ".runtime/postgres-source/root.crt"))
   assert.equal(env.PGPASSWORD, syntheticPassword); assert.equal(env.PGCONNECT_TIMEOUT, "10")
   assert.equal(env.PGAPPNAME, "fcuno-read-only-compatibility-probe-v1")
@@ -226,14 +232,18 @@ test("the overall native deadline terminates a metadata process rather than wait
   let started
   const ready = new Promise(resolve => { started = resolve }), process = spawnFixture({ hang: true, onMetadata: started })
   const check = probePostgresBackupRuntime({ ...options, spawnImpl: process.spawnImpl })
-  const rejected = assert.rejects(check, /Native compatibility unavailable/)
+  const rejected = assert.rejects(check, error => {
+    assert.deepEqual(postgresProbeFailureResult(error).diagnostic, { stage: "connection", code: "DEADLINE_EXCEEDED" }); return true
+  })
   await ready; t.mock.timers.tick(20001); await rejected
   assert.deepEqual(process.calls[3].signals, ["SIGTERM"]); assert.equal(process.calls[3].closed, true)
   await assert.rejects(stat(dirname(process.calls[3].options.env.PGPASSFILE)), { code: "ENOENT" })
 })
 test("unconfirmed child termination never reports success or removes its diagnostic directory", async t => {
   const options = await nativeFixture(t), process = spawnFixture({ stdinFailure: true, neverClose: true })
-  await assert.rejects(probePostgresBackupRuntime({ ...options, spawnImpl: process.spawnImpl }), /termination unconfirmed/)
+  await assert.rejects(probePostgresBackupRuntime({ ...options, spawnImpl: process.spawnImpl }), error => {
+    assert.deepEqual(postgresProbeFailureResult(error).diagnostic, { stage: "cleanup", code: "TERMINATION_UNCONFIRMED" }); return true
+  })
   const call = process.calls[3], directory = dirname(call.options.env.PGPASSFILE)
   assert.deepEqual(call.signals, ["SIGTERM", "SIGKILL"]); assert.equal(call.closed, false)
   assert.equal((await stat(directory)).isDirectory(), true)
@@ -252,4 +262,55 @@ for (const [label, overrides] of [
   const options = await nativeFixture(t, overrides), process = spawnFixture()
   await assert.rejects(probePostgresBackupRuntime({ ...options, spawnImpl: process.spawnImpl }))
   assert.equal(process.calls.length, 0)
+})
+
+test("admin-only route returns classified stages without error details or credentials", async () => {
+  const error = postgresProbeFailure("bundle", "BUNDLE_UNVERIFIED")
+  error.message = "private file path and synthetic credential"
+  error.cause = { stderr: "private SQL and provider text" }
+  const route = loadRoute({ probe: async () => { throw error } }), response = await route.GET(new Request(probeUrl))
+  assert.equal(response.status, 503); noCache(response)
+  assert.deepEqual(await response.json(), { ...postgresProbeFailureResult(null), diagnostic: { stage: "bundle", code: "BUNDLE_UNVERIFIED" } })
+})
+for (const [label, overrides, stage, code] of [
+  ["runtime", { VERCEL_ENV: "preview" }, "runtime", "RUNTIME_UNAVAILABLE"],
+  ["certificate", { POSTGRES_BACKUP_CA_SHA256: "b".repeat(64) }, "certificate", "CERTIFICATE_UNVERIFIED"],
+  ["credential", { POSTGRES_BACKUP_SOURCE_CREDENTIAL_JSON: "synthetic private invalid json" }, "credential", "CREDENTIAL_UNAVAILABLE"],
+]) test(`native diagnostics classify ${label} without starting a child`, async t => {
+  const options = await nativeFixture(t, overrides), process = spawnFixture()
+  await assert.rejects(probePostgresBackupRuntime({ ...options, spawnImpl: process.spawnImpl }), error => {
+    assert.deepEqual(postgresProbeFailureResult(error).diagnostic, { stage, code }); return true
+  }); assert.equal(process.calls.length, 0)
+})
+test("bundle verification errors are classified before CA, credential or subprocess access", async t => {
+  const options = await nativeFixture(t), process = spawnFixture()
+  await assert.rejects(probePostgresBackupRuntime({ ...options, spawnImpl: process.spawnImpl,
+    verifyBundle: () => { throw Object.assign(Error("synthetic secret"), { code: "private-path" }) } }), error => {
+    assert.deepEqual(postgresProbeFailureResult(error).diagnostic, { stage: "bundle", code: "BUNDLE_UNVERIFIED" }); return true
+  }); assert.equal(process.calls.length, 0)
+})
+for (const [label, settings, stage, code] of [
+  ["client spawn", { failSpawnAt: 0 }, "client", "SPAWN_FAILED"],
+  ["metadata spawn", { failSpawnAt: 3 }, "connection", "SPAWN_FAILED"],
+  ["client command", { clientExitCode: 127 }, "client", "COMMAND_FAILED"],
+  ["client version", { version: "17.10" }, "client", "VERSION_MISMATCH"],
+  ["metadata command", { exitCode: 2 }, "connection", "COMMAND_FAILED"],
+  ["pipe", { stdinFailure: true }, "connection", "IO_FAILED"],
+  ["output bound", { metadata: "x".repeat(65537) }, "connection", "OUTPUT_LIMIT"],
+  ["result JSON", { metadata: "private malformed server output" }, "result", "RESULT_INVALID"],
+  ["result safety", { metadata: JSON.stringify({ ...fixture(), backendTls: false }) }, "result", "RESULT_INVALID"],
+]) test(`native ${label} returns only a bounded stage and observes termination`, async t => {
+  const options = await nativeFixture(t), process = spawnFixture({ ...settings, stderr: syntheticPassword + " private SQL provider error" })
+  await assert.rejects(probePostgresBackupRuntime({ ...options, spawnImpl: process.spawnImpl }), error => {
+    assert.deepEqual(postgresProbeFailureResult(error).diagnostic, { stage, code })
+    assert.equal(error.message, "Native compatibility unavailable")
+    assert.ok(!JSON.stringify(postgresProbeFailureResult(error)).includes(syntheticPassword)); return true
+  }); assert.ok(process.calls.every(call => call.closed))
+})
+test("actual missing local binary is classified without exposing the failed path", async t => {
+  const options = await nativeFixture(t)
+  await assert.rejects(probePostgresBackupRuntime(options), error => {
+    assert.deepEqual(postgresProbeFailureResult(error).diagnostic, { stage: "client", code: "SPAWN_FAILED" })
+    assert.ok(!JSON.stringify(postgresProbeFailureResult(error)).includes(options.root)); return true
+  })
 })

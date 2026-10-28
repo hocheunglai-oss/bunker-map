@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises"
 import vm from "node:vm"
 import ts from "typescript"
 import { fcunoConnectionPolicy as pins } from "../config/fcunoConnections.ts"
-import { createPostgresProbeHandler, POSTGRES_PROBE_BODY, POSTGRES_PROBE_URL, validatePostgresProbeResult } from "../lib/postgresBackupProbeCapability.mjs"
+import { createPostgresProbeHandler, POSTGRES_PROBE_BODY, POSTGRES_PROBE_URL, validatePostgresProbeResult,
+  postgresProbeFailure, postgresProbeFailureResult } from "../lib/postgresBackupProbeCapability.mjs"
 import { main } from "../scripts/probe-postgres-backup.mjs"
 
 const time = Date.parse("2026-10-28T07:00:00.000Z"), now = () => time
@@ -95,7 +96,34 @@ test("unsafe native output is rejected and never disclosed as success", async ()
     { recoveryVerified: true }, { clientTls: "require" }, { backendTls: false }, { checkedAt: "2026-01-01" }]) {
     const value = { ...proof(), ...change }; assert.throws(() => validatePostgresProbeResult(value, time))
     const { handler } = fixture({ probe: async () => value }), response = await handler(request())
-    assert.equal(response.status, 503); assert.equal(await response.text(), "")
+    assert.equal(response.status, 503)
+    assert.deepEqual(await response.json(), { ...postgresProbeFailureResult(null), diagnostic: { stage: "result", code: "RESULT_INVALID" } })
+  }
+})
+test("only the authenticated literal operation may receive finite probe diagnostics", async () => {
+  const error = postgresProbeFailure("connection", "COMMAND_FAILED")
+  error.message = "private password SQL provider host"
+  error.stderr = "more private server content"
+  const { handler, calls } = fixture({ probe: async () => { throw error } })
+  const result = await handler(request())
+  assert.equal(result.status, 503); privateResponse(result)
+  assert.deepEqual(await result.json(), { ...postgresProbeFailureResult(null), diagnostic: { stage: "connection", code: "COMMAND_FAILED" } })
+  for (const bad of [request({ headers: { authorization: "" } }), request({ body: "{}" })]) {
+    const response = await handler(bad); assert.ok([400, 401].includes(response.status)); assert.equal(await response.text(), "")
+  }
+  const providerFailure = fixture({ claim: () => { throw error } })
+  const response = await providerFailure.handler(request())
+  assert.equal(response.status, 503); assert.equal(await response.text(), ""); assert.equal(providerFailure.calls.probe, 0)
+  assert.equal(calls.probe, 1)
+})
+test("arbitrary thrown values cannot forge a diagnostic or expose message, stack, cause or stderr", async () => {
+  for (const error of [Object.assign(Error("synthetic private secret"), { stage: "connection", code: "COMMAND_FAILED", stderr: "private", cause: "private" }),
+    { diagnostic: { stage: "bundle", code: "BUNDLE_UNVERIFIED" } }, "synthetic secret", null]) {
+    const { handler } = fixture({ probe: async () => { throw error } }), response = await handler(request())
+    assert.equal(response.status, 503); assert.deepEqual(await response.json(), postgresProbeFailureResult(null))
+  }
+  for (const [stage, code] of [["connection", "password=private"], ["private", "COMMAND_FAILED"], [["connection"], "COMMAND_FAILED"], ["__proto__", "COMMAND_FAILED"]]) {
+    assert.throws(() => postgresProbeFailure(stage, code))
   }
 })
 
