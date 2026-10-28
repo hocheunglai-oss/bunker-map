@@ -8,7 +8,8 @@ import { POSTGRES_BACKUP_PROTOCOL, assertExportContext, guardedExport, validateE
 import { RECOVERY_CATALOG_EXPRESSION } from "../../lib/postgresRecoveryCatalog.mjs"
 
 const policy = fcunoConnectionPolicy.postgresBackup
-const host = `db.${fcunoConnectionPolicy.supabase.projectRef}.supabase.co`
+const host = policy.sessionPoolerHost
+const poolerUser = `${policy.databaseLogin}.${fcunoConnectionPolicy.supabase.projectRef}`
 const fail = () => { throw new Error("Fixed native PostgreSQL export failed") }
 
 // All statements are source-owned constants. A request cannot select a query,
@@ -50,7 +51,7 @@ export function fixedNativeEnvironment({ credential, caPath, workDirectory }) {
   // No process.env spread: inherited PGOPTIONS, PGSERVICE, LD_PRELOAD,
   // NODE_OPTIONS, PATH, user startup/password files are never consulted.
   return { LANG: "C", LC_ALL: "C", TZ: "UTC", OPENSSL_CONF: "/dev/null", PGHOST: host, PGPORT: "5432", PGDATABASE: policy.databaseName,
-    PGUSER: policy.databaseLogin, PGPASSWORD: credential.password, PGSSLMODE: "verify-full", PGSSLROOTCERT: caPath,
+    PGUSER: poolerUser, PGPASSWORD: credential.password, PGSSLMODE: "verify-full", PGSSLROOTCERT: caPath,
     PGSSLCERT: join(workDirectory, "absent-client-cert"), PGSSLKEY: join(workDirectory, "absent-client-key"),
     PGPASSFILE: join(workDirectory, "absent-password-file"), PGSERVICEFILE: join(workDirectory, "absent-service-file"),
     PGCONNECT_TIMEOUT: "10", PGAPPNAME: "fcuno-fixed-weekly-export-v1",

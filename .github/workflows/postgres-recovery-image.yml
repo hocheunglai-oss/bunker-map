@@ -48,6 +48,10 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Read canonical source connection pins with Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
       - name: Prove signed native export through production recovery controller
         run: bash scripts/postgres-recovery/run-controller-proof.sh
       - name: Retain nonsecret controller proof only

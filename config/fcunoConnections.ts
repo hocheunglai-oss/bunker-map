@@ -31,6 +31,10 @@ export const fcunoConnectionPolicy = Object.freeze({
     databaseName: "postgres",
     databaseRole: "fcuno_backup_export_login",
     databaseLogin: "fcuno_backup_export_login",
+    // Verified in this project's Connect dialog, not inferred from its region.
+    // Session mode preserves the exporter's snapshot-owning connection while
+    // providing IPv4 connectivity from Vercel; transaction mode is not used.
+    sessionPoolerHost: "aws-1-ap-south-1.pooler.supabase.com",
     targetPrefix: "fcuno-postgresql/weekly",
     maximumArchiveBytes: 8589934592,
     maximumMetadataBytes: 8388608,

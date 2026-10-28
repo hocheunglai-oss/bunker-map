@@ -3,6 +3,7 @@ import { requireAdminPagePermission } from "@/lib/adminAuth"
 import { isAdminRole } from "@/lib/adminPages"
 import { fcunoConnectionPolicy } from "@/config/fcunoConnections"
 import { probePostgresBackupRuntime } from "@/lib/postgresBackupProbe.mjs"
+import { postgresProbeFailureResult } from "@/lib/postgresBackupProbeCapability.mjs"
 import { verifyPostgresRuntimeBundle } from "@/scripts/lib/postgres-runtime-bundle.mjs"
 
 export const dynamic = "force-dynamic"
@@ -32,9 +33,8 @@ export async function GET(request: Request) {
     inFlight ??= probePostgresBackupRuntime({ runtime: process.env, verifyBundle: verifyPostgresRuntimeBundle })
       .finally(() => { inFlight = null })
     return NextResponse.json(await inFlight, { headers })
-  } catch {
+  } catch (error) {
     // Native/provider errors can include data or authentication details: never log them.
-    return NextResponse.json({ status: "unknown", scope: "native-runtime-and-read-only-metadata",
-      exportPerformed: false, recoveryVerified: false }, { status: 503, headers })
+    return NextResponse.json(postgresProbeFailureResult(error), { status: 503, headers })
   }
 }

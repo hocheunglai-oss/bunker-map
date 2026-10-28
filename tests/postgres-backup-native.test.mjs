@@ -19,7 +19,8 @@ const exec = promisify(execFile), hash = bytes => createHash("sha256").update(by
 const bin = process.env.NATIVE_PG_BIN
 const cloudProof = process.env.FCUNO_CLOUD_CONTROLLER_PROOF === "1"
 const fixturePassword = "synthetic_fixture_password_not_a_real_secret_000000"
-const tlsHost = `db.${fcunoConnectionPolicy.supabase.projectRef}.supabase.co`
+const tlsHost = fcunoConnectionPolicy.postgresBackup.sessionPoolerHost
+const poolerUser = `${fcunoConnectionPolicy.postgresBackup.databaseLogin}.${fcunoConnectionPolicy.supabase.projectRef}`
 
 for (const killError of [false, true]) test(`unobserved native termination rejects cleanup even with kill error=${killError}`, async () => {
   const process = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() })
@@ -121,13 +122,15 @@ test("real PG17 TLS export, signed streaming decode and isolated restore preserv
     const context = { signal: AbortSignal.timeout(25000), deadline: start + 25000, now: clock }
     const open = createFixedNativeExporter({ binaries, certificate: { path: caPath, sha256: hash(await readFile(caPath)) }, privateKey, now: clock,
       getCredential: async () => ({ password: fixturePassword, issuedAt: start - 1000, expiresAt: start + 600000 }),
-      // The sole fixture substitution pins the destination to our loopback
-      // server. Production code has no configurable hostaddr or fixture flag.
+      // The fixture pins the destination to loopback and models the shared
+      // pooler's tenant-qualified login mapping to the unchanged database role.
+      // This proves native TLS/snapshot/export semantics, not a live pooler.
+      // Production code has no configurable hostaddr, user or fixture flag.
       spawn(executable, args, options) {
         calls.push({ executable, args, options })
         assert.equal(options.env.PGHOST, tlsHost); assert.equal(options.env.PGSSLMODE, "verify-full")
-        assert.equal(options.env.PGUSER, "fcuno_backup_export_login"); assert.equal(options.shell, false)
-        return spawn(executable, args, { ...options, env: { ...options.env, PGHOSTADDR: "127.0.0.1", PGPORT: clusters[0].port } })
+        assert.equal(options.env.PGUSER, poolerUser); assert.equal(options.shell, false)
+        return spawn(executable, args, { ...options, env: { ...options.env, PGHOSTADDR: "127.0.0.1", PGPORT: clusters[0].port, PGUSER: fcunoConnectionPolicy.postgresBackup.databaseLogin } })
       } })
     const handler = createPostgresBackupHandler({ now: clock,
       runtime: { enabled: true, vercel: "1", environment: "production", projectId: fcunoConnectionPolicy.vercel.projectId, googleSubject: "123456789012345678901" },
@@ -267,7 +270,7 @@ test("native plan has no caller-controlled SQL/options/credentials fallback", ()
   const environment = fixedNativeEnvironment({ credential: { password: fixturePassword, issuedAt: 1, expiresAt: 100000 }, caPath: "/owned/ca.pem", workDirectory: "/owned/temp" })
   assert.equal(environment.PGHOST, tlsHost)
   assert.equal(environment.PGSSLMODE, "verify-full")
-  assert.equal(environment.PGUSER, "fcuno_backup_export_login")
+  assert.equal(environment.PGUSER, poolerUser)
   for (const forbidden of ["PGSERVICE", "PGHOSTADDR", "PATH", "HOME", "LD_PRELOAD", "NODE_OPTIONS"]) assert.equal(environment[forbidden], undefined)
   assert.throws(() => fixedNativeEnvironment({ credential: { password: fixturePassword, issuedAt: 1, expiresAt: 100 * 86400000 }, caPath: "/owned/ca.pem", workDirectory: "/owned/temp" }))
 })
