@@ -49,9 +49,9 @@ async function boundedText(response, maximum, signal) {
 // GOOGLE_APPLICATION_CREDENTIALS fallback. Only this Cloud Run job's metadata
 // identity can request a short-lived, fixed-audience Google ID token.
 export function createMetadataIdentityTokenProvider({ fetch: fetchImpl = fetch, runtime = process.env, now = Date.now, purpose = "storage-media" } = {}) {
-  if (!["storage-media", "postgres-candidate"].includes(purpose)) fail()
-  const identityAudience = purpose === "postgres-candidate"
-    ? `${fcunoConnectionPolicy.vercel.productionOrigins[0]}${fcunoConnectionPolicy.postgresBackup.sourcePath}` : SOURCE_URL
+  if (!["storage-media", "postgres-candidate", "postgres-probe"].includes(purpose)) fail()
+  const identityAudience = purpose !== "storage-media"
+    ? `${fcunoConnectionPolicy.vercel.productionOrigins[0]}${fcunoConnectionPolicy.postgresBackup.sourcePath}${purpose === "postgres-probe" ? "-probe" : ""}` : SOURCE_URL
   const metadataIdentityUrl = purpose === "storage-media" ? METADATA_IDENTITY_URL
     : `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=${encodeURIComponent(identityAudience)}`
   return async context => {

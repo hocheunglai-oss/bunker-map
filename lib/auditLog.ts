@@ -586,6 +586,9 @@ export function approvedCountryLabelNormalizationUndoMessage(record: AuditLogRec
 }
 
 export function canUndoAuditLogRecord(record: AuditLogRecord) {
+  // Derived certification evidence is not a user-authored template revision.
+  // Replaying its obsolete recipient certificate independently is not valid.
+  if (isOutlookCertificationRefreshAudit(record)) return false
   // Group changes require target-version and current-membership checks.
   // Replaying a whole stored snapshot would bypass that transaction boundary.
   if (record.tableSchema === "public" && (record.tableName === "admin_role_defaults"
@@ -609,6 +612,13 @@ export function canUndoAuditLogRecord(record: AuditLogRecord) {
     return false
   }
   return !NON_UNDOABLE_TABLES.has(record.tableName)
+}
+
+function isOutlookCertificationRefreshAudit(record: AuditLogRecord) {
+  const representation = record.requestContext.auditRepresentation
+  return record.tableSchema === "public" && record.tableName === "email_templates"
+    && typeof representation === "object" && representation !== null
+    && "kind" in representation && representation.kind === "outlook-certification-refresh-v1"
 }
 
 export async function getAuditLogRecord(logId: string) {
@@ -1609,6 +1619,7 @@ function buildSummary(
 ) {
   const subject = subjectFor(record, recordLabel)
   if (record.undoOfLogId) return `Undid a previous change to ${subject}.`
+  if (isOutlookCertificationRefreshAudit(record)) return `Refreshed certified recipients for ${subject}; template content is unchanged.`
   const supplierSummary = getSupplierStoreSummary(record)
   if (supplierSummary) return supplierSummary
   const mfaTestPresentation = getSpcMfaTestPresentation(record)
@@ -1670,6 +1681,11 @@ function buildDetails(
 
   if (record.undoOfLogId) {
     details.push(`This change restored the previous version of ${subject}.`)
+  }
+
+  if (isOutlookCertificationRefreshAudit(record)) {
+    details.push("The complete recipient evidence before and after this refresh is retained. Unchanged message bodies are represented by their SHA-256 checksums and byte lengths, not duplicated snapshots.")
+    details.push("This automatic certificate refresh cannot be undone independently. Template content was not changed.")
   }
 
   if (record.tableName === "outlook_template_insertion_attempts") {

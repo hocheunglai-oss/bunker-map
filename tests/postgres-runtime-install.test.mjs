@@ -82,5 +82,5 @@ test('production entrypoint installs before compiler; only backup routes trace r
   assert.match(build, /installPostgresRuntime\(\)\.then\(\(\) => runProductionBuild\(\)\)/);
   const config = await import('../next.config.js').then(value => value.default);
   const traced = Object.entries(config.outputFileTracingIncludes).filter(([, values]) => values.some(value => value.includes('.runtime/'))).map(([key]) => key).sort();
-  assert.deepEqual(traced, ['/api/admin/system-health/postgres-backup', '/api/backups/postgres']);
+  assert.deepEqual(traced, ['/api/admin/system-health/postgres-backup', '/api/backups/postgres', '/api/backups/postgres-probe']);
 });

@@ -9,11 +9,13 @@ RUN npm ci --omit=dev
 COPY scripts/backup-google-drive-files-to-gcs.mjs ./scripts/backup-google-drive-files-to-gcs.mjs
 COPY scripts/backup-storage-media-to-gcs.mjs ./scripts/backup-storage-media-to-gcs.mjs
 COPY scripts/backup-postgres-to-gcs.mjs ./scripts/backup-postgres-to-gcs.mjs
+COPY scripts/probe-postgres-backup.mjs ./scripts/probe-postgres-backup.mjs
 COPY scripts/lib/postgres-backup-source-adapter.mjs scripts/lib/postgres-backup-receiver.mjs ./scripts/lib/
 COPY scripts/lib/storage-media-*.mjs ./scripts/lib/
 COPY scripts/lib/backup-budget-*.mjs ./scripts/lib/
 COPY config/fcunoConnections.ts ./config/fcunoConnections.ts
 COPY lib/storageMediaBackup.mjs lib/backupValidationSpool.mjs lib/storageMediaRecurring.mjs lib/storageMediaBackupHealth.mjs lib/backupOperatingPolicy.mjs ./lib/
 COPY lib/postgresBackupProtocol.mjs lib/postgresBackupReceipt.mjs lib/postgresRecoveryCatalog.mjs lib/postgresRecoveryAcceptance.mjs lib/postgresRecoveryEvidence.mjs ./lib/
+COPY lib/postgresBackupProbeCapability.mjs ./lib/postgresBackupProbeCapability.mjs
 
 CMD ["npm", "run", "backup:drive-files:gcs"]
