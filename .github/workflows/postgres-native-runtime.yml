@@ -1,0 +1,52 @@
+name: PostgreSQL native runtime bundle
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/postgres-native-runtime.yml'
+      - 'scripts/postgres-runtime/**'
+      - 'scripts/lib/postgres-runtime-bundle.mjs'
+      - 'tests/postgres-runtime-bundle.test.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  linux-x64-native-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - name: Test fail-closed bundle verifier
+        run: node --test tests/postgres-runtime-bundle.test.mjs
+      - name: Build official pinned-source clients on the pinned AL2023 Node24 image
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/fcuno-pg-artifact" "$RUNNER_TEMP/fcuno-pg-proof"
+          chmod 777 "$RUNNER_TEMP/fcuno-pg-proof"
+          docker build --platform linux/amd64 --target proof --file scripts/postgres-runtime/Dockerfile --tag fcuno-pg-native-proof .
+          docker build --platform linux/amd64 --target artifact --file scripts/postgres-runtime/Dockerfile --output "type=local,dest=$RUNNER_TEMP/fcuno-pg-artifact" .
+      - name: Real TLS, gzip and isolated recovery proof with no outside network
+        run: |
+          set -euo pipefail
+          docker run --rm --platform linux/amd64 --network none --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=512m \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --mount "type=bind,source=$RUNNER_TEMP/fcuno-pg-proof,target=/evidence" \
+            fcuno-pg-native-proof | tee "$RUNNER_TEMP/fcuno-pg-proof/native-proof.log"
+          node -e 'const fs=require("node:fs"),c=require("node:crypto"),p=process.env.RUNNER_TEMP;const r=JSON.parse(fs.readFileSync(p+"/fcuno-pg-proof/native-proof.json"));const h=c.createHash("sha256").update(fs.readFileSync(p+"/fcuno-pg-artifact/postgres/manifest.json")).digest("hex");if(!r.passed||r.manifestSha256!==h||r.productionDatabaseAccessed!==false)process.exit(1);'
+      - name: Retain reviewed bundle and secret-free native evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fcuno-postgres17-linux-x64-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/fcuno-pg-artifact/
+            ${{ runner.temp }}/fcuno-pg-proof/
