@@ -3082,11 +3082,47 @@ async function checkGoogleContacts(): Promise<HealthCheckResult> {
   }
 }
 
-async function checkExchangeTruth(): Promise<HealthCheckResult> {
+function createOutlookTemplateTruthReader(): () => Promise<unknown> {
+  // One complete proof per health assessment. The template verifier already
+  // returns its full Exchange proof; sharing that same promise avoids a second
+  // concurrent history scan without keeping evidence between assessments.
+  let result: Promise<unknown> | undefined
+  return () => {
+    if (!result) {
+      result = (async () => {
+        const { data, error } = await getSupabaseClient().rpc(
+          "verify_outlook_template_recipient_truth"
+        )
+        if (error) throw error
+        const verification = asRecord(data, "Outlook template recipient verification")
+        if (verification.schema !== OUTLOOK_TEMPLATE_TRUTH_SCHEMA || typeof verification.valid !== "boolean") {
+          throw new Error("Outlook template recipient verification has an unsupported contract.")
+        }
+        const exchangeTruth = asRecord(verification.exchangeTruth, "Exchange truth verification")
+        const proofFlags = ["valid", "integrityValid", "ledgerValid", "snapshotsValid", "referencesValid", "operationallyConsistent"]
+        if (proofFlags.some(flag => typeof exchangeTruth[flag] !== "boolean") ||
+            (verification.valid && proofFlags.some(flag => exchangeTruth[flag] !== true))) {
+          throw new Error("Outlook template recipient verification has inconsistent Exchange evidence.")
+        }
+        return verification
+      })()
+    }
+    return result
+  }
+}
+
+async function checkExchangeTruth(
+  readTemplateTruth?: () => Promise<unknown>
+): Promise<HealthCheckResult> {
   const supabase = getSupabaseClient()
   const [checkpointResponse, verificationResponse] = await Promise.all([
     supabase.rpc("get_outlook_exchange_truth_checkpoint"),
-    supabase.rpc("verify_outlook_exchange_truth_ledger"),
+    readTemplateTruth
+      ? readTemplateTruth().then(data => ({
+          data: asRecord(data, "Outlook template recipient verification").exchangeTruth,
+          error: null,
+        }))
+      : supabase.rpc("verify_outlook_exchange_truth_ledger"),
   ])
   if (checkpointResponse.error) throw checkpointResponse.error
   if (verificationResponse.error) throw verificationResponse.error
@@ -3232,15 +3268,11 @@ async function checkExchangeTruth(): Promise<HealthCheckResult> {
   }
 }
 
-async function checkOutlookTemplateRecipientTruth(): Promise<HealthCheckResult> {
-  const supabase = getSupabaseClient()
-  const { data, error } = await supabase.rpc(
-    "verify_outlook_template_recipient_truth"
-  )
-  if (error) throw error
-
+async function checkOutlookTemplateRecipientTruth(
+  readTemplateTruth: () => Promise<unknown> = createOutlookTemplateTruthReader()
+): Promise<HealthCheckResult> {
   const verification = asRecord(
-    data,
+    await readTemplateTruth(),
     "Outlook template recipient verification"
   )
   const templates = asRecord(
@@ -3323,6 +3355,7 @@ async function checkCronConfig(): Promise<HealthCheckResult> {
 
 export async function getSystemHealth(options: { backupGapObserver?: BackupGapObserver } = {}): Promise<SystemHealth> {
   const observer = options.backupGapObserver
+  const readTemplateTruth = createOutlookTemplateTruthReader()
   const checks = await Promise.all([
     runCheck("supabase", "Supabase", checkSupabase),
     runCheck("schema", "Optional Schema", checkOptionalSchema),
@@ -3338,11 +3371,11 @@ export async function getSystemHealth(options: { backupGapObserver?: BackupGapOb
     runCheck("storage-media-backup", "Uploaded-file Backup", checkStorageMediaBackup, 45_000),
     runCheck("calendar", "Google Calendar", checkGoogleCalendar),
     runCheck("contacts", "Google Contacts", checkGoogleContacts),
-    runCheck("exchange-truth", "Exchange Truth Chain", checkExchangeTruth, OUTLOOK_TRUTH_CHECK_TIMEOUT_MS),
+    runCheck("exchange-truth", "Exchange Truth Chain", () => checkExchangeTruth(readTemplateTruth), OUTLOOK_TRUTH_CHECK_TIMEOUT_MS),
     runCheck(
       "outlook-template-recipient-truth",
       "Outlook Template Recipient Truth",
-      checkOutlookTemplateRecipientTruth,
+      () => checkOutlookTemplateRecipientTruth(readTemplateTruth),
       OUTLOOK_TRUTH_CHECK_TIMEOUT_MS,
     ),
     runCheck("exchange", "Exchange Sync", checkExchangeConfig),
