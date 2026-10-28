@@ -180,6 +180,7 @@ function healthAssessmentHarness(options: {
   ].map(name => [name, async () => ({ status: "ok", message: "Unrelated provider fixture" })]))
   const context = {
     ...unrelated, exports: {}, Date: Clock, setTimeout, clearTimeout,
+    process: { env: {} }, getPostgresSourceMaintenanceCheck: () => null, getPostgresRecoveryMaintenanceCheck: () => null,
     CHECK_TIMEOUT_MS: 1000, BACKUP_CHECK_TIMEOUT_MS: 1000, OUTLOOK_TRUTH_CHECK_TIMEOUT_MS: options.proofTimeoutMs ?? 1000,
     OUTLOOK_TEMPLATE_TRUTH_SCHEMA: "fcuno.outlook-template-recipient-truth/v2",
     EXCHANGE_CERTIFICATION_WARNING_AGE_HOURS: 36,

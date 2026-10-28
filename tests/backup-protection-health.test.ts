@@ -13,8 +13,10 @@ import * as connections from "../config/fcunoConnections"
 import * as attendanceExceptions from "../lib/attendanceAutoConfirmPolicy"
 import * as attendanceRules from "../lib/attendanceRules"
 import type { HealthCheckResult, SystemHealth } from "../lib/systemHealth"
+import * as backupMaintenance from "../lib/postgresBackupMaintenance"
+import { recoveryMaintenanceFixture } from "./fixtures/postgres-maintenance-receipt"
 
-function fixture(options: { active?: boolean; driveError?: boolean; verified?: Record<string, unknown>; inventory?: Record<string, unknown>; corrupt?: boolean; readFailure?: boolean } = {}) {
+function fixture(options: { active?: boolean; driveError?: boolean; verified?: Record<string, unknown>; inventory?: Record<string, unknown>; corrupt?: boolean; readFailure?: boolean; environment?: Record<string, string> } = {}) {
   const now = Date.now()
   const createdAt = new Date(now - 60_000).toISOString()
   const migration = "20261015073258"
@@ -42,6 +44,7 @@ function fixture(options: { active?: boolean; driveError?: boolean; verified?: R
     "@/lib/storageMediaBackupHealthService": mediaHealth, "@/lib/storageMediaBackupSource": mediaSource,
     "@/config/fcunoConnections": connections,
     "@/lib/attendanceAutoConfirmPolicy": attendanceExceptions, "@/lib/attendanceRules": attendanceRules,
+    "@/lib/postgresBackupMaintenance": backupMaintenance,
   }
   const loaded = { exports: {} as { getSystemHealth(options?: { backupGapObserver?: policy.BackupGapObserver }): Promise<SystemHealth>; fixture: {
     checkDriveBackup(observer?: policy.BackupGapObserver): Promise<HealthCheckResult>
@@ -53,7 +56,7 @@ function fixture(options: { active?: boolean; driveError?: boolean; verified?: R
   code += `\nverifyStreamedBackupFile = async () => { if (fixtureOptions.readFailure) throw new BackupEvidenceReadError(); if (fixtureOptions.corrupt) throw Error('Confirmed checksum mismatch'); return fixtureVerified; };\ngetCurrentBackupInventory = async () => fixtureInventory;\nmodule.exports.fixture = { checkDriveBackup, checkDriveFileContentBackup, readDriveFileBytes, BackupEvidenceReadError };`
   new Function("require", "module", "exports", "process", "fixtureOptions", "fixtureVerified", "fixtureInventory", "fetch", code)(
     (name: string) => { assert.ok(name in modules, name); return modules[name] }, loaded, loaded.exports,
-    { env: { NEXT_PUBLIC_SUPABASE_URL: "https://fixture.invalid", SUPABASE_SERVICE_ROLE_KEY: "synthetic-only", GOOGLE_OAUTH_CLIENT_ID: "synthetic-only", GOOGLE_OAUTH_CLIENT_SECRET: "synthetic-only", GOOGLE_DRIVE_REFRESH_TOKEN: "synthetic-only", GOOGLE_DRIVE_COMPANY_FOLDER_ID: "synthetic-only" } },
+    { env: { NEXT_PUBLIC_SUPABASE_URL: "https://fixture.invalid", SUPABASE_SERVICE_ROLE_KEY: "synthetic-only", GOOGLE_OAUTH_CLIENT_ID: "synthetic-only", GOOGLE_OAUTH_CLIENT_SECRET: "synthetic-only", GOOGLE_DRIVE_REFRESH_TOKEN: "synthetic-only", GOOGLE_DRIVE_COMPANY_FOLDER_ID: "synthetic-only", ...options.environment } },
     options, verified, { migrationHead: migration, catalogSha256: catalog, liveTables: [], ...options.inventory }, () => assert.fail("No live network in health fixture"),
   )
   return loaded.exports
@@ -73,6 +76,30 @@ test("normal System Health get remains read-only without an observer", async () 
   assert.equal(health.checks.find((check) => check.id === "storage-media-backup")?.details?.notificationEligible, false)
   assert.equal(health.checks.find((check) => check.id === "backup")?.details?.notificationEligible, true)
   assert.doesNotMatch(JSON.stringify(health), /firstUncoveredAt|firstDueAt|fcuno.backup-protection-gaps/)
+})
+
+test("actual System Health adds cheap source-expiry advice only while enabled, with missing maintenance configuration visible", async () => {
+  const now = Date.now(), day = 86400000
+  const environment = { POSTGRES_BACKUP_SOURCE_ENABLED: "1", VERCEL: "1", VERCEL_ENV: "production",
+    VERCEL_PROJECT_ID: connections.fcunoConnectionPolicy.vercel.projectId,
+    POSTGRES_BACKUP_SOURCE_CREDENTIAL_JSON: JSON.stringify({ issuedAt: now - 80 * day, expiresAt: now + 10 * day, password: "a".repeat(64) }),
+    POSTGRES_BACKUP_MAINTENANCE_EMAIL_RECIPIENTS: "admin@example.invalid" }
+  const enabled = (await fixture({ environment }).getSystemHealth()).checks.filter(backupMaintenance.isPostgresBackupMaintenanceCheck)
+  assert.equal(enabled.length, 2); assert.equal(enabled[0].status, "warning")
+  assert.equal(enabled[0].details?.evidence, "configured-source-credential-expiry")
+  assert.equal(enabled[1].details?.evidence, "operator-verified-recovery-receipt-copy")
+  assert.equal(enabled[1].details?.notificationEligible, false, "No claimed recovery or email before operator evidence is installed")
+  assert.doesNotMatch(JSON.stringify(enabled), /aaaaaa|password|SOURCE_CREDENTIAL/)
+  const missing = await fixture({ environment: { ...environment, POSTGRES_BACKUP_MAINTENANCE_EMAIL_RECIPIENTS: "" } }).getSystemHealth()
+  assert.equal(missing.checks.find(backupMaintenance.isPostgresBackupMaintenanceCheck)?.status, "error")
+  const off = await fixture({ environment: { ...environment, POSTGRES_BACKUP_SOURCE_ENABLED: "0" } }).getSystemHealth()
+  assert.equal(off.checks.filter(backupMaintenance.isPostgresBackupMaintenanceCheck).length, 0)
+  const recovery = recoveryMaintenanceFixture(now - 80 * day, now - day)
+  const withProof = await fixture({ environment: { ...environment, ...recovery.runtime } }).getSystemHealth()
+  const recoveryCheck = withProof.checks.find(check => check.id === "postgresql-backup-recovery-renewal")!
+  assert.equal(recoveryCheck.status, "warning"); assert.equal(recoveryCheck.details?.notificationEligible, true)
+  assert.equal(recoveryCheck.details?.remoteReadbackCurrent, false)
+  assert.equal(recoveryCheck.details?.provesCurrentBackupSuccess, false)
 })
 
 test("actual file health sends only hashed sparse gaps to the injected observer", async () => {

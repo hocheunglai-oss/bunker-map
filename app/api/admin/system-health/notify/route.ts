@@ -6,6 +6,8 @@ import { getErrorMessage, getSystemHealth, type HealthCheck } from "@/lib/system
 import { buildHealthAlertHtml, deliverHealthAlerts } from "@/lib/systemHealthAlerts"
 import { createHealthAlertStore } from "@/lib/systemHealthAlertStore"
 import { createBackupProtectionGapObserver } from "@/lib/backupProtectionGapStore"
+import { listManagedAdminUsers } from "@/lib/adminUsers"
+import { deliverPostgresBackupMaintenance, getPostgresBackupMaintenanceRecipients, isPostgresBackupMaintenanceCheck } from "@/lib/postgresBackupMaintenance"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -46,30 +48,57 @@ export async function GET(request: Request) {
       process.env.EVENT_CALENDAR_EMAIL_RECIPIENTS
     )
 
-    if (!recipients.length) {
-      throw new Error("SYSTEM_HEALTH_EMAIL_RECIPIENTS or EVENT_CALENDAR_EMAIL_RECIPIENTS is not configured.")
-    }
+    // Do not even observe maintenance incidents in the ordinary staff channel:
+    // a muted observation can still resolve/rearm an existing incident.
+    const ordinaryChecks = health.checks.filter(check => !isPostgresBackupMaintenanceCheck(check))
+    const maintenanceNotified: HealthCheck[] = []
+    const maintenanceDelivery = (async () => {
+      if (process.env.POSTGRES_BACKUP_SOURCE_ENABLED !== "1") return { recipients: 0, sent: 0 }
+      const checks = health.checks.filter(isPostgresBackupMaintenanceCheck)
+      if (!checks.some(check => check.id === "postgresql-backup-access-renewal")) {
+        throw new Error("Independent backup maintenance health was not available.")
+      }
+      const configuredRecipients = getPostgresBackupMaintenanceRecipients(process.env)
+      // Fetch the canonical directory afresh on each enabled notification run.
+      // No JWT metadata, cached role or general staff-list fallback is accepted.
+      const accounts = await listManagedAdminUsers()
+      return deliverPostgresBackupMaintenance({ checks, accounts, configuredRecipients,
+        token: randomUUID, createStore: createHealthAlertStore,
+        async send(selectedRecipient, selectedChecks) {
+          const result = await sendCalendarEmail({ to: [selectedRecipient], subject: "FC Uno: backup maintenance needed",
+            html: buildHealthAlertHtml(selectedChecks, health.checkedAt) })
+          if (!result.accepted.length) throw new Error("No backup maintenance email recipient was accepted.")
+          maintenanceNotified.push(...selectedChecks)
+        },
+      })
+    })()
     // Each recipient has independent delivery state: one rejected mailbox must
     // not cause duplicates for colleagues or permanently miss its own alert.
-    const deliveries = await Promise.allSettled(recipients.map((recipient) => deliverHealthAlerts({
-      checks: health.checks,
-      muted: isNonAlertingCheck,
-      token: randomUUID(),
-      store: createHealthAlertStore(recipient),
-      async send(checks) {
-        const result = await sendCalendarEmail({
-          to: [recipient],
-          subject: "FC Uno: action needed",
-          html: buildHealthAlertHtml(checks, health.checkedAt),
-        })
-        if (!result.accepted.length) throw new Error("No System Health email recipients were accepted.")
-      },
-    })))
-    const failed = deliveries.find((delivery) => delivery.status === "rejected")
-    if (failed?.status === "rejected") throw failed.reason
-    const notifiedChecks = [...new Map(deliveries.flatMap((delivery) =>
-      delivery.status === "fulfilled" ? delivery.value.map((check) => [check.id, check] as const) : [],
-    )).values()]
+    const ordinaryDelivery = (async () => {
+      if (!recipients.length) throw new Error("SYSTEM_HEALTH_EMAIL_RECIPIENTS or EVENT_CALENDAR_EMAIL_RECIPIENTS is not configured.")
+      const deliveries = await Promise.allSettled(recipients.map((recipient) => deliverHealthAlerts({
+        checks: ordinaryChecks,
+        muted: isNonAlertingCheck,
+        token: randomUUID(),
+        store: createHealthAlertStore(recipient),
+        async send(checks) {
+          const result = await sendCalendarEmail({
+            to: [recipient],
+            subject: "FC Uno: action needed",
+            html: buildHealthAlertHtml(checks, health.checkedAt),
+          })
+          if (!result.accepted.length) throw new Error("No System Health email recipients were accepted.")
+        },
+      })))
+      const failed = deliveries.find((delivery) => delivery.status === "rejected")
+      if (failed?.status === "rejected") throw failed.reason
+      return deliveries.flatMap(delivery => delivery.status === "fulfilled" ? delivery.value : [])
+    })()
+    // A broken independent notification channel must not suppress the other.
+    const [ordinary, maintenance] = await Promise.allSettled([ordinaryDelivery, maintenanceDelivery])
+    if (ordinary.status === "rejected") throw ordinary.reason
+    if (maintenance.status === "rejected") throw maintenance.reason
+    const notifiedChecks = [...new Map([...ordinary.value, ...maintenanceNotified].map(check => [check.id, check])).values()]
 
     return NextResponse.json({
       success: true,
@@ -77,6 +106,7 @@ export async function GET(request: Request) {
       status: health.status,
       checkedAt: health.checkedAt,
       recipients: recipients.length,
+      maintenance: maintenance.value,
       checks: notifiedChecks.map((check) => ({
         id: check.id,
         label: check.label,

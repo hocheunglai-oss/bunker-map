@@ -4,7 +4,37 @@ const assert = require("node:assert/strict")
 const fs = require("node:fs")
 const path = require("node:path")
 
+function resolveCompiledSystemHealth(webpack) {
+  const candidates = []
+  const asyncPrototype = Object.getPrototypeOf(async function () {})
+  for (const [id, factory] of Object.entries(webpack.m)) {
+    if (!factory.toString().includes("storage-media-backup")) continue
+    for (const exported of Object.values(webpack(id))) {
+      // The notification renderer also contains the media check ID. Select the
+      // native async health aggregator by its full check contract, not by that
+      // shared string, a minified name/module ID or whichever export is first.
+      if (typeof exported !== "function" || Object.getPrototypeOf(exported) !== asyncPrototype) continue
+      const source = exported.toString()
+      if (["storage-media-backup", "exchange-truth", "outlook-template-recipient-truth", "backupGapObserver"].every(marker => source.includes(marker))) {
+        candidates.push(exported)
+      }
+    }
+  }
+  assert.equal(candidates.length, 1, "Resolve exactly the production getSystemHealth export, not a guessed module ID")
+  return candidates[0]
+}
+
+function verifyResolverBoundaries() {
+  const aggregator = async function () { return ["storage-media-backup", "exchange-truth", "outlook-template-recipient-truth", "backupGapObserver"] }
+  const renderer = function () { return "storage-media-backup" }
+  const fixture = exports => Object.assign(() => exports, { m: { fixture: renderer } })
+  assert.equal(resolveCompiledSystemHealth(fixture({ renderer, aggregator })), aggregator)
+  assert.throws(() => resolveCompiledSystemHealth(fixture({ renderer })), /Resolve exactly/)
+  assert.throws(() => resolveCompiledSystemHealth(fixture({ aggregator, ambiguous: aggregator })), /Resolve exactly/)
+}
+
 async function main() {
+  verifyResolverBoundaries()
   for (const key of Object.keys(process.env)) {
     if (/(?:SUPABASE_SERVICE_ROLE|GOOGLE_|CRON_SECRET|MAIL_|SMTP_|OUTLOOK_|DINGTALK_)/.test(key)) {
       assert.equal(process.env[key], undefined, `Production-test credentials must be absent: ${key}`)
@@ -22,15 +52,8 @@ async function main() {
   assert.ok(fs.existsSync(path.join(built, "app/api/admin/system-health/route.js")), "Build the production route first")
   require(path.join(built, "app/api/admin/system-health/route.js"))
   const webpack = require(path.join(built, "webpack-runtime.js"))
-  const candidates = []
-  for (const [id, factory] of Object.entries(webpack.m)) {
-    if (!factory.toString().includes("storage-media-backup")) continue
-    for (const exported of Object.values(webpack(id))) {
-      if (typeof exported === "function" && exported.toString().includes("storage-media-backup")) candidates.push(exported)
-    }
-  }
-  assert.equal(candidates.length, 1, "Resolve exactly the production getSystemHealth export, not a guessed module ID")
-  const result = await candidates[0]()
+  const getSystemHealth = resolveCompiledSystemHealth(webpack)
+  const result = await getSystemHealth()
   const check = result.checks.find(value => value.id === "storage-media-backup")
   assert.ok(check)
   assert.equal(check.status, "warning")

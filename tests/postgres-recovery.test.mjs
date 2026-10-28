@@ -140,9 +140,12 @@ test("extension export conditions are aligned and fail closed before source dump
 })
 test("weekly activation without first recovery receipt makes no network request", async () => {
   let calls = 0
-  await assert.rejects(backupMain({ args: ["--execute-recurring-weekly"], runtime: {
-    CLOUD_RUN_JOB: pins.storageMediaBackup.googleJob, POSTGRES_BACKUP_RECURRING_ENABLED: "1", POSTGRES_BACKUP_VERIFICATION_KEY_PEM: publicPem,
-  }, fetch: async () => { calls++; throw Error("must not fetch") } }), /acceptance remains pending/)
+  for (const maintenance of [undefined, JSON.stringify({ schema: "fcuno.recovery-maintenance-attestation/v1", checkedAt: new Date(now()).toISOString() })]) {
+    await assert.rejects(backupMain({ args: ["--execute-recurring-weekly"], runtime: {
+      CLOUD_RUN_JOB: pins.storageMediaBackup.googleJob, POSTGRES_BACKUP_RECURRING_ENABLED: "1", POSTGRES_BACKUP_VERIFICATION_KEY_PEM: publicPem,
+      POSTGRES_BACKUP_RECOVERY_MAINTENANCE_JSON: maintenance,
+    }, fetch: async () => { calls++; throw Error("must not fetch") } }), /acceptance remains pending/)
+  }
   assert.equal(calls, 0)
 })
 test("COPY and sequence parsing re-quotes identifiers and rejects SQL injection", () => {

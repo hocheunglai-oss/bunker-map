@@ -12,6 +12,7 @@ import { createSupabaseStorageReadProvider, readCurrentStorageMediaInventoryStat
 import { fcunoConnectionPolicy } from "@/config/fcunoConnections"
 import { hasCyDingTalkAutoConfirmException, hasJzDingTalkAutoConfirmException } from "@/lib/attendanceAutoConfirmPolicy"
 import { hktDateFromTimestamp } from "@/lib/attendanceRules"
+import { getPostgresSourceMaintenanceCheck, getPostgresRecoveryMaintenanceCheck } from "@/lib/postgresBackupMaintenance"
 
 export type HealthStatus = "ok" | "warning" | "error"
 
@@ -3382,6 +3383,13 @@ export async function getSystemHealth(options: { backupGapObserver?: BackupGapOb
     runCheck("email-notice", "Notice Email", checkEmailNoticeConfig),
     runCheck("cron", "Vercel Cron", checkCronConfig),
   ])
+
+  // Pure source configuration only: never opens a native database connection,
+  // reads backup archives or fetches the account directory for dashboard visits.
+  const backupMaintenance = getPostgresSourceMaintenanceCheck(process.env)
+  if (backupMaintenance) checks.push(backupMaintenance)
+  const recoveryMaintenance = getPostgresRecoveryMaintenanceCheck(process.env)
+  if (recoveryMaintenance) checks.push(recoveryMaintenance)
 
   return {
     status: combineStatus(checks),

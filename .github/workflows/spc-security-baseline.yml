@@ -111,7 +111,7 @@ jobs:
           import assert from "node:assert/strict"
           import {readFileSync} from "node:fs"
           const text=readFileSync("postgres-fixed-export-tests.tap","utf8")
-          for(const [name,expected] of [["tests",191],["pass",191],["fail",0],["cancelled",0],["skipped",0]]){
+          for(const [name,expected] of [["tests",193],["pass",193],["fail",0],["cancelled",0],["skipped",0]]){
             const values=[...text.matchAll(new RegExp("^# "+name+" (\\d+)","gm"))]
             assert.equal(Number(values.at(-1)?.[1]),expected,name)
           }
@@ -265,7 +265,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/backup-protection-*.test.ts tests/backup-truth-snapshot-export.test.ts tests/drive-file-backup-health.test.ts tests/storage-media-backup-health.test.ts tests/system-health-alerts.test.ts tests/system-health-backup-window.test.ts 2>&1 | tee backup-protection-tests.tap
+          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/backup-protection-*.test.ts tests/postgres-backup-maintenance.test.ts tests/backup-truth-snapshot-export.test.ts tests/drive-file-backup-health.test.ts tests/storage-media-backup-health.test.ts tests/system-health-alerts.test.ts tests/system-health-backup-window.test.ts 2>&1 | tee backup-protection-tests.tap
           node --test --test-reporter=tap tests/backup-receipt-description.test.mjs 2>&1 | tee backup-receipt-description.tap
 
       - name: Verify nonretryable backup observation failures through the SDK callback
