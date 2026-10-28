@@ -14,3 +14,20 @@ ENV PATH=/nix/var/nix/profiles/default/bin:/usr/local/bin:/usr/bin:/bin \
 WORKDIR /opt/fcuno
 USER 1000:1000
 ENTRYPOINT ["/usr/local/bin/node", "/opt/fcuno/compatibility-proof.mjs"]
+
+# Production recovery contains no source adapter, credential or cloud SDK.
+FROM compatibility AS recovery
+COPY config/fcunoConnections.ts /opt/fcuno/config/fcunoConnections.ts
+COPY lib/postgresBackupReceipt.mjs lib/postgresBackupProtocol.mjs lib/postgresRecoveryCatalog.mjs lib/storageMediaBackup.mjs /opt/fcuno/lib/
+COPY scripts/postgres-recovery/offline.mjs /opt/fcuno/scripts/postgres-recovery/offline.mjs
+ENTRYPOINT ["/usr/local/bin/node", "/opt/fcuno/scripts/postgres-recovery/offline.mjs", "--verify-cloud-input"]
+
+# Secret-free synthetic source/test tooling exists only in this CI target.
+FROM recovery AS native-controller-proof
+COPY lib/postgresBackupCapability.mjs /opt/fcuno/lib/postgresBackupCapability.mjs
+COPY scripts/lib/postgres-backup-native.mjs /opt/fcuno/scripts/lib/postgres-backup-native.mjs
+COPY tests/postgres-backup-native.test.mjs /opt/fcuno/tests/postgres-backup-native.test.mjs
+COPY supabase/migrations/20260723080340_backup_reliability_guards.sql /opt/fcuno/supabase/migrations/
+COPY supabase/migrations/*_fixed_postgresql_export_admission.sql /opt/fcuno/supabase/migrations/
+ENV NATIVE_PG_BIN=/nix/var/nix/profiles/default/bin FCUNO_CLOUD_CONTROLLER_PROOF=1 TMPDIR=/recovery
+ENTRYPOINT ["/usr/local/bin/node", "--test", "/opt/fcuno/tests/postgres-backup-native.test.mjs"]

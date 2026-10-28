@@ -151,6 +151,8 @@ test("Cloud Build upload allowlist includes every Docker COPY source and exclude
   const denied = [".env", ".env.local", ".git/config", ".google-drive-oauth-token.json", ".vercel/project.json",
     "browser-state/session.json", "backups/database.json", "exports/database.sql", "node_modules/package/index.js",
     "scripts/auth-google-drive.mjs", "scripts/lib/private-key.json", "scripts/lib/storage-media-token.json",
+    "scripts/lib/postgres-backup-native.mjs", "scripts/lib/postgres-runtime-bundle.mjs",
+    "lib/postgresBackupRuntime.mjs", "lib/postgresBackupAdmission.mjs", "lib/postgresBackupCapability.mjs",
     "config/private-key.json", "lib/credentials.mjs", "app/page.tsx", "tests/storage-media-job-auth.test.mjs"]
   const fixture = mkdtempSync(join(tmpdir(), "fcuno-gcloudignore-test-"))
   try {

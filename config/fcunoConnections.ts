@@ -17,11 +17,28 @@ export const fcunoConnectionPolicy = Object.freeze({
   },
   supabase: {
     projectRef: "gglyugbrnyvyfktgwert",
+    organizationId: "yxyxcenpgqutvoctrdkj",
     presentationMediaBucket,
   },
   dailyBackupReceipt: {
     googleAccount: "wider.custom@gmail.com",
     dailyFolderId: "1-JU5aMyzGpC6tBDbhe_fBN1EmXpOpf1F",
+  },
+  // Candidate transport only. There is deliberately no enabled route or job:
+  // runtime, scoped authentication and source admission must be verified first.
+  postgresBackup: {
+    sourcePath: "/api/backups/postgres",
+    databaseName: "postgres",
+    databaseRole: "fcuno_backup_export_login",
+    databaseLogin: "fcuno_backup_export_login",
+    targetPrefix: "fcuno-postgresql/weekly",
+    maximumArchiveBytes: 8589934592,
+    maximumMetadataBytes: 8388608,
+    chunkBytes: 262144,
+    objectBytes: 16777216,
+    maximumExportMs: 240000,
+    windowStartHourHkt: 2,
+    windowEndHourHkt: 6,
   },
   exchangeAddressBook: {
     tenantId: "70011d0d-19b4-4a61-8195-ab1fd987c20f",

@@ -84,6 +84,21 @@ test("create-only media upload captures server receipt and preserves unsafe-inte
   assert.ok(calls.every(call => call.init.method !== "DELETE"))
 })
 
+test("PostgreSQL candidate uses its own fixed prefix, bounded parts and control schema", async () => {
+  const { adapter, calls } = setup({ factory: { mode: "postgres-candidate" } })
+  const saved = await adapter.writeArchivePart({ index: 0, bytes, sizeBytes: bytes.length, ifGenerationMatch: "0" }, context())
+  assert.equal(saved.target.objectName, "fcuno-postgresql/weekly/runs/offline-run_1/archive/000000")
+  assert.equal(saved.target.bucket, policy.targetBucket)
+  await assert.rejects(adapter.writeTarget({ source, bytes, ifGenerationMatch: "0" }, context()))
+  await assert.rejects(adapter.writeArchivePart({ index: 0, bytes, sizeBytes: bytes.length, ifGenerationMatch: "1" }, context()))
+  await assert.rejects(adapter.writeArchivePart({ index: -1, bytes, sizeBytes: bytes.length, ifGenerationMatch: "0" }, context()))
+  await assert.rejects(adapter.writeArchivePart({ index: 0, bytes, sizeBytes: 16777217, ifGenerationMatch: "0" }, context()))
+  await assert.rejects(adapter.control.compareAndSwap("0", record, context()))
+  const next = await adapter.control.compareAndSwap("0", { schema: "fcuno.postgresql-control/v1", fence: 1, lease: null, latestSuccess: null }, context())
+  assert.equal(next.record.schema, "fcuno.postgresql-control/v1")
+  assert.ok(calls.filter(call => call.init.method === "POST").every(call => call.url.searchParams.get("name").startsWith("fcuno-postgresql/weekly/")))
+})
+
 test("recurring mode uses separate pinned daily object/control paths and preserves legacy records", async () => {
   const { adapter, calls } = setup({ factory: { mode: "recurring" } })
   const saved = await adapter.writeTarget({ source, bytes, ifGenerationMatch: "0" }, context())
@@ -97,6 +112,21 @@ test("recurring mode uses separate pinned daily object/control paths and preserv
   await assert.rejects(adapter.inspectTarget({ ...saved.target, objectName: saved.target.objectName.replace("/daily/", "/") }, context()))
   assert.ok(calls.filter(call => call.init.method === "POST").every(call => call.url.searchParams.get("name").startsWith(`${policy.targetPrefix}/daily/`)))
   assert.ok(calls.every(call => call.init.method !== "DELETE"))
+})
+
+test("recovery mode reads existing immutable archives but can only create its bounded acceptance receipt", async () => {
+  const { adapter, calls } = setup({ factory: { mode: "postgres-recovery" } })
+  assert.equal(adapter.manifestObjectName, "fcuno-postgresql/weekly/runs/offline-run_1/recovery.json")
+  await assert.rejects(adapter.writeArchivePart({ index: 0, bytes, sizeBytes: bytes.length, ifGenerationMatch: "0" }, context()))
+  await assert.rejects(adapter.control.read(context()))
+  await assert.rejects(adapter.control.compareAndSwap("0", record, context()))
+  await assert.rejects(adapter.uploadImmutable({ objectName: adapter.manifestObjectName, bytes: Buffer.alloc(16385), sizeBytes: 16385 }, context()))
+  assert.equal(calls.length, 0)
+  const saved = await adapter.uploadImmutable({ objectName: adapter.manifestObjectName, bytes, sizeBytes: bytes.length }, context())
+  assert.deepEqual(await adapter.inspectTarget(saved.target, context()), saved)
+  assert.deepEqual(await collect((await adapter.readTarget(saved.target, context())).bytes), bytes)
+  await assert.rejects(adapter.uploadImmutable({ objectName: adapter.manifestObjectName.replace("recovery.json", "manifest.json"), bytes }, context()))
+  assert.equal(calls.filter(call => call.init.method === "POST").length, 1)
 })
 
 test("recurring lifecycle guard refuses any deletion rule that could erase a still-referenced daily generation", async () => {

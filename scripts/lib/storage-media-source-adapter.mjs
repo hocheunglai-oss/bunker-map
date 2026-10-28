@@ -48,11 +48,16 @@ async function boundedText(response, maximum, signal) {
 // No local OAuth refresh token, key file, Supabase credential, IAM change, or
 // GOOGLE_APPLICATION_CREDENTIALS fallback. Only this Cloud Run job's metadata
 // identity can request a short-lived, fixed-audience Google ID token.
-export function createMetadataIdentityTokenProvider({ fetch: fetchImpl = fetch, runtime = process.env, now = Date.now } = {}) {
+export function createMetadataIdentityTokenProvider({ fetch: fetchImpl = fetch, runtime = process.env, now = Date.now, purpose = "storage-media" } = {}) {
+  if (!["storage-media", "postgres-candidate"].includes(purpose)) fail()
+  const identityAudience = purpose === "postgres-candidate"
+    ? `${fcunoConnectionPolicy.vercel.productionOrigins[0]}${fcunoConnectionPolicy.postgresBackup.sourcePath}` : SOURCE_URL
+  const metadataIdentityUrl = purpose === "storage-media" ? METADATA_IDENTITY_URL
+    : `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=${encodeURIComponent(identityAudience)}`
   return async context => {
     if (runtime.CLOUD_RUN_JOB !== policy.googleJob || runtime.GOOGLE_APPLICATION_CREDENTIALS) fail()
     const signal = signalFor(context, 55_000, now)
-    const response = await fetchImpl(METADATA_IDENTITY_URL, {
+    const response = await fetchImpl(metadataIdentityUrl, {
       headers: { "Metadata-Flavor": "Google" }, signal, redirect: "error", cache: "no-store",
     })
     if (response.status !== 200 || response.headers.get("metadata-flavor") !== "Google") { await response.body?.cancel(); fail() }
@@ -63,7 +68,7 @@ export function createMetadataIdentityTokenProvider({ fetch: fetchImpl = fetch, 
     const current = Math.floor(now() / 1000)
     // This is a local target check, not signature verification. The source
     // endpoint independently verifies Google's signature and every claim.
-    if (claims.iss !== policy.googleTokenIssuer || claims.aud !== SOURCE_URL || claims.email !== policy.googleServiceAccount ||
+    if (claims.iss !== policy.googleTokenIssuer || claims.aud !== identityAudience || claims.email !== policy.googleServiceAccount ||
         claims.email_verified !== true || !Number.isSafeInteger(claims.exp) || !Number.isSafeInteger(claims.iat) ||
         claims.exp <= current || claims.iat > current + 30 || claims.iat < current - 3630 ||
         claims.exp <= claims.iat || claims.exp - claims.iat > 3630) fail()

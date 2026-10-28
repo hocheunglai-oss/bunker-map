@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import { fcunoConnectionPolicy } from "../../config/fcunoConnections.ts"
 import { validateRecurringControl } from "../../lib/storageMediaRecurring.mjs"
 import { validateControlRecord, validateSourceIdentity, validateTargetIdentity } from "../../lib/storageMediaBackup.mjs"
+import { validatePostgresControl } from "../../lib/postgresBackupReceipt.mjs"
 
 const policy = fcunoConnectionPolicy.storageMediaBackup
 const ORIGIN = "https://storage.googleapis.com"
@@ -69,13 +70,14 @@ function guarded(promise, signal, late = () => {}) {
 /** No import-time IO, environment access, SDK cleanup, deletion or retries. */
 export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAccessToken, runId, now = Date.now, mode = "approved-snapshot" } = {}) {
   if (typeof fetchImpl !== "function" || typeof getAccessToken !== "function" || typeof now !== "function" ||
-      !["approved-snapshot", "recurring"].includes(mode) || typeof runId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(runId)) fail("invalid_configuration")
-  const scopedPrefix = mode === "recurring" ? `${PREFIX}/daily` : PREFIX
+      !["approved-snapshot", "recurring", "postgres-candidate", "postgres-recovery"].includes(mode) || typeof runId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(runId)) fail("invalid_configuration")
+  const recovery = mode === "postgres-recovery", postgres = mode === "postgres-candidate" || recovery
+  const scopedPrefix = postgres ? fcunoConnectionPolicy.postgresBackup.targetPrefix : mode === "recurring" ? `${PREFIX}/daily` : PREFIX
   const runPrefix = `${scopedPrefix}/runs/${runId}`
-  const manifestObjectName = `${runPrefix}/manifest.json`
+  const manifestObjectName = `${runPrefix}/${recovery ? "recovery" : "manifest"}.json`
   const controlName = `${scopedPrefix}/control.json`
-  const validateControl = mode === "recurring" ? validateRecurringControl : validateControlRecord
-  const maximumObjectBytes = mode === "recurring" ? policy.recurring.maxObjectBytes : policy.approvedTotalBytes
+  const validateControl = postgres ? validatePostgresControl : mode === "recurring" ? validateRecurringControl : validateControlRecord
+  const maximumObjectBytes = postgres ? fcunoConnectionPolicy.postgresBackup.objectBytes : mode === "recurring" ? policy.recurring.maxObjectBytes : policy.approvedTotalBytes
   let bucketValidated = false
   function operation(context, maximum) {
     if (!context?.signal || typeof context.signal.throwIfAborted !== "function" || !Number.isSafeInteger(context.deadline)) fail("invalid_context")
@@ -88,7 +90,7 @@ export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAcce
   function target(value) {
     const result = validateTargetIdentity(value)
     generation(result.generation)
-    if (result.bucket !== BUCKET || !new RegExp(`^${scopedPrefix}/runs/[A-Za-z0-9][A-Za-z0-9_-]{0,79}/(?:objects/[0-9a-f]{64}|manifest\\.json)$`).test(result.objectName)) fail("unapproved_target")
+    if (result.bucket !== BUCKET || !new RegExp(`^${scopedPrefix}/runs/[A-Za-z0-9][A-Za-z0-9_-]{0,79}/(?:${postgres ? "archive/[0-9]{6}" : "objects/[0-9a-f]{64}"}|manifest\\.json${recovery ? "|recovery\\.json" : ""})$`).test(result.objectName)) fail("unapproved_target")
     return result
   }
   function objectUrl(name, query = {}) {
@@ -141,12 +143,12 @@ export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAcce
   }
   async function validateBucket(context) {
     const op = operation(context, 20_000)
-    const response = await request(`${ORIGIN}/storage/v1/b/${encodeURIComponent(BUCKET)}?fields=name,location,iamConfiguration,versioning${mode === "recurring" ? ",lifecycle" : ""}`, op)
+    const response = await request(`${ORIGIN}/storage/v1/b/${encodeURIComponent(BUCKET)}?fields=name,location,iamConfiguration,versioning${mode !== "approved-snapshot" ? ",lifecycle" : ""}`, op)
     if (response.status !== 200) { await discard(response); fail("bucket_read_failed") }
     const info = record(await json(response, op))
     if (info.name !== BUCKET || info.location !== policy.googleRegion.toUpperCase() || info.versioning?.enabled !== true ||
         info.iamConfiguration?.publicAccessPrevention !== "enforced" || info.iamConfiguration?.uniformBucketLevelAccess?.enabled !== true) fail("unsafe_bucket_configuration")
-    if (mode === "recurring" && info.lifecycle !== undefined) {
+    if (mode !== "approved-snapshot" && info.lifecycle !== undefined) {
       if (!info.lifecycle || typeof info.lifecycle !== "object" || Array.isArray(info.lifecycle)) fail("unsafe_lifecycle_configuration")
       const rules = info.lifecycle?.rule
       if (rules !== undefined && (!Array.isArray(rules) || rules.length > 1000)) fail("unsafe_lifecycle_configuration")
@@ -168,7 +170,7 @@ export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAcce
   function receipt(metadata, name) {
     const info = record(metadata)
     if (info.bucket !== BUCKET || info.name !== name) fail("receipt_identity_mismatch")
-    const sizeBytes = size(info.size), maximum = name === controlName ? JSON_LIMIT : name.endsWith("/manifest.json") ? MANIFEST_LIMIT : maximumObjectBytes
+    const sizeBytes = size(info.size), maximum = name === controlName ? JSON_LIMIT : name.endsWith("/recovery.json") ? 16384 : name.endsWith("/manifest.json") ? MANIFEST_LIMIT : maximumObjectBytes
     if (sizeBytes > maximum) fail("receipt_size_exceeded")
     return Object.freeze({ target: Object.freeze({ bucket: BUCKET, objectName: name, generation: generation(info.generation) }), sizeBytes, crc32c: crc(info.crc32c) })
   }
@@ -241,6 +243,7 @@ export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAcce
     } finally { local.abort(); await input.close().catch(() => {}) }
   }
   function objectNameForSource(value) {
+    if (postgres) fail("media_write_not_available")
     const source = validateSourceIdentity(value)
     if (source.bucket !== policy.sourceBucket || source.sizeBytes > maximumObjectBytes) fail("unapproved_source")
     return `${runPrefix}/objects/${digest(JSON.stringify(source))}`
@@ -250,11 +253,19 @@ export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAcce
     const source = validateSourceIdentity(input.source)
     return upload(objectNameForSource(source), input.bytes, "0", context, { maximum: maximumObjectBytes, expectedBytes: source.sizeBytes })
   }
+  async function writeArchivePart(input, context) {
+    if (!postgres || recovery || !input || input.ifGenerationMatch !== "0" || !Number.isSafeInteger(input.index) || input.index < 0 ||
+        input.index >= Math.ceil(fcunoConnectionPolicy.postgresBackup.maximumArchiveBytes / maximumObjectBytes) ||
+        !Number.isSafeInteger(input.sizeBytes) || input.sizeBytes < 1 || input.sizeBytes > maximumObjectBytes) fail("unapproved_archive_part")
+    return upload(`${runPrefix}/archive/${String(input.index).padStart(6, "0")}`, input.bytes, "0", context,
+      { maximum: maximumObjectBytes, expectedBytes: input.sizeBytes })
+  }
   async function uploadImmutable(input, context) {
+    const maximum = recovery ? 16384 : MANIFEST_LIMIT
     if (!input || (input.ifGenerationMatch !== undefined && input.ifGenerationMatch !== "0") || input.objectName !== manifestObjectName ||
         (input.contentType !== undefined && input.contentType !== "application/json") ||
-        (input.sizeBytes !== undefined && (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes < 0 || input.sizeBytes > MANIFEST_LIMIT || Object.is(input.sizeBytes, -0)))) fail("unapproved_immutable_write")
-    return upload(input.objectName, input.bytes, "0", context, { maximum: MANIFEST_LIMIT, expectedBytes: input.sizeBytes, contentType: "application/json" })
+        (input.sizeBytes !== undefined && (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes < 0 || input.sizeBytes > maximum || Object.is(input.sizeBytes, -0)))) fail("unapproved_immutable_write")
+    return upload(input.objectName, input.bytes, "0", context, { maximum, expectedBytes: input.sizeBytes, contentType: "application/json" })
   }
   async function inspectTarget(value, context) {
     const selected = target(value), op = operation(context, 20_000)
@@ -316,6 +327,7 @@ export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAcce
   }
   const control = Object.freeze({
     async read(context) {
+      if (recovery) fail("control_not_available")
       const op = operation(context, 20_000)
       await ensureBucket(op)
       const expected = await inspectName(controlName, undefined, op, true)
@@ -323,6 +335,7 @@ export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAcce
       return (await readControlReceipt(expected, op)).snapshot
     },
     async compareAndSwap(expectedGeneration, record, context) {
+      if (recovery) fail("control_not_available")
       generation(expectedGeneration, true)
       const op = operation(context, 20_000), checked = validateControl(record), bytes = Buffer.from(JSON.stringify(checked))
       if (bytes.byteLength > JSON_LIMIT) fail("control_limit_exceeded")
@@ -334,5 +347,5 @@ export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAcce
       return verified.snapshot
     },
   })
-  return Object.freeze({ validateBucket, writeTarget, inspectTarget, readTarget, uploadImmutable, control, objectNameForSource, manifestObjectName })
+  return Object.freeze({ validateBucket, writeTarget, writeArchivePart, inspectTarget, readTarget, uploadImmutable, control, objectNameForSource, manifestObjectName })
 }

@@ -21,6 +21,7 @@
 /build
 /exports/
 /backups/
+/.runtime/
 
 # Restricted local assessment evidence (never commit generated evidence packs)
 /output/pdf/nis2-security-evidence-*/
