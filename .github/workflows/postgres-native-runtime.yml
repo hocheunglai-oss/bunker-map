@@ -42,7 +42,7 @@ jobs:
             fcuno-pg-native-proof | tee "$RUNNER_TEMP/fcuno-pg-proof/native-proof.log"
           node -e 'const fs=require("node:fs"),c=require("node:crypto"),p=process.env.RUNNER_TEMP;const r=JSON.parse(fs.readFileSync(p+"/fcuno-pg-proof/native-proof.json"));const h=c.createHash("sha256").update(fs.readFileSync(p+"/fcuno-pg-artifact/postgres/manifest.json")).digest("hex");if(!r.passed||r.manifestSha256!==h||r.productionDatabaseAccessed!==false)process.exit(1);'
       - name: Retain reviewed bundle and secret-free native evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fcuno-postgres17-linux-x64-${{ github.sha }}
           if-no-files-found: error

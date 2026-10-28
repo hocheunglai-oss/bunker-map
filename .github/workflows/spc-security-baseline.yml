@@ -359,7 +359,7 @@ jobs:
 
       - name: Retain sanitized security evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: spc-security-evidence-${{ github.run_id }}
           path: |
@@ -452,7 +452,7 @@ jobs:
 
       - name: Retain synthetic browser verification evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: report-browser-evidence-${{ github.run_id }}
           path: |
@@ -509,7 +509,7 @@ jobs:
 
       - name: Retain synthetic Phonebook browser verification evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: phonebook-browser-evidence-${{ github.run_id }}
           path: |
@@ -558,7 +558,7 @@ jobs:
 
       - name: Retain synthetic directory and feedback verification evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: directory-feedback-browser-evidence-${{ github.run_id }}
           path: |
@@ -614,7 +614,7 @@ jobs:
 
       - name: Retain synthetic calendar and session verification evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: calendar-session-browser-evidence-${{ github.run_id }}
           path: |
@@ -668,7 +668,7 @@ jobs:
 
       - name: Retain synthetic calendar fallback verification evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: calendar-fallback-browser-evidence-${{ github.run_id }}
           path: |
@@ -702,7 +702,7 @@ jobs:
 
       - name: Retain live-check evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: spc-live-security-baseline-${{ github.run_id }}
           path: live-security-baseline.txt
@@ -873,7 +873,7 @@ jobs:
 
       - name: Retain actual native SQL and cleanup evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-spc-record-state-${{ github.run_id }}
           path: ${{ runner.temp }}/fcuno-native-record-evidence
