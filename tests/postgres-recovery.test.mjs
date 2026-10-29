@@ -9,7 +9,7 @@ import { join } from "node:path"
 import { fcunoConnectionPolicy as pins } from "../config/fcunoConnections.ts"
 import { createRecoveryBuild, validateRecoveryHostInspection, RECOVERY_WORKSPACE, RECOVERY_POSTGRES_IMAGE } from "../lib/postgresRecoveryBuild.mjs"
 import { requireCloudRecoveryAcceptance, validateRecoveryAcceptanceDescriptor } from "../lib/postgresRecoveryAcceptance.mjs"
-import { parseCopyHeader, parseSequenceState, parseToc, boundedLines, fingerprintRows, runOfflineRecovery } from "../scripts/postgres-recovery/offline.mjs"
+import { parseCopyHeader, parseSequenceState, parseToc, boundedLines, fingerprintRows, runOfflineRecovery, buildRecoveryRoleSettingSql } from "../scripts/postgres-recovery/offline.mjs"
 import { createRecoveryDiagnostics, createNativeStderrHint, validateRecoveryDiagnostic, validateRecoveryFailureHost, recoveryFailure } from "../lib/postgresRecoveryDiagnostics.mjs"
 import { recordRecoveryFailureAndReject, RECOVERY_CONTROLLER_EXIT_CODES, createRecoveryControllerStages, readRecoveryPublicationInputs, readRecoveryHostOutcome, recoveryPublicationFailed, runCloudRecoveryCli } from "../scripts/postgres-recovery/cloud.mjs"
 import { createStorageMediaGcsAdapter } from "../scripts/lib/storage-media-gcs-adapter.mjs"
@@ -71,6 +71,56 @@ function acceptanceFixture(change = () => {}) {
       return { target: record.target, crc32c: record.crc32c, bytes: (async function* () { yield isManifest ? manifestBytes : bytes })() } } }
   return { value, descriptor, gcs, inspections: () => inspections }
 }
+
+test("role-setting replay keeps one transaction and exact stored-text postcondition", () => {
+  const sql = buildRecoveryRoleSettingSql({ role: "reader", database: null }, "statement_timeout=20000")
+  assert.ok(sql.startsWith("BEGIN; DO E'")); assert.ok(sql.endsWith("LANGUAGE plpgsql; COMMIT;"))
+  assert.match(sql, /FROM CURRENT/); assert.match(sql, /TO E/)
+  assert.equal((sql.match(/IS DISTINCT FROM ARRAY/g) || []).length, 2)
+  assert.match(sql, /pg_catalog\.pg_db_role_setting/)
+  assert.match(sql, /pg_catalog\.array_agg/)
+  assert.match(sql, /Private recovery setting representation mismatch/)
+  assert.doesNotMatch(sql, /UPDATE pg_catalog|rolpassword|LOGIN|ALTER SYSTEM/)
+})
+
+test("role-setting replay selects only the exact global, role-database or database scope", () => {
+  for (const [setting, target, scope] of [
+    [{ role: "reader", database: null }, 'ALTER ROLE "reader" SET', "database_id pg_catalog.oid := 0::pg_catalog.oid"],
+    [{ role: "reader", database: "postgres" }, 'ALTER ROLE "reader" IN DATABASE postgres SET', "datname="],
+    [{ role: "ALL", database: "postgres" }, "ALTER DATABASE postgres SET", "role_id pg_catalog.oid := 0::pg_catalog.oid"],
+  ]) {
+    const sql = buildRecoveryRoleSettingSql(setting, "work_mem=1024kB")
+    assert.ok(sql.includes(target)); assert.ok(sql.includes(scope))
+    assert.match(sql, /settings\.setrole=role_id AND settings\.setdatabase=database_id/)
+  }
+})
+
+test("role-setting replay quotes values and identifiers without interpolating executable text", () => {
+  const role = `role"; DROP ROLE victim; --\\'`, value = `value\\' ; END; $$\n香港,=true`
+  const setting = { role, database: "postgres" }, item = `fcuno.synthetic=${value}`
+  const before = JSON.stringify({ setting, item })
+  Object.freeze(setting)
+  const sql = buildRecoveryRoleSettingSql(setting, item)
+  assert.ok(sql.includes('"role""; DROP ROLE victim; --'))
+  assert.ok(sql.includes("\\\\\\\\"), "nested E literals must escape literal backslashes twice")
+  assert.equal(JSON.stringify({ setting, item }), before)
+  assert.equal((sql.match(/; COMMIT;/g) || []).length, 1)
+})
+
+test("role-setting replay rejects malformed targets and never uses an alternate database", () => {
+  for (const setting of [null, [], {}, { role: "", database: null }, { role: "reader", database: undefined },
+    { role: "reader", database: "other" }, { role: "ALL", database: null },
+    { role: "fcuno_recovery_operator", database: null }, { role: "a\0b", database: null },
+    { role: "x".repeat(257), database: null }])
+    assert.throws(() => buildRecoveryRoleSettingSql(setting, "work_mem=1024kB"))
+})
+
+test("role-setting replay rejects malformed GUC syntax and bounded-value overflow", () => {
+  for (const item of [null, {}, "", "=x", "no_equals", "a b=1", "a;SELECT=1", "a\0=1", "a=x\0y", "a=" + "x".repeat(16 * 1024 * 1024)])
+    assert.throws(() => buildRecoveryRoleSettingSql({ role: "reader", database: null }, item))
+  for (const item of ["statement_timeout=8000", "work_mem=1024kB", "default_transaction_read_only=true", "search_path=public, auth", "fcuno.synthetic=", "fcuno.synthetic=a=b"])
+    assert.ok(buildRecoveryRoleSettingSql({ role: "reader", database: null }, item))
+})
 
 test("recovery columns compare visible ordinals without hiding missing, reordered or changed catalog fields", () => {
   const column = (name, position, overrides = {}) => ({ schema: "public", relation: "fixture", name, position,

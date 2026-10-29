@@ -24,6 +24,53 @@ const sameCatalogSection = (expected, actual, section) => section === "columns" 
   section === "schemas" ? equivalentRecoverySchemas(expected, actual) :
   ["relations", "functions", "types"].includes(section) ? equivalentRecoveryAclSection(expected, actual, section) : same(expected, actual)
 
+// FROM CURRENT preserves PostgreSQL's list-valued GUC syntax, but canonicalizes
+// typed values (8000 -> 8s, 1024kB -> 1MB, true -> on). Retain that safe list
+// handling, then use a literal only when required to reproduce the signed
+// stored text. Both attempts and the exact catalog postcondition share one
+// transaction; an unsupported representation rolls back, never compares equal.
+export function buildRecoveryRoleSettingSql(setting, item) {
+  if (!setting || typeof setting !== "object" || Array.isArray(setting) ||
+      typeof item !== "string" || Buffer.byteLength(item) > MAX_TEXT || item.includes("\0") ||
+      ![null, "postgres"].includes(setting.database) || typeof setting.role !== "string" ||
+      !setting.role || setting.role === operator || (setting.role === "ALL" && setting.database === null)) failure()
+  const at = item.indexOf("="); if (at <= 0) failure()
+  const name = item.slice(0, at), value = item.slice(at + 1)
+  if (!/^[A-Za-z][A-Za-z0-9_.]*$/.test(name)) failure()
+  // Explicit E strings remain safe even when the recovered database defaults
+  // standard_conforming_strings to off. This also quotes the entire DO body.
+  const escape = text => `E'${text.replaceAll("\\", "\\\\").replaceAll("'", "''")}'`
+  const target = setting.role === "ALL" ? "ALTER DATABASE postgres" :
+    `ALTER ROLE ${quote(setting.role)}${setting.database === null ? "" : " IN DATABASE postgres"}`
+  const roleId = setting.role === "ALL" ? "0::pg_catalog.oid" :
+    `(SELECT oid FROM pg_catalog.pg_roles WHERE rolname=${escape(setting.role)})`
+  const databaseId = setting.database === null ? "0::pg_catalog.oid" :
+    "(SELECT oid FROM pg_catalog.pg_database WHERE datname='postgres')"
+  const readback = `SELECT pg_catalog.array_agg(config.value) INTO stored_values
+      FROM pg_catalog.pg_db_role_setting AS settings
+      CROSS JOIN LATERAL pg_catalog.unnest(settings.setconfig) AS config(value)
+      WHERE settings.setrole=role_id AND settings.setdatabase=database_id
+        AND pg_catalog.split_part(config.value,'=',1)=${escape(name)};`
+  const body = `DECLARE role_id pg_catalog.oid := ${roleId};
+    database_id pg_catalog.oid := ${databaseId}; stored_values pg_catalog.text[];
+    BEGIN
+      IF role_id IS NULL OR database_id IS NULL THEN RAISE EXCEPTION 'Private recovery setting target missing'; END IF;
+      PERFORM pg_catalog.set_config(${escape(name)},${escape(value)},true);
+      EXECUTE ${escape(`${target} SET ${quote(name)} FROM CURRENT`)};
+      ${readback}
+      IF stored_values IS DISTINCT FROM ARRAY[${escape(item)}]::pg_catalog.text[] THEN
+        EXECUTE ${escape(`${target} SET ${quote(name)} TO ${escape(value)}`)};
+      END IF;
+      ${readback}
+      IF stored_values IS DISTINCT FROM ARRAY[${escape(item)}]::pg_catalog.text[] THEN
+        RAISE EXCEPTION 'Private recovery setting representation mismatch';
+      END IF;
+    END`
+  const statement = `BEGIN; DO ${escape(body)} LANGUAGE plpgsql; COMMIT;`
+  if (Buffer.byteLength(statement) > MAX_TEXT) failure()
+  return statement
+}
+
 export async function* boundedLines(stream) {
   let pending = Buffer.alloc(0)
   for await (const chunk of stream) {
@@ -262,11 +309,7 @@ export async function runOfflineRecovery({ archivePath, manifest, publicKey, bin
     // whole search_path list. Passwords and login access remain excluded.
     await diagnostics.stage("restore-role-settings")
     for (const setting of catalog.database.roleSettings || []) for (const item of setting.settings || []) {
-      const at = item.indexOf("="); if (at <= 0) failure()
-      const name = item.slice(0, at), value = item.slice(at + 1)
-      if (!/^[A-Za-z][A-Za-z0-9_.]*$/.test(name)) failure()
-      const target = setting.role === "ALL" ? `ALTER DATABASE postgres` : `ALTER ROLE ${quote(setting.role)}${setting.database === null ? "" : " IN DATABASE postgres"}`
-      await sql(`BEGIN; SELECT set_config(${literal(name)},${literal(value)},true); ${target} SET ${quote(name)} FROM CURRENT; COMMIT;`)
+      await sql(buildRecoveryRoleSettingSql(setting, item))
     }
     await diagnostics.stage("verify-catalog")
     let restoredCatalog = JSON.parse(await sql(`SELECT ${RECOVERY_CATALOG_EXPRESSION};`))

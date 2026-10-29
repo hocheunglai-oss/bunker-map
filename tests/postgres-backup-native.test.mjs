@@ -12,7 +12,7 @@ import { createFixedNativeExporter, createNativeChild, fixedDumpArguments, fixed
 import { decodePostgresExport } from "../lib/postgresBackupProtocol.mjs"
 import { createPostgresBackupHandler, POSTGRES_BACKUP_URL } from "../lib/postgresBackupCapability.mjs"
 import { fcunoConnectionPolicy } from "../config/fcunoConnections.ts"
-import { runOfflineRecovery } from "../scripts/postgres-recovery/offline.mjs"
+import { runOfflineRecovery, buildRecoveryRoleSettingSql } from "../scripts/postgres-recovery/offline.mjs"
 import { POSTGRES_RECEIPT_SCHEMA } from "../lib/postgresBackupReceipt.mjs"
 import { RECOVERY_CATALOG_EXPRESSION } from "../lib/postgresRecoveryCatalog.mjs"
 import { equivalentRecoveryColumns } from "../lib/postgresRecoveryColumns.mjs"
@@ -290,6 +290,22 @@ test("real PG17 TLS export, signed streaming decode and isolated restore preserv
       ALTER DATABASE postgres SET standard_conforming_strings=off;`)
     assert.equal(await sql(clusters[0], `SELECT count(*) FROM pg_init_privs i JOIN pg_namespace n ON n.oid=i.objoid
       WHERE i.classoid='pg_namespace'::regclass AND (n.nspname IN ('auth','storage','empty_initial_acl') OR n.nspname ~ '^default_acl_[0-9]+$') AND i.initprivs=n.nspacl;`), "15")
+    // FROM CURRENT normalizes these native stored literals (20000 -> 20s,
+    // 1024kB -> 1MB, true -> on). Preserve original text and setting order,
+    // including list-valued search_path and all three setting scopes.
+    await sql(clusters[0], `ALTER ROLE application_user SET statement_timeout='20000';
+      ALTER ROLE application_user SET lock_timeout='2000';
+      ALTER ROLE application_user SET idle_in_transaction_session_timeout='250000';
+      ALTER ROLE application_user SET work_mem='1024kB';
+      ALTER ROLE application_user SET default_transaction_read_only='true';
+      ALTER ROLE application_user SET search_path TO "$user",public,"space schema","back\\slash schema";
+      ALTER ROLE application_user IN DATABASE postgres SET statement_timeout='60000';
+      ALTER ROLE fixture_owner SET log_statement='none';
+      ALTER DATABASE postgres SET lock_timeout='2000';
+      ALTER ROLE "single'quote" SET fcuno.synthetic TO E'quote\\\\slash''; END; $$,=香港';`)
+    const expectedApplicationConfig = JSON.parse(await sql(clusters[0], "SELECT to_json(rolconfig) FROM pg_roles WHERE rolname='application_user'"))
+    assert.deepEqual(expectedApplicationConfig.slice(0, 5), ["statement_timeout=20000", "lock_timeout=2000",
+      "idle_in_transaction_session_timeout=250000", "work_mem=1024kB", "default_transaction_read_only=true"])
     const cloudExport = await open(context), cloudParts = []; let cloudMetadata, cloudComplete
     for await (const item of decodePostgresExport(cloudExport.bytes, publicKey, context)) {
       if (item.type === "metadata") cloudMetadata = item.metadata
@@ -298,6 +314,7 @@ test("real PG17 TLS export, signed streaming decode and isolated restore preserv
     }
     await cloudExport.close()
     assert.equal(String(cloudMetadata.catalog.roles.find(role => role.rolname === "fixture_owner").oid), "10")
+    assert.deepEqual(cloudMetadata.catalog.roles.find(role => role.rolname === "application_user").rolconfig, expectedApplicationConfig)
     assert.deepEqual(cloudMetadata.catalog.recovery.columns.filter(column => column.schema === "public" && column.relation === "rows")
       .map(column => [column.name, column.position]), [["id", 2], ["body", 4], ["extra", 6]])
     const cloudBytes = Buffer.concat(cloudParts), cloudPath = join(root, "cloud.dump"), cloudRun = "native-cloud-fixture"
@@ -329,6 +346,35 @@ test("real PG17 TLS export, signed streaming decode and isolated restore preserv
     await assert.rejects(sql(clusters[1], rollbackPlan.sql))
     assert.equal(await sql(clusters[1], "SELECT count(*) FROM pg_namespace WHERE nspname IN ('replay_first','replay_rollback') AND nspacl IS NULL;"), "2",
       "failed grantor assertion rolls back the entire transaction, including a previously verified schema")
+    // Exercise the actual SQL builder independently under nonstandard strings,
+    // including an explicit postcondition fault to prove transaction rollback.
+    await sql(clusters[1], `CREATE ROLE "guc\\owner's" NOLOGIN; ALTER DATABASE postgres SET standard_conforming_strings=off;`)
+    const gucRole = "guc\\owner's", gucLiteral = value => `E'${value.replaceAll("\\", "\\\\").replaceAll("'", "''")}'`
+    const globalSetting = { role: gucRole, database: null }, databaseSetting = { role: gucRole, database: "postgres" }
+    const readSetting = async (setting, name) => sql(clusters[1], `SELECT value FROM pg_db_role_setting s,
+      unnest(s.setconfig) value WHERE setrole=${setting.role === "ALL" ? "0" : `(SELECT oid FROM pg_roles WHERE rolname=${gucLiteral(setting.role)})`}
+      AND setdatabase=${setting.database === null ? "0" : "(SELECT oid FROM pg_database WHERE datname='postgres')"}
+      AND split_part(value,'=',1)=${gucLiteral(name)};`)
+    for (const [setting, item] of [[globalSetting, "work_mem=1024kB"], [globalSetting, "default_transaction_read_only=true"],
+      [globalSetting, "search_path=public, auth"], [databaseSetting, "statement_timeout=20000"],
+      [{ role: "ALL", database: "postgres" }, "lock_timeout=2000"],
+      [globalSetting, "fcuno.synthetic=quote\\slash'; END; $$\n香港,=true"], [globalSetting, "fcuno.empty="]]) {
+      await sql(clusters[1], buildRecoveryRoleSettingSql(setting, item))
+      assert.equal(await readSetting(setting, item.slice(0, item.indexOf("="))), item)
+    }
+    const beforeGucRollback = await sql(clusters[1], "SELECT coalesce(jsonb_agg(to_jsonb(s) ORDER BY setdatabase,setrole),'[]') FROM pg_db_role_setting s")
+    const gucPlan = buildRecoveryRoleSettingSql(globalSetting, "work_mem=2048kB")
+    const postconditionAt = gucPlan.lastIndexOf("IF stored_values IS DISTINCT FROM ARRAY")
+    assert.ok(postconditionAt > gucPlan.indexOf("IF stored_values IS DISTINCT FROM ARRAY"))
+    // Flip ONLY the final assertion in this synthetic SQL to force failure
+    // after both real writes. Production code has no bypass or test hook.
+    const faultedGucPlan = gucPlan.slice(0, postconditionAt) + gucPlan.slice(postconditionAt)
+      .replace("IF stored_values IS DISTINCT FROM ARRAY", "IF stored_values IS NOT DISTINCT FROM ARRAY")
+    await assert.rejects(sql(clusters[1], faultedGucPlan), /representation mismatch/)
+    await assert.rejects(sql(clusters[1], buildRecoveryRoleSettingSql({ role: "missing_guc_role", database: null }, "work_mem=1024kB")), /target missing/)
+    assert.throws(() => buildRecoveryRoleSettingSql({ role: gucRole, database: "other" }, "work_mem=1024kB"))
+    assert.equal(await sql(clusters[1], "SELECT coalesce(jsonb_agg(to_jsonb(s) ORDER BY setdatabase,setrole),'[]') FROM pg_db_role_setting s"), beforeGucRollback,
+      "failed exact stored-setting assertion rolls back the attempted FROM CURRENT and literal writes")
     // A real extension config WHERE filter can silently exclude source rows.
     // Reproduce only in this disposable synthetic catalog and reject before
     // launching pg_dump, even though a filtered archive could restore cleanly.
