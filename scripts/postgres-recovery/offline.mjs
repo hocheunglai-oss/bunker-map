@@ -10,7 +10,7 @@ import { validatePostgresManifest } from "../../lib/postgresBackupReceipt.mjs"
 import { RECOVERY_CATALOG_EXPRESSION, RECOVERY_CATALOG_KEYS, validateRecoveryCatalog } from "../../lib/postgresRecoveryCatalog.mjs"
 import { createRecoveryDiagnostics, createNativeStderrHint } from "../../lib/postgresRecoveryDiagnostics.mjs"
 import { equivalentRecoveryColumns } from "../../lib/postgresRecoveryColumns.mjs"
-import { equivalentRecoverySchemas, equivalentRecoveryDatabase, equivalentRecoveryAclSection } from "../../lib/postgresRecoveryAcl.mjs"
+import { equivalentRecoverySchemas, equivalentRecoveryDatabase, equivalentRecoveryAclSection, buildMissingSchemaAclReplay } from "../../lib/postgresRecoveryAcl.mjs"
 
 const MAX_LINE = 64 * 1024 * 1024, MAX_TEXT = 16 * 1024 * 1024
 const operator = "fcuno_recovery_operator"
@@ -269,9 +269,21 @@ export async function runOfflineRecovery({ archivePath, manifest, publicKey, bin
       await sql(`BEGIN; SELECT set_config(${literal(name)},${literal(value)},true); ${target} SET ${quote(name)} FROM CURRENT; COMMIT;`)
     }
     await diagnostics.stage("verify-catalog")
-    const restoredCatalog = JSON.parse(await sql(`SELECT ${RECOVERY_CATALOG_EXPRESSION};`))
+    let restoredCatalog = JSON.parse(await sql(`SELECT ${RECOVERY_CATALOG_EXPRESSION};`))
     validateRecoveryCatalog(restoredCatalog)
     await diagnostics.catalog(catalog.recovery, restoredCatalog, sameCatalogSection)
+    // Managed bootstrap/extension initial schema grants may be absent from a
+    // logical archive's delta ACLs. Restore only a narrowly proven missing ACL
+    // from the signed metadata, never accept the missing privilege as equal.
+    // No other catalog difference may be repaired or concealed here.
+    if (!RECOVERY_CATALOG_KEYS.filter(section => section !== "schemas").every(section => sameCatalogSection(catalog.recovery[section], restoredCatalog[section], section))) failure()
+    const schemaAclReplay = buildMissingSchemaAclReplay(catalog.recovery.schemas, restoredCatalog.schemas, catalog.roles)
+    if (schemaAclReplay) {
+      await sql(schemaAclReplay.sql)
+      restoredCatalog = JSON.parse(await sql(`SELECT ${RECOVERY_CATALOG_EXPRESSION};`))
+      validateRecoveryCatalog(restoredCatalog)
+      await diagnostics.catalog(catalog.recovery, restoredCatalog, sameCatalogSection)
+    }
     if (!RECOVERY_CATALOG_KEYS.every(section => sameCatalogSection(catalog.recovery[section], restoredCatalog[section], section))) failure()
     await diagnostics.stage("verify-tables")
     const tables = JSON.parse(await sql(`select coalesce(json_agg(json_build_object('schema',n.nspname,'name',c.relname,'kind',c.relkind,'readable',true) order by n.nspname,c.relname),'[]'::json) from pg_class c join pg_namespace n on n.oid=c.relnamespace where c.relkind in ('r','p','m','f') and n.nspname not in ('pg_catalog','information_schema') and n.nspname !~ '^pg_toast' and n.nspname !~ '^pg_temp_'`))

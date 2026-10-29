@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { equivalentRecoverySchemas, equivalentRecoveryDatabase, equivalentRecoveryAclSection, summarizeRecoveryAclTextDifference } from "../lib/postgresRecoveryAcl.mjs"
+import { equivalentRecoverySchemas, equivalentRecoveryDatabase, equivalentRecoveryAclSection, summarizeRecoveryAclTextDifference, buildMissingSchemaAclReplay } from "../lib/postgresRecoveryAcl.mjs"
 
 const items = ["owner=CTc/owner", "delegate=c*/owner", "reader=c/delegate", "=Tc/owner"]
 const database = acl => ({ name: "postgres", owner: "owner", encoding: "UTF8", comment: null, acl })
@@ -198,4 +198,87 @@ for (const [section, fields] of [
 test("ACL section selector refuses every other catalog location", () => {
   for (const section of ["schemas", "database", "columns", "constraints", "indexes", "triggers", "policies", "views", "sequences", "extensionTables", "acl", "__proto__", "", undefined, null])
     assert.equal(equivalentRecoveryAclSection([schema(text(items))], [schema(text(items.toReversed()))], section), false)
+})
+
+const replayRoles = ["owner", "delegate", "reader", "public"].map(rolname => ({ rolname }))
+const replaySchema = acl => ({ name: "example", owner: "owner", comment: null, acl })
+const replay = entries => buildMissingSchemaAclReplay([replaySchema(text(entries))], [replaySchema(null)], replayRoles)
+
+test("missing schema ACL replay is one guarded transaction and preserves grantors, options and PUBLIC", () => {
+  const source = [replaySchema(text(["reader=U/delegate", "=U/owner", "delegate=U*C*/owner", "owner=UC/owner", "public=C/owner"]))]
+  const target = [replaySchema(null)], before = JSON.stringify([source, target, replayRoles])
+  const plan = buildMissingSchemaAclReplay(source, target, replayRoles)
+  assert.equal(plan.schemas, 1); assert.equal(plan.grants, 7)
+  assert.ok(plan.sql.startsWith("BEGIN;\n")); assert.ok(plan.sql.endsWith("\nCOMMIT;"))
+  assert.match(plan.sql, /n\.nspacl IS NULL/); assert.match(plan.sql, /n\.nspacl IS NOT NULL/)
+  assert.match(plan.sql, /REVOKE ALL PRIVILEGES ON SCHEMA "example" FROM "owner";/)
+  assert.ok(plan.sql.indexOf('TO "delegate" WITH GRANT OPTION;') < plan.sql.indexOf('TO "reader";'))
+  assert.match(plan.sql, /SET LOCAL ROLE "delegate";\nGRANT USAGE ON SCHEMA "example" TO "reader";/)
+  assert.match(plan.sql, /TO PUBLIC;/); assert.match(plan.sql, /TO "public";/)
+  assert.match(plan.sql, /COLLATE pg_catalog\."C"/)
+  assert.equal(JSON.stringify([source, target, replayRoles]), before)
+})
+
+test("missing explicit empty schema ACL revokes implicit owner rights without creating grants", () => {
+  const plan = replay([])
+  assert.equal(plan.schemas, 1); assert.equal(plan.grants, 0)
+  assert.match(plan.sql, /REVOKE ALL PRIVILEGES/); assert.doesNotMatch(plan.sql, /\nGRANT /)
+  assert.match(plan.sql, /ARRAY\[\]::pg_catalog\.text\[\]/)
+})
+
+test("equal or exact owner-default schema permissions require no replay", () => {
+  assert.equal(buildMissingSchemaAclReplay([replaySchema(null)], [replaySchema(null)], replayRoles), null)
+  assert.equal(replay(["owner=UC/owner"]), null)
+  assert.equal(buildMissingSchemaAclReplay([replaySchema(text(["reader=U/owner", "owner=UC/owner"]))],
+    [replaySchema(text(["owner=UC/owner", "reader=U/owner"]))], replayRoles), null)
+})
+
+test("owner grant authority remains implicit even if the source revoked owner effective rights", () => {
+  const plan = replay(["reader=UC/owner"])
+  assert.equal(plan.grants, 2)
+  assert.doesNotMatch(plan.sql, /GRANT (?:USAGE|CREATE) ON SCHEMA "example" TO "owner";/)
+})
+
+test("schema replay rejects missing/extra/reordered schemas and every non-ACL change", () => {
+  const source = replaySchema(text(["reader=U/owner"]))
+  for (const target of [[], [replaySchema(null), replaySchema(null)], [{ ...replaySchema(null), name: "other" }],
+    [{ ...replaySchema(null), owner: "reader" }], [{ ...replaySchema(null), comment: "changed" }], [{ ...replaySchema(null), future: true }]])
+    assert.throws(() => buildMissingSchemaAclReplay([source], target, replayRoles))
+  const second = { ...source, name: "second" }
+  assert.throws(() => buildMissingSchemaAclReplay([source, second], [{ ...second, acl: null }, replaySchema(null)], replayRoles))
+  assert.throws(() => buildMissingSchemaAclReplay([source, source], [replaySchema(null), replaySchema(null)], replayRoles))
+})
+
+test("schema replay refuses to overwrite non-NULL ACLs or infer missing signed permissions", () => {
+  for (const actual of ["{}", text(["reader=C/owner"]), text(["reader=U/owner", "delegate=U/owner"])])
+    assert.throws(() => buildMissingSchemaAclReplay([replaySchema(text(["reader=U/owner"]))], [replaySchema(actual)], replayRoles))
+  assert.throws(() => buildMissingSchemaAclReplay([replaySchema(null)], [replaySchema(text(["reader=U/owner"]))], replayRoles))
+})
+
+for (const entries of [["reader=U/missing"], ["missing=U/owner"], ["reader=X/owner"], ["reader=UU/owner"], ["reader=CU/owner"],
+  ["reader=U**/owner"], ["reader=/owner"], ["=U*/owner"], ["reader=U/owner", "reader=C/owner"],
+  ["reader=U/delegate"], ["reader=U*/delegate", "delegate=U*/reader"], ['"reader"=U/owner'], ["reader=U/owner trailing"],
+  ['"reader=U/owner'], ["reader=U/owner;RESET ROLE;"]])
+  test(`schema replay rejects malformed, unlisted or unreachable ACL (${JSON.stringify(entries)})`, () => assert.throws(() => replay(entries)))
+
+test("schema replay uses exact ACL quoting and SQL escaping for unusual captured names", () => {
+  const names = ["MixedCase", "123name", "select", "NULL", "space owner", "slash/equals=owner", 'double"quote', "back\\slash", "香港owner", "braces{},comma", "single'quote", 'x";DROP SCHEMA public;--']
+  for (const owner of names) {
+    const encoded = /^[A-Za-z0-9_]+$/.test(owner) ? owner : `"${owner.replaceAll('"', '""')}"`
+    const row = { name: owner, owner, comment: null, acl: text([`reader=U*/${encoded}`, `${encoded}=UC/${encoded}`]) }
+    const plan = buildMissingSchemaAclReplay([row], [{ ...row, acl: null }], [{ rolname: owner }, { rolname: "reader" }])
+    assert.equal(plan.schemas, 1); assert.equal(plan.grants, 3)
+    assert.ok(plan.sql.includes(`SET LOCAL ROLE "${owner.replaceAll('"', '""')}";`))
+    assert.ok(plan.sql.includes(`n.nspname=E'${owner.replaceAll("\\", "\\\\").replaceAll("'", "''")}'`))
+  }
+})
+
+test("schema replay bounds names, arrays and aggregate ACL input before any SQL is produced", () => {
+  const source = replaySchema(text(["reader=U/owner"]))
+  for (const roles of [null, [], [{ rolname: "owner" }, { rolname: "owner" }], [{ rolname: "\0" }], [{ rolname: "a".repeat(64) }]])
+    assert.throws(() => buildMissingSchemaAclReplay([source], [replaySchema(null)], roles))
+  for (const name of ["", "a".repeat(64), "港".repeat(22), "a\0b"])
+    assert.throws(() => buildMissingSchemaAclReplay([{ ...source, name }], [{ ...replaySchema(null), name }], replayRoles))
+  assert.throws(() => buildMissingSchemaAclReplay(Array(100001), Array(100001), replayRoles))
+  assert.throws(() => replay(Array(100001).fill("reader=U/owner")))
 })

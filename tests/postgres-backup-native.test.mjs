@@ -16,6 +16,7 @@ import { runOfflineRecovery } from "../scripts/postgres-recovery/offline.mjs"
 import { POSTGRES_RECEIPT_SCHEMA } from "../lib/postgresBackupReceipt.mjs"
 import { RECOVERY_CATALOG_EXPRESSION } from "../lib/postgresRecoveryCatalog.mjs"
 import { equivalentRecoveryColumns } from "../lib/postgresRecoveryColumns.mjs"
+import { buildMissingSchemaAclReplay } from "../lib/postgresRecoveryAcl.mjs"
 
 const exec = promisify(execFile), hash = bytes => createHash("sha256").update(bytes).digest("hex")
 const bin = process.env.NATIVE_PG_BIN
@@ -270,6 +271,25 @@ test("real PG17 TLS export, signed streaming decode and isolated restore preserv
       assert.equal(nativeDefaults.actualRelation, nativeDefaults.relation)
       assert.equal(nativeDefaults.actualSequence, nativeDefaults.sequence)
     }
+    // Managed-server initial grants are omitted from pg_dump when identical to
+    // pg_init_privs. Model that ONLY in this disposable synthetic source;
+    // the recovery code must rebuild the signed actual ACL, not ignore it.
+    for (let index = 0; index < defaultOwners.length; index++)
+      await sql(clusters[0], `GRANT USAGE ON SCHEMA default_acl_${index} TO fixture_recipient WITH GRANT OPTION;`)
+    await sql(clusters[0], `GRANT USAGE ON SCHEMA auth TO fixture_grantor WITH GRANT OPTION;
+      REVOKE CREATE ON SCHEMA auth FROM fixture_owner;
+      SET ROLE fixture_grantor; GRANT USAGE ON SCHEMA auth TO fixture_recipient; RESET ROLE;
+      GRANT USAGE,CREATE ON SCHEMA storage TO "slash/equals=owner" WITH GRANT OPTION;
+      SET ROLE "slash/equals=owner"; GRANT USAGE ON SCHEMA storage TO application_user; RESET ROLE;
+      CREATE ROLE "PUBLIC" NOLOGIN; GRANT USAGE ON SCHEMA storage TO "PUBLIC";
+      GRANT USAGE ON SCHEMA storage TO PUBLIC;
+      CREATE SCHEMA empty_initial_acl; REVOKE ALL ON SCHEMA empty_initial_acl FROM fixture_owner;
+      INSERT INTO pg_catalog.pg_init_privs(objoid,classoid,objsubid,privtype,initprivs)
+      SELECT oid,'pg_catalog.pg_namespace'::regclass,0,'i',nspacl
+      FROM pg_catalog.pg_namespace WHERE nspname IN ('auth','storage','empty_initial_acl') OR nspname ~ '^default_acl_[0-9]+$';
+      ALTER DATABASE postgres SET standard_conforming_strings=off;`)
+    assert.equal(await sql(clusters[0], `SELECT count(*) FROM pg_init_privs i JOIN pg_namespace n ON n.oid=i.objoid
+      WHERE i.classoid='pg_namespace'::regclass AND (n.nspname IN ('auth','storage','empty_initial_acl') OR n.nspname ~ '^default_acl_[0-9]+$') AND i.initprivs=n.nspacl;`), "15")
     const cloudExport = await open(context), cloudParts = []; let cloudMetadata, cloudComplete
     for await (const item of decodePostgresExport(cloudExport.bytes, publicKey, context)) {
       if (item.type === "metadata") cloudMetadata = item.metadata
@@ -282,6 +302,9 @@ test("real PG17 TLS export, signed streaming decode and isolated restore preserv
       .map(column => [column.name, column.position]), [["id", 2], ["body", 4], ["extra", 6]])
     const cloudBytes = Buffer.concat(cloudParts), cloudPath = join(root, "cloud.dump"), cloudRun = "native-cloud-fixture"
     await writeFile(cloudPath, cloudBytes, { flag: "wx", mode: 0o600 })
+    const initialToc = (await native("pg_restore", ["--list", cloudPath])).stdout
+    assert.equal(/ACL - SCHEMA (auth|storage|empty_initial_acl|default_acl_[0-9]+) /m.test(initialToc), false,
+      "unchanged managed-bootstrap grants are absent from logical archive ACL entries")
     const cloudManifest = { schema: POSTGRES_RECEIPT_SCHEMA, status: "copied-and-byte-verified", runId: cloudRun, week: (await import("../lib/postgresBackupProtocol.mjs")).postgresBackupWeek(start),
       metadata: cloudMetadata, completion: cloudComplete.completion, signature: cloudComplete.signature,
       parts: [{ target: { bucket: fcunoConnectionPolicy.storageMediaBackup.targetBucket,
@@ -294,6 +317,18 @@ test("real PG17 TLS export, signed streaming decode and isolated restore preserv
         pgRestore: join(bin, "pg_restore"), sort: "/usr/bin/sort", ...(cloudProof ? { localeArchive: environment.LOCALE_ARCHIVE } : { preload: "" }) } })
     assert.equal(proof.status, "isolated-logical-recovery-verified")
     assert.equal(proof.tables, cloudProof ? 4 : 3); assert.equal(proof.catalogSections, 12); assert.equal(proof.unaccountedTocEntries, 0)
+    // Real PostgreSQL can remap a superuser grantor to the object owner. The
+    // pre-COMMIT exact assertion must reject that and roll back earlier grants.
+    await sql(clusters[1], `CREATE ROLE replay_supergrantor SUPERUSER NOLOGIN; CREATE ROLE replay_reader NOLOGIN;
+      CREATE SCHEMA replay_first; CREATE SCHEMA replay_rollback;`)
+    const rollbackSource = { name: "replay_rollback", owner: "fixture_owner", comment: null,
+      acl: "{fixture_owner=UC/fixture_owner,replay_supergrantor=U*/fixture_owner,replay_reader=U/replay_supergrantor}" }
+    const firstSource = { ...rollbackSource, name: "replay_first", acl: "{fixture_owner=UC/fixture_owner,replay_reader=U/fixture_owner}" }
+    const rollbackPlan = buildMissingSchemaAclReplay([firstSource, rollbackSource], [{ ...firstSource, acl: null }, { ...rollbackSource, acl: null }],
+      ["fixture_owner", "replay_supergrantor", "replay_reader"].map(rolname => ({ rolname })))
+    await assert.rejects(sql(clusters[1], rollbackPlan.sql))
+    assert.equal(await sql(clusters[1], "SELECT count(*) FROM pg_namespace WHERE nspname IN ('replay_first','replay_rollback') AND nspacl IS NULL;"), "2",
+      "failed grantor assertion rolls back the entire transaction, including a previously verified schema")
     // A real extension config WHERE filter can silently exclude source rows.
     // Reproduce only in this disposable synthetic catalog and reject before
     // launching pg_dump, even though a filtered archive could restore cleanly.
