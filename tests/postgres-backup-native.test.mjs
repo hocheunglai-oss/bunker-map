@@ -14,6 +14,8 @@ import { createPostgresBackupHandler, POSTGRES_BACKUP_URL } from "../lib/postgre
 import { fcunoConnectionPolicy } from "../config/fcunoConnections.ts"
 import { runOfflineRecovery } from "../scripts/postgres-recovery/offline.mjs"
 import { POSTGRES_RECEIPT_SCHEMA } from "../lib/postgresBackupReceipt.mjs"
+import { RECOVERY_CATALOG_EXPRESSION } from "../lib/postgresRecoveryCatalog.mjs"
+import { equivalentRecoveryColumns } from "../lib/postgresRecoveryColumns.mjs"
 
 const exec = promisify(execFile), hash = bytes => createHash("sha256").update(bytes).digest("hex")
 const bin = process.env.NATIVE_PG_BIN
@@ -79,7 +81,10 @@ test("real PG17 TLS export, signed streaming decode and isolated restore preserv
       RESET ROLE;
       CREATE ROLE application_user NOLOGIN;
       CREATE SCHEMA auth; CREATE SCHEMA storage;
-      CREATE TABLE public.rows(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, body text NOT NULL, extra jsonb);
+      CREATE TABLE public.rows(removed_leading text, id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        removed_before_body text, body text NOT NULL, removed_before_extra text, extra jsonb, removed_trailing text);
+      ALTER TABLE public.rows DROP COLUMN removed_leading, DROP COLUMN removed_before_body,
+        DROP COLUMN removed_before_extra, DROP COLUMN removed_trailing;
       INSERT INTO public.rows(body,extra) SELECT repeat('synthetic-'||n::text,200), jsonb_build_object('number',n,'unicode','香港') FROM generate_series(1,200) n;
       ALTER TABLE public.rows ENABLE ROW LEVEL SECURITY;
       CREATE POLICY own_rows ON public.rows FOR SELECT TO application_user USING(id > 0);
@@ -181,6 +186,10 @@ test("real PG17 TLS export, signed streaming decode and isolated restore preserv
       'comment',obj_description('public.rows'::regclass,'pg_class'),
       'acl',(select relacl::text from pg_class where oid='public.rows'::regclass));`
     assert.equal(await sql(clusters[1], fingerprint), await sql(clusters[0], fingerprint))
+    const restoredColumns = JSON.parse(await sql(clusters[1], `SELECT ${RECOVERY_CATALOG_EXPRESSION};`)).columns
+    assert.notDeepEqual(metadata.catalog.recovery.columns, restoredColumns, "logical restore compacts dropped physical slots")
+    assert.equal(equivalentRecoveryColumns(metadata.catalog.recovery.columns, restoredColumns), true,
+      "every visible column property and its order must survive the real logical restore")
     assert.equal(await sql(clusters[1], "select rolcanlogin from pg_roles where rolname='application_user'"), "f")
     assert.equal(await sql(clusters[0], "select count(*) from pg_stat_activity where application_name='fcuno-fixed-weekly-export-v1'"), "0")
     // Exercise the SAME native restore/content verifier that runs sealed in
@@ -195,6 +204,8 @@ test("real PG17 TLS export, signed streaming decode and isolated restore preserv
     }
     await cloudExport.close()
     assert.equal(String(cloudMetadata.catalog.roles.find(role => role.rolname === "fixture_owner").oid), "10")
+    assert.deepEqual(cloudMetadata.catalog.recovery.columns.filter(column => column.schema === "public" && column.relation === "rows")
+      .map(column => [column.name, column.position]), [["id", 2], ["body", 4], ["extra", 6]])
     const cloudBytes = Buffer.concat(cloudParts), cloudPath = join(root, "cloud.dump"), cloudRun = "native-cloud-fixture"
     await writeFile(cloudPath, cloudBytes, { flag: "wx", mode: 0o600 })
     const cloudManifest = { schema: POSTGRES_RECEIPT_SCHEMA, status: "copied-and-byte-verified", runId: cloudRun, week: (await import("../lib/postgresBackupProtocol.mjs")).postgresBackupWeek(start),

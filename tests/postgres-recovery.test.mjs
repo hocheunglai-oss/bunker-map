@@ -1,16 +1,22 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { createHash, generateKeyPairSync, sign } from "node:crypto"
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm, mkdir, writeFile, chmod, realpath, stat } from "node:fs/promises"
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fcunoConnectionPolicy as pins } from "../config/fcunoConnections.ts"
 import { createRecoveryBuild, validateRecoveryHostInspection, RECOVERY_WORKSPACE, RECOVERY_POSTGRES_IMAGE } from "../lib/postgresRecoveryBuild.mjs"
 import { requireCloudRecoveryAcceptance, validateRecoveryAcceptanceDescriptor } from "../lib/postgresRecoveryAcceptance.mjs"
-import { parseCopyHeader, parseSequenceState, parseToc, boundedLines, fingerprintRows } from "../scripts/postgres-recovery/offline.mjs"
+import { parseCopyHeader, parseSequenceState, parseToc, boundedLines, fingerprintRows, runOfflineRecovery } from "../scripts/postgres-recovery/offline.mjs"
+import { createRecoveryDiagnostics, createNativeStderrHint, validateRecoveryDiagnostic, validateRecoveryFailureHost, recoveryFailure } from "../lib/postgresRecoveryDiagnostics.mjs"
+import { recordRecoveryFailureAndReject } from "../scripts/postgres-recovery/cloud.mjs"
+import { createStorageMediaGcsAdapter } from "../scripts/lib/storage-media-gcs-adapter.mjs"
 import { requirePostgresRecoveryBuildRuntime, createMetadataAccessTokenProvider } from "../scripts/lib/storage-media-job-auth.mjs"
 import { validateOfflineRecoveryResult } from "../lib/postgresRecoveryEvidence.mjs"
 import { RECOVERY_CATALOG_KEYS, validateRecoveryCatalog } from "../lib/postgresRecoveryCatalog.mjs"
+import { equivalentRecoveryColumns } from "../lib/postgresRecoveryColumns.mjs"
 import { POSTGRES_BACKUP_PROTOCOL } from "../lib/postgresBackupProtocol.mjs"
 import { main as backupMain } from "../scripts/backup-postgres-to-gcs.mjs"
 
@@ -65,14 +71,295 @@ function acceptanceFixture(change = () => {}) {
   return { value, descriptor, gcs, inspections: () => inspections }
 }
 
+test("recovery columns compare visible ordinals without hiding missing, reordered or changed catalog fields", () => {
+  const column = (name, position, overrides = {}) => ({ schema: "public", relation: "fixture", name, position,
+    type: "text", not_null: false, identity: "", generated: "", storage: "x", compression: "",
+    default: null, collation: "default", collation_schema: "pg_catalog", comment: null, ...overrides })
+  const source = [column("id", 2), column("body", 4), column("extra", 6), column("other", 1, { relation: "other" })]
+  const restored = [column("id", 1), column("body", 2), column("extra", 3), column("other", 1, { relation: "other" })]
+  const unchanged = JSON.stringify({ source, restored })
+  source.forEach(Object.freeze); restored.forEach(Object.freeze); Object.freeze(source); Object.freeze(restored)
+  assert.equal(equivalentRecoveryColumns(source, restored), true)
+  assert.equal(equivalentRecoveryColumns(restored, source), true)
+  assert.equal(equivalentRecoveryColumns([], []), true)
+  assert.equal(JSON.stringify({ source, restored }), unchanged, "signed input must not be mutated")
+  // Object-key order is not a schema change; array order remains meaningful.
+  assert.equal(equivalentRecoveryColumns(source, restored.map(item => Object.fromEntries(Object.entries(item).reverse()))), true)
+  for (const [label, change] of [
+    ["missing", rows => rows.splice(1, 1)], ["extra", rows => rows.splice(3, 0, column("added", 4))],
+    ["reordered names", rows => { [rows[0].name, rows[1].name] = [rows[1].name, rows[0].name] }],
+    ["renamed", rows => { rows[1].name = "changed" }], ["type", rows => { rows[1].type = "integer" }],
+    ["nullability", rows => { rows[1].not_null = true }], ["default", rows => { rows[1].default = "'x'::text" }],
+    ["identity", rows => { rows[1].identity = "a" }], ["generated", rows => { rows[1].generated = "s" }],
+    ["storage", rows => { rows[1].storage = "p" }], ["compression", rows => { rows[1].compression = "p" }],
+    ["collation", rows => { rows[1].collation = "C" }], ["collation schema", rows => { rows[1].collation_schema = "public" }],
+    ["comment", rows => { rows[1].comment = "changed" }], ["missing field", rows => { delete rows[1].comment }],
+    ["unknown future field", rows => { rows[1].future = { value: [1, 2] } }],
+    ["relation order", rows => { rows.unshift(rows.pop()) }],
+  ]) {
+    const changed = structuredClone(restored); change(changed)
+    assert.equal(equivalentRecoveryColumns(source, changed), false, label)
+  }
+  const futureSource = structuredClone(source), futureRestored = structuredClone(restored)
+  futureSource[0].future = { value: [1, 2] }; futureRestored[0].future = { value: [1, 2] }
+  assert.equal(equivalentRecoveryColumns(futureSource, futureRestored), true)
+  futureRestored[0].future.value.reverse()
+  assert.equal(equivalentRecoveryColumns(futureSource, futureRestored), false)
+  for (const badPosition of [0, -1, 1.5, "1", null, undefined, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    const invalidRows = structuredClone(restored); invalidRows[0].position = badPosition
+    assert.throws(() => equivalentRecoveryColumns(invalidRows, restored), /Recovery column metadata invalid/)
+    assert.throws(() => equivalentRecoveryColumns(restored, invalidRows), /Recovery column metadata invalid/)
+  }
+  for (const change of [
+    rows => { rows[1].position = rows[0].position }, rows => { rows[1].position = 1 },
+    rows => { [rows[0], rows[1]] = [rows[1], rows[0]] },
+    rows => { rows.splice(1, 0, rows.pop()) }, rows => { rows[1].name = rows[0].name },
+    rows => { rows[0].schema = "" }, rows => { rows[0].relation = "bad\0name" },
+    rows => { rows[0].name = null }, rows => { delete rows[0].position }, rows => { rows[0] = null },
+    rows => { rows[0] = [] }, rows => { rows[0] = Object.assign(Object.create(null), rows[0]) },
+  ]) {
+    const invalidRows = structuredClone(restored); change(invalidRows)
+    assert.throws(() => equivalentRecoveryColumns(invalidRows, restored), /Recovery column metadata invalid/)
+  }
+  for (const invalidRows of [null, {}, "", Array(100001)])
+    assert.throws(() => equivalentRecoveryColumns(invalidRows, restored), /Recovery column metadata invalid/)
+})
+
 test("cloud recovery build uses pinned images, existing identity, no logs and no source secrets", () => {
   const build = createRecoveryBuild({ manifestReceipt, verificationKeyPem: publicPem, budgetConfigJson: "{}", sourceCommit: "f".repeat(40) })
   assert.equal(build.options.logging, "NONE"); assert.equal(build.options.diskSizeGb, "100")
   assert.equal(build.serviceAccount, `projects/${pins.storageMediaBackup.googleProjectId}/serviceAccounts/${pins.storageMediaBackup.googleServiceAccount}`)
   assert.equal(build.steps.length, 4); assert.ok(build.steps.every(step => /@sha256:[0-9a-f]{64}$/.test(step.name)))
   assert.equal(build.steps[0].args.at(-1), "download"); assert.equal(build.steps[3].args.at(-1), "publish")
+  assert.equal(build.steps[2].allowFailure, true, "continue only to mandatory private failure recording")
+  assert.equal(build.steps[3].allowFailure, undefined)
+  assert.equal(build.steps[3].allowExitCodes, undefined, "publisher failure must fail the Build")
   assert.doesNotMatch(JSON.stringify(build), /PGPASSWORD|SOURCE_CREDENTIAL|SIGNING_KEY|SERVICE_ROLE_KEY|DATABASE_URL/)
   assert.throws(() => createRecoveryBuild({ manifestReceipt, verificationKeyPem: publicPem, budgetConfigJson: "{}", sourceCommit: "main; malicious" }))
+})
+
+test("private diagnostics accept fixed enums only and never retain raw errors or SQL", async () => {
+  const saved = [], trace = createRecoveryDiagnostics({ now, save: async value => saved.push(value) })
+  await trace.stage("restore-archive")
+  trace.native("pgRestore", 17, "SECRET_SQL")
+  await trace.failed(new Error("SECRET_SQL business row password"))
+  assert.deepEqual(trace.snapshot().native, { program: "pgRestore", exitCode: 17, signal: null, stderrHint: "generic" })
+  assert.doesNotMatch(JSON.stringify(saved), /SECRET_SQL|business row|password/)
+  await assert.rejects(trace.stage("SELECT private_data"))
+  assert.throws(() => trace.native("/private/secret", 1, null))
+  for (const mutate of [v => v.error = "private", v => v.stage = "private", v => v.native.stderr = "private", v => v.native.signal = "private", v => v.catalog = [{ section: "private", expectedCount: 1, actualCount: 1, equal: false }]]) {
+    const value = trace.snapshot(); mutate(value); assert.throws(() => validateRecoveryDiagnostic(value))
+  }
+})
+
+test("catalog diagnostics contain only twelve fixed section counts and equality flags", async () => {
+  const expected = Object.fromEntries(RECOVERY_CATALOG_KEYS.map(key => [key, []])), actual = structuredClone(expected)
+  expected.columns = [{ privateSql: "do not publish" }]; actual.columns = [{ privateSql: "different secret" }]
+  const trace = createRecoveryDiagnostics({ now })
+  const checkedSections = []
+  await trace.catalog(expected, actual, (a, b, section) => { checkedSections.push(section); return JSON.stringify(a) === JSON.stringify(b) })
+  assert.deepEqual(checkedSections, RECOVERY_CATALOG_KEYS)
+  assert.equal(trace.snapshot().catalog.length, 12)
+  assert.deepEqual(trace.snapshot().catalog.find(value => value.section === "columns"), { section: "columns", expectedCount: 1, actualCount: 1, equal: false })
+  assert.doesNotMatch(JSON.stringify(trace.snapshot()), /publish|secret|privateSql/)
+})
+
+test("native stderr hints are bounded heuristic enums and cannot publish private text", () => {
+  for (const [line, expected] of [["ERROR: permission denied for table SECRET_BUSINESS", "permission-denied"],
+    ["ERROR: relation SECRET_BUSINESS already exists", "object-exists"], ["ERROR: relation SECRET_BUSINESS does not exist", "missing-object"],
+    ["ERROR: unrecognized configuration parameter SECRET_BUSINESS", "unsupported-setting"],
+    ["ERROR: canceling statement due to statement timeout", "statement-timeout"], ["FATAL: out of memory SECRET_BUSINESS", "memory"],
+    ["SECRET_BUSINESS arbitrary failure", "generic"]]) {
+    const hint = createNativeStderrHint()
+    hint.write(Buffer.from("private prefix".repeat(10000))); hint.write(Buffer.from(line.slice(0, 8))); hint.write(Buffer.from(line.slice(8)))
+    assert.equal(hint.value(), expected)
+    const trace = createRecoveryDiagnostics({ now }); trace.native("pgRestore", 1, null, hint.value())
+    assert.doesNotMatch(JSON.stringify(trace.snapshot()), /SECRET_BUSINESS|private prefix|ERROR|FATAL/)
+    assert.equal(Object.hasOwn(trace.snapshot().native, "stderr"), false)
+  }
+  const trace = createRecoveryDiagnostics({ now }); trace.native("pgRestore", 1, null, "private text"); assert.equal(trace.snapshot().native.stderrHint, "generic")
+})
+
+test("host failure diagnostics reject extra inspect fields and distinguish OOM/missing outcomes", async () => {
+  const outcome = { schema: "fcuno.private-recovery-host-outcome/v1", dockerRunExitCode: 0,
+    state: { Status: "exited", Running: false, ExitCode: 0, OOMKilled: false } }
+  const trace = createRecoveryDiagnostics({ now }); await trace.cleanup("ok"); await trace.complete()
+  assert.equal(recoveryFailure({ host: outcome, diagnostic: trace.snapshot() }), false)
+  for (const change of [v => v.dockerRunExitCode = 1, v => v.state.ExitCode = 137, v => v.state.OOMKilled = true, v => v.state = null]) {
+    const value = structuredClone(outcome); change(value); assert.equal(recoveryFailure({ host: value, diagnostic: trace.snapshot() }), true)
+  }
+  assert.equal(recoveryFailure({ host: outcome, diagnostic: null }), true)
+  await trace.cleanup("failed"); assert.equal(recoveryFailure({ host: outcome, diagnostic: trace.snapshot() }), true)
+  for (const change of [v => v.Error = "secret", v => v.state.Error = "secret", v => v.state.ExitCode = "secret", v => v.state.Status = "secret"]) {
+    const value = structuredClone(outcome); change(value); assert.throws(() => validateRecoveryFailureHost(value))
+  }
+})
+
+test("actual offline verifier records a fake native failure without storing its stderr", async () => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "fcuno-diagnostic-unit-")))
+  try {
+    const archivePath = join(directory, "fixture.dump"), executable = join(directory, "fake-initdb")
+    const bytes = Buffer.from("PGDMP synthetic unit data")
+    await writeFile(archivePath, bytes, { mode: 0o600, flag: "wx" })
+    await writeFile(executable, '#!/bin/sh\nprintf "SECRET_PRIVATE_SQL_AND_ROW\\n" >&2\nexit 17\n', { mode: 0o700, flag: "wx" })
+    await chmod(executable, 0o700)
+    const m = structuredClone(manifest)
+    m.metadata.catalog.roles.push({ oid: 10, rolname: "synthetic_bootstrap", rolsuper: true })
+    m.completion.archiveSha256 = sha(bytes); m.completion.archiveBytes = bytes.length
+    m.completion.metadataSha256 = sha(Buffer.from(JSON.stringify(m.metadata)))
+    m.signature = sign(null, Buffer.from(JSON.stringify(m.completion)), privateKey).toString("base64url")
+    m.parts[0].sizeBytes = bytes.length; m.parts[0].byteSha256 = sha(bytes)
+    const snapshots = [], trace = createRecoveryDiagnostics({ save: async value => snapshots.push(value) })
+    await assert.rejects(runOfflineRecovery({ archivePath, manifest: m, publicKey, workRoot: directory, diagnostics: trace,
+      signal: AbortSignal.timeout(5000), binaries: Object.fromEntries(["initdb", "pgCtl", "psql", "pgRestore", "sort"].map(key => [key, executable])) }), /Isolated native recovery command failed/)
+    assert.equal(trace.snapshot().stage, "initdb"); assert.equal(trace.snapshot().status, "failed"); assert.equal(trace.snapshot().cleanup, "ok")
+    assert.deepEqual(trace.snapshot().native, { program: "initdb", exitCode: 17, signal: null, stderrHint: "generic" })
+    assert.doesNotMatch(JSON.stringify(snapshots), /SECRET_PRIVATE_SQL_AND_ROW|synthetic_bootstrap|fixture\.dump/)
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test("failed diagnostic persistence cannot skip owned server cleanup or mask primary failure", async () => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "fcuno-diagnostic-cleanup-unit-")))
+  try {
+    const archivePath = join(directory, "fixture.dump"), marker = join(directory, "stopped")
+    const bytes = Buffer.from("PGDMP synthetic cleanup data"), binaries = {}
+    await writeFile(archivePath, bytes, { mode: 0o600 })
+    for (const name of ["initdb", "pgCtl", "psql", "pgRestore", "sort"]) {
+      const path = join(directory, name); binaries[name] = path
+      const body = name === "psql" ? 'exit 17' : name === "pgCtl" ? `case " $* " in *" stop "*) printf stopped > '${marker}';; esac\nexit 0` : 'exit 0'
+      await writeFile(path, `#!/bin/sh\n${body}\n`, { mode: 0o700 }); await chmod(path, 0o700)
+    }
+    const m = structuredClone(manifest); m.metadata.catalog.roles.push({ oid: 10, rolname: "synthetic_bootstrap", rolsuper: true })
+    m.completion.archiveSha256 = sha(bytes); m.completion.archiveBytes = bytes.length; m.completion.metadataSha256 = sha(Buffer.from(JSON.stringify(m.metadata)))
+    m.signature = sign(null, Buffer.from(JSON.stringify(m.completion)), privateKey).toString("base64url"); m.parts[0].sizeBytes = bytes.length; m.parts[0].byteSha256 = sha(bytes)
+    const trace = createRecoveryDiagnostics({ save: async value => { if (value.status === "failed" || value.cleanup !== "not-started") throw Error("synthetic diagnostic disk full") } })
+    await assert.rejects(runOfflineRecovery({ archivePath, manifest: m, publicKey, workRoot: directory, diagnostics: trace, binaries, signal: AbortSignal.timeout(5000) }), /Isolated native recovery command failed/)
+    assert.equal(await readFile(marker, "utf8"), "stopped")
+    assert.equal(trace.snapshot().stage, "create-operator"); assert.equal(trace.snapshot().cleanup, "ok")
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test("shell retains safe host outcome before cleanup and preserves failure exit", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "fcuno-diagnostic-shell-unit-")))
+  try {
+    const work = join(root, "work"), bin = join(root, "bin"), journal = join(root, "calls.jsonl")
+    await mkdir(work); await mkdir(bin)
+    const script = (await readFile(new URL("../scripts/postgres-recovery/run-cloud-isolated.sh", import.meta.url), "utf8"))
+      .replace("work=/workspace/.fcuno-postgres-recovery", `work='${work}'`)
+    await writeFile(join(root, "run.sh"), script, { mode: 0o600 })
+    await writeFile(join(bin, "docker"), `#!${process.execPath}\nimport fs from 'node:fs';\nconst args=process.argv.slice(2);fs.appendFileSync(${JSON.stringify(journal)},JSON.stringify(args)+'\\n');\nif(args[0]==='run')process.exit(1);\nif(args[0]==='inspect'){if(args[2]==='{{json .}}')throw Error('full failure inspect forbidden');process.stdout.write(JSON.stringify({Status:'exited',Running:false,ExitCode:1,OOMKilled:false}));}\n`, { mode: 0o700 })
+    await chmod(join(bin, "docker"), 0o700)
+    await assert.rejects(promisify(execFile)("/bin/bash", [join(root, "run.sh")], { env: { PATH: `${bin}:/usr/bin:/bin` } }), error => error.code === 1)
+    const outcome = JSON.parse(await readFile(join(work, "host-outcome.json"), "utf8")); validateRecoveryFailureHost(outcome)
+    assert.equal(outcome.dockerRunExitCode, 1); assert.equal(outcome.state.OOMKilled, false)
+    assert.equal((await stat(join(work, "host-outcome.json"))).mode & 0o777, 0o600)
+    const calls = (await readFile(journal, "utf8")).trim().split("\n").map(JSON.parse)
+    assert.deepEqual(calls.map(call => call[0]), ["run", "inspect", "rm"])
+    assert.ok(calls[0].includes("none")); assert.ok(calls[0].includes("--read-only")); assert.ok(calls[0].includes("2g"))
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test("failed restore writes immutable build-specific failure then rejects, never acceptance", async () => {
+  const buildId = runtime.FCUNO_POSTGRES_RECOVERY_BUILD_ID, calls = [], trace = createRecoveryDiagnostics({ now })
+  await trace.stage("verify-catalog"); await trace.failed(); await trace.cleanup("ok")
+  let recorded, receipt
+  const host = { schema: "fcuno.private-recovery-host-outcome/v1", dockerRunExitCode: 1,
+    state: { Status: "exited", Running: false, ExitCode: 1, OOMKilled: false } }
+  const gcs = {
+    uploadImmutable: async () => { throw Error("Acceptance forbidden") },
+    uploadRecoveryFailure: async input => {
+      calls.push("failure-only"); recorded = input.bytes
+      assert.equal(input.buildId, buildId)
+      receipt = { target: { ...manifestReceipt.target, objectName: manifestReceipt.target.objectName.replace("manifest.json", `failures/${buildId}.json`), generation: "123" },
+        sizeBytes: recorded.length, crc32c: crc(recorded) }
+      return receipt
+    },
+    readTarget: async () => { calls.push("readback"); return { ...receipt, bytes: (async function* () { yield recorded })() } },
+    inspectTarget: async () => { calls.push("inspect"); return receipt },
+  }
+  await assert.rejects(recordRecoveryFailureAndReject({ gcs, context: context(), plan: { manifest: manifestReceipt, buildId, sourceCommit: "f".repeat(40) }, host, diagnostic: trace.snapshot() }), /Isolated recovery failed; private diagnostic recorded/)
+  assert.deepEqual(calls, ["failure-only", "readback", "inspect"])
+  const report = JSON.parse(recorded); assert.equal(report.recoveryVerified, false); assert.equal(report.status, "cloud-isolated-recovery-failed")
+  assert.throws(() => validateOfflineRecoveryResult(report, manifest, now()))
+  assert.throws(() => validateRecoveryAcceptanceDescriptor({ ...receipt, byteSha256: sha(recorded) }))
+  const build = createRecoveryBuild({ manifestReceipt, verificationKeyPem: publicPem, budgetConfigJson: "{}", sourceCommit: "f".repeat(40) })
+  assert.equal(build.steps[2].allowFailure, true); assert.equal(build.steps[3].allowFailure, undefined); assert.equal(build.steps[3].allowExitCodes, undefined)
+})
+
+test("failure publisher rejects contaminated diagnostics before any write", async () => {
+  let writes = 0
+  await assert.rejects(recordRecoveryFailureAndReject({ gcs: { uploadRecoveryFailure: async () => { writes++ } }, context: context(),
+    plan: { manifest: manifestReceipt, buildId: runtime.FCUNO_POSTGRES_RECOVERY_BUILD_ID, sourceCommit: "f".repeat(40) }, host: null,
+    diagnostic: { ...createRecoveryDiagnostics({ now }).snapshot(), stderr: "secret SQL" } }))
+  assert.equal(writes, 0)
+})
+
+test("failure publisher rejects changed name, generation, bytes and final metadata", async () => {
+  const buildId = runtime.FCUNO_POSTGRES_RECOVERY_BUILD_ID
+  for (const changed of ["name", "generation", "bytes", "inspect"]) {
+    let bytes, receipt
+    const gcs = { uploadImmutable: async () => { throw Error("acceptance forbidden") },
+      uploadRecoveryFailure: async input => {
+        bytes = input.bytes; receipt = { target: { ...manifestReceipt.target, objectName: manifestReceipt.target.objectName.replace("manifest.json", `failures/${buildId}.json`), generation: "123" }, sizeBytes: bytes.length, crc32c: crc(bytes) }
+        return changed === "name" ? { ...receipt, target: { ...receipt.target, objectName: "recovery.json" } } : receipt
+      },
+      readTarget: async () => ({ ...receipt, target: changed === "generation" ? { ...receipt.target, generation: "124" } : receipt.target,
+        bytes: (async function* () { yield changed === "bytes" ? Buffer.alloc(bytes.length) : bytes })() }),
+      inspectTarget: async () => changed === "inspect" ? { ...receipt, target: { ...receipt.target, generation: "124" } } : receipt }
+    await assert.rejects(recordRecoveryFailureAndReject({ gcs, context: context(), plan: { manifest: manifestReceipt, buildId, sourceCommit: "f".repeat(40) }, host: null, diagnostic: null }),
+      error => !error.message.includes("private diagnostic recorded"))
+  }
+})
+
+test("failure upload adapter rejects traversal, acceptance overwrite and other modes before network", async () => {
+  let calls = 0
+  const fetch = async () => { calls++; throw Error("unexpected network") }, getAccessToken = async () => { calls++; throw Error("unexpected token") }
+  for (const mode of ["approved-snapshot", "recurring", "postgres-candidate"]) {
+    const gcs = createStorageMediaGcsAdapter({ mode, runId: "fixture", fetch, getAccessToken })
+    await assert.rejects(gcs.uploadRecoveryFailure({ buildId: runtime.FCUNO_POSTGRES_RECOVERY_BUILD_ID, bytes: Buffer.from("{}") }, context()))
+  }
+  const gcs = createStorageMediaGcsAdapter({ mode: "postgres-recovery", runId: "fixture", fetch, getAccessToken })
+  for (const buildId of ["../recovery", "recovery.json", "private", runtime.FCUNO_POSTGRES_RECOVERY_BUILD_ID + "/../../recovery.json"]) {
+    await assert.rejects(gcs.uploadRecoveryFailure({ buildId, bytes: Buffer.from("{}") }, context()))
+  }
+  await assert.rejects(gcs.uploadRecoveryFailure({ buildId: runtime.FCUNO_POSTGRES_RECOVERY_BUILD_ID, bytes: Buffer.alloc(16385) }, context()))
+  await assert.rejects(gcs.uploadRecoveryFailure({ buildId: runtime.FCUNO_POSTGRES_RECOVERY_BUILD_ID, bytes: Buffer.from("{}"), objectName: "recovery.json" }, context()))
+  await assert.rejects(gcs.uploadRecoveryFailure({ buildId: runtime.FCUNO_POSTGRES_RECOVERY_BUILD_ID, bytes: Buffer.from("{}"), ifGenerationMatch: "123" }, context()))
+  assert.equal(calls, 0)
+})
+
+test("failure adapter creates only exact run/build object using generation-zero precondition", async () => {
+  const calls = [], bytes = Buffer.from('{"status":"synthetic-failed"}'), buildId = runtime.FCUNO_POSTGRES_RECOVERY_BUILD_ID
+  const expectedName = `${pins.postgresBackup.targetPrefix}/runs/fixture/failures/${buildId}.json`
+  const gcs = createStorageMediaGcsAdapter({ mode: "postgres-recovery", runId: "fixture", now, getAccessToken: async () => "synthetic-token",
+    fetch: async (input, init = {}) => {
+      const url = new URL(input); calls.push({ url, init })
+      if (url.pathname.startsWith("/storage/v1/b/")) return Response.json({ name: pins.storageMediaBackup.targetBucket,
+        location: pins.storageMediaBackup.googleRegion.toUpperCase(), versioning: { enabled: true },
+        iamConfiguration: { publicAccessPrevention: "enforced", uniformBucketLevelAccess: { enabled: true } } })
+      assert.equal(init.method, "POST"); assert.equal(url.searchParams.get("ifGenerationMatch"), "0")
+      assert.equal(url.searchParams.get("name"), expectedName)
+      assert.deepEqual(Buffer.from(await new Response(init.body).arrayBuffer()), bytes)
+      return Response.json({ bucket: pins.storageMediaBackup.targetBucket, name: expectedName, generation: "123", size: String(bytes.length), crc32c: crc(bytes) })
+    } })
+  const saved = await gcs.uploadRecoveryFailure({ buildId, bytes }, context())
+  assert.equal(saved.target.objectName, expectedName); assert.equal(calls.length, 2)
+  assert.ok(calls.every(call => !call.url.href.includes("recovery.json")))
+})
+
+test("diagnostics source closure is explicit and no raw error output was enabled", async () => {
+  const source = await readFile(new URL("../scripts/postgres-recovery/offline.mjs", import.meta.url), "utf8")
+  assert.match(source, /stderr\.on\("data", \(\) => \{\}\)/)
+  assert.match(source, /process\.stderr\.on\("data", stderrHint\.write\)/)
+  assert.match(source, /diagnostics\.native\(name, code, signal, stderrHint\.value\(\)\)/)
+  assert.doesNotMatch(source, /console\.(?:log|error)|\.stack|stderr\.pipe/)
+  for (const [path, pattern] of [["../.gcloudignore", /!lib\/postgresRecoveryDiagnostics\.mjs/],
+    ["../scripts/postgres-recovery/Dockerfile.dockerignore", /!lib\/postgresRecoveryDiagnostics\.mjs/],
+    ["../scripts/postgres-recovery/Dockerfile", /COPY lib\/postgresBackupReceipt\.mjs[^\n]*lib\/postgresRecoveryDiagnostics\.mjs/],
+    ["../.gcloudignore", /!lib\/postgresRecoveryColumns\.mjs/],
+    ["../scripts/postgres-recovery/Dockerfile.dockerignore", /!lib\/postgresRecoveryColumns\.mjs/],
+    ["../scripts/postgres-recovery/Dockerfile", /COPY lib\/postgresBackupReceipt\.mjs[^\n]*lib\/postgresRecoveryColumns\.mjs/]])
+    assert.match(await readFile(new URL(path, import.meta.url), "utf8"), pattern)
 })
 test("CI host checks private proof only after the sealed container exits and ownership returns", async () => {
   const script = await readFile(new URL("../scripts/postgres-recovery/run-controller-proof.sh", import.meta.url), "utf8")

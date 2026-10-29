@@ -8,6 +8,7 @@ import { fcunoConnectionPolicy } from "../../config/fcunoConnections.ts"
 import { validatePostgresManifest, validatePostgresManifestReceipt } from "../../lib/postgresBackupReceipt.mjs"
 import { RECOVERY_WORKSPACE, validateRecoveryHostInspection } from "../../lib/postgresRecoveryBuild.mjs"
 import { validateOfflineRecoveryResult } from "../../lib/postgresRecoveryEvidence.mjs"
+import { validateRecoveryDiagnostic, validateRecoveryFailureHost, recoveryFailure } from "../../lib/postgresRecoveryDiagnostics.mjs"
 import { createMetadataAccessTokenProvider, requirePostgresRecoveryBuildRuntime } from "../lib/storage-media-job-auth.mjs"
 import { createStorageMediaBudgetRuntime } from "../lib/storage-media-budget-runtime.mjs"
 import { createStorageMediaGcsAdapter } from "../lib/storage-media-gcs-adapter.mjs"
@@ -22,6 +23,31 @@ async function smallFile(path, maximum = 16384) {
   const info = await lstat(path)
   if (!info.isFile() || info.isSymbolicLink() || info.size > maximum) failure()
   return readFile(path)
+}
+async function optionalPrivateJson(path, maximum = 16384) {
+  try { return JSON.parse(await smallFile(path, maximum)) }
+  catch (error) { if (error?.code === "ENOENT") return null; throw error }
+}
+// This branch always rejects, even after its immutable private receipt was
+// durably read back. It cannot publish an acceptance or make the Build pass.
+export async function recordRecoveryFailureAndReject({ gcs, context, plan, host, diagnostic }) {
+  validatePostgresManifestReceipt(plan.manifest)
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(plan.buildId) || !/^[0-9a-f]{40}$/.test(plan.sourceCommit)) failure()
+  if (host !== null) validateRecoveryFailureHost(host)
+  if (diagnostic !== null) validateRecoveryDiagnostic(diagnostic)
+  if (host !== null && !recoveryFailure({ host, diagnostic })) failure()
+  const report = { schema: "fcuno.postgresql-recovery-failure/v1", status: "cloud-isolated-recovery-failed", recoveryVerified: false,
+    manifest: plan.manifest, build: { projectId: fcunoConnectionPolicy.storageMediaBackup.googleProjectId, id: plan.buildId, sourceCommit: plan.sourceCommit }, host, diagnostic }
+  const bytes = Buffer.from(JSON.stringify(report))
+  if (bytes.length > 16384) failure()
+  const saved = await gcs.uploadRecoveryFailure({ buildId: plan.buildId, bytes }, context)
+  const expectedName = plan.manifest.target.objectName.replace(/manifest\.json$/, `failures/${plan.buildId}.json`)
+  if (saved.target.bucket !== plan.manifest.target.bucket || saved.target.objectName !== expectedName || saved.sizeBytes !== bytes.length) failure()
+  const readback = await gcs.readTarget(saved.target, context)
+  if (!same(readback.target, saved.target) || readback.crc32c !== saved.crc32c) failure()
+  await measureByteStream(readback.bytes, { expectedBytes: bytes.length, expectedSha256: hash(bytes), expectedCrc32c: saved.crc32c }, context)
+  if (!same(await gcs.inspectTarget(saved.target, context), saved)) failure()
+  throw new Error("Isolated recovery failed; private diagnostic recorded")
 }
 export async function cloudMain({ args = process.argv.slice(2), runtime = process.env, fetch: fetchImpl = fetch, now = Date.now } = {}) {
   if (args.length !== 1 || !["download", "publish"].includes(args[0])) failure()
@@ -74,6 +100,10 @@ export async function cloudMain({ args = process.argv.slice(2), runtime = proces
   const manifest = validatePostgresManifest(JSON.parse(await smallFile(`${RECOVERY_WORKSPACE}/input/manifest.json`, fcunoConnectionPolicy.postgresBackup.maximumMetadataBytes)))
   if (manifest.runId !== runId || hash(Buffer.from(JSON.stringify(manifest.metadata))) !== manifest.completion.metadataSha256 ||
       !verify(null, Buffer.from(JSON.stringify(manifest.completion)), publicKey, Buffer.from(manifest.signature, "base64url"))) failure()
+  const hostOutcome = await optionalPrivateJson(`${RECOVERY_WORKSPACE}/host-outcome.json`)
+  const diagnostic = await optionalPrivateJson(`${RECOVERY_WORKSPACE}/output/diagnostic.json`)
+  if (hostOutcome === null || recoveryFailure({ host: hostOutcome, diagnostic }))
+    await recordRecoveryFailureAndReject({ gcs, context, plan, host: hostOutcome, diagnostic })
   const containment = validateRecoveryHostInspection(JSON.parse(await smallFile(`${RECOVERY_WORKSPACE}/host-inspection.json`, 1024 * 1024)))
   const result = validateOfflineRecoveryResult(JSON.parse(await smallFile(`${RECOVERY_WORKSPACE}/output/recovery.json`)), manifest, now())
   const acceptance = { schema: "fcuno.postgresql-recovery-acceptance/v1", status: "cloud-isolated-logical-recovery-verified", manifest: descriptor,

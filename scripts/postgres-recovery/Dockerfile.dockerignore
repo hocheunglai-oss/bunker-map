@@ -8,6 +8,8 @@
 !lib/postgresBackupProtocol.mjs
 !lib/postgresBackupCapability.mjs
 !lib/postgresRecoveryCatalog.mjs
+!lib/postgresRecoveryDiagnostics.mjs
+!lib/postgresRecoveryColumns.mjs
 !lib/storageMediaBackup.mjs
 !scripts/
 !scripts/lib/
