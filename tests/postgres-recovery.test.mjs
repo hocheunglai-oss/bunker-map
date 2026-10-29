@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { createHash, generateKeyPairSync, sign } from "node:crypto"
-import { mkdtemp, readFile, rm, mkdir, writeFile, chmod, realpath, stat } from "node:fs/promises"
+import { mkdtemp, readFile, rm, mkdir, writeFile, chmod, realpath, stat, symlink } from "node:fs/promises"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { tmpdir } from "node:os"
@@ -11,7 +11,7 @@ import { createRecoveryBuild, validateRecoveryHostInspection, RECOVERY_WORKSPACE
 import { requireCloudRecoveryAcceptance, validateRecoveryAcceptanceDescriptor } from "../lib/postgresRecoveryAcceptance.mjs"
 import { parseCopyHeader, parseSequenceState, parseToc, boundedLines, fingerprintRows, runOfflineRecovery } from "../scripts/postgres-recovery/offline.mjs"
 import { createRecoveryDiagnostics, createNativeStderrHint, validateRecoveryDiagnostic, validateRecoveryFailureHost, recoveryFailure } from "../lib/postgresRecoveryDiagnostics.mjs"
-import { recordRecoveryFailureAndReject } from "../scripts/postgres-recovery/cloud.mjs"
+import { recordRecoveryFailureAndReject, RECOVERY_CONTROLLER_EXIT_CODES, createRecoveryControllerStages, readRecoveryPublicationInputs, runCloudRecoveryCli } from "../scripts/postgres-recovery/cloud.mjs"
 import { createStorageMediaGcsAdapter } from "../scripts/lib/storage-media-gcs-adapter.mjs"
 import { requirePostgresRecoveryBuildRuntime, createMetadataAccessTokenProvider } from "../scripts/lib/storage-media-job-auth.mjs"
 import { validateOfflineRecoveryResult } from "../lib/postgresRecoveryEvidence.mjs"
@@ -345,6 +345,117 @@ test("failure adapter creates only exact run/build object using generation-zero 
   const saved = await gcs.uploadRecoveryFailure({ buildId, bytes }, context())
   assert.equal(saved.target.objectName, expectedName); assert.equal(calls.length, 2)
   assert.ok(calls.every(call => !call.url.href.includes("recovery.json")))
+})
+
+test("controller stage exit codes are fixed, nonzero and reject adversarial stage values", () => {
+  const values = Object.values(RECOVERY_CONTROLLER_EXIT_CODES)
+  assert.ok(values.every(value => Number.isInteger(value) && value > 1 && value < 126))
+  assert.equal(new Set(values).size, values.length)
+  const trace = createRecoveryControllerStages()
+  for (const [stage, code] of Object.entries(RECOVERY_CONTROLLER_EXIT_CODES)) { trace.enter(stage); assert.equal(trace.exitCode(), code) }
+  for (const value of ["__proto__", "constructor", "toString", "complete", "0", 0, null, undefined, {}, { toString() { throw Error("private") } }, "private SQL\npassword"]) {
+    assert.throws(() => trace.enter(value)); assert.equal(trace.exitCode(), 90)
+  }
+  assert.ok(Object.isFrozen(RECOVERY_CONTROLLER_EXIT_CODES)); assert.ok(Object.isFrozen(trace))
+})
+
+test("controller CLI ignores exception-supplied codes and untrusted stage overrides", async () => {
+  const confidential = new Error("private SQL password token")
+  confidential.exitCode = 0; confidential.code = 0; confidential.stage = "failure-recorded"
+  let calls = 0
+  const fetch = async () => { calls++; throw confidential }, stage = () => { throw confidential }
+  assert.equal(await runCloudRecoveryCli({ args: ["private SQL"], runtime, fetch, stage }), 20)
+  assert.equal(await runCloudRecoveryCli({ args: ["publish"], runtime: {}, fetch, stage }), 21)
+  assert.equal(await runCloudRecoveryCli({ args: ["publish"], runtime, fetch, stage }), 22)
+  const hostile = { get GOOGLE_CLOUD_PROJECT() { throw confidential } }
+  assert.equal(await runCloudRecoveryCli({ args: ["publish"], runtime: hostile, fetch, stage }), 21)
+  assert.equal(calls, 0)
+})
+
+test("publisher preflight exercises real private files and reports exact failing boundary", async () => {
+  const root = await mkdtemp(join(tmpdir(), "fcuno-publish-preflight-"))
+  const pubRuntime = { ...runtime, FCUNO_RECOVERY_SOURCE_COMMIT: "f".repeat(40), POSTGRES_BACKUP_VERIFICATION_KEY_PEM: publicPem }
+  const plan = { buildId: runtime.FCUNO_POSTGRES_RECOVERY_BUILD_ID, sourceCommit: pubRuntime.FCUNO_RECOVERY_SOURCE_COMMIT,
+    manifest: manifestReceipt, verificationKeySha256: sha(Buffer.from(publicPem)) }
+  const failedHost = { schema: "fcuno.private-recovery-host-outcome/v1", dockerRunExitCode: 1,
+    state: { Status: "exited", Running: false, ExitCode: 1, OOMKilled: false } }
+  const json = (path, value) => writeFile(path, JSON.stringify(value), { mode: 0o600 })
+  const cases = [
+    [30, async dir => rm(join(dir, "plan.json"))],
+    [30, async dir => writeFile(join(dir, "plan.json"), "{")],
+    [30, async dir => { await rm(join(dir, "plan.json")); await symlink(join(dir, "input/manifest.json"), join(dir, "plan.json")) }],
+    [30, async dir => writeFile(join(dir, "plan.json"), Buffer.alloc(16385))],
+    [31, async dir => json(join(dir, "plan.json"), { ...plan, buildId: "different-build" })],
+    [31, async dir => json(join(dir, "plan.json"), { ...plan, verificationKeySha256: "0".repeat(64) })],
+    [32, async dir => rm(join(dir, "input/manifest.json"))],
+    [32, async dir => writeFile(join(dir, "input/manifest.json"), Buffer.alloc(pins.postgresBackup.maximumMetadataBytes + 1))],
+    [32, async dir => writeFile(join(dir, "input/manifest.json"), "{")],
+    [33, async dir => json(join(dir, "input/manifest.json"), { ...manifest, signature: "a".repeat(86) })],
+    [33, async dir => json(join(dir, "input/manifest.json"), { ...manifest, runId: "different-run" })],
+    [34, async dir => writeFile(join(dir, "host-outcome.json"), "{")],
+    [35, async dir => json(join(dir, "host-outcome.json"), { ...failedHost, rawError: "private SQL" })],
+    [34, async dir => writeFile(join(dir, "output/diagnostic.json"), "{")],
+    [34, async dir => symlink(join(dir, "input/manifest.json"), join(dir, "output/diagnostic.json"))],
+    [34, async dir => mkdir(join(dir, "output/diagnostic.json"))],
+    [35, async dir => json(join(dir, "output/diagnostic.json"), { ...createRecoveryDiagnostics({ now }).snapshot(), stage: "private SQL" })],
+  ]
+  try {
+    for (let index = 0; index < cases.length + 2; index++) {
+      const dir = join(root, String(index)); await mkdir(dir, { mode: 0o700 })
+      await mkdir(join(dir, "input"), { mode: 0o700 }); await mkdir(join(dir, "output"), { mode: 0o700 })
+      await json(join(dir, "plan.json"), plan); await writeFile(join(dir, "input/manifest.json"), manifestBytes, { mode: 0o600 })
+      if (index !== cases.length) await json(join(dir, "host-outcome.json"), failedHost)
+      const trace = createRecoveryControllerStages()
+      const input = { workspace: dir, runtime: pubRuntime, descriptor: manifestReceipt, publicKey, stage: trace.enter }
+      if (index < cases.length) {
+        await cases[index][1](dir); await assert.rejects(readRecoveryPublicationInputs(input))
+        assert.equal(trace.exitCode(), cases[index][0], `case ${index}`)
+      } else {
+        const result = await readRecoveryPublicationInputs(input)
+        assert.equal(result.diagnostic, null); assert.deepEqual(result.hostOutcome, index === cases.length ? null : failedHost)
+        assert.equal(trace.exitCode(), 35); assert.deepEqual(result.manifest, manifest)
+      }
+    }
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test("failure publisher exposes only fixed substages and never a success exit", async () => {
+  const buildId = runtime.FCUNO_POSTGRES_RECOVERY_BUILD_ID
+  const host = { schema: "fcuno.private-recovery-host-outcome/v1", dockerRunExitCode: 1,
+    state: { Status: "exited", Running: false, ExitCode: 1, OOMKilled: false } }
+  for (const [fault, code] of [["input", 40], ["upload", 41], ["receipt", 42], ["readback", 43], ["bytes", 44], ["inspect", 45], ["none", 46]]) {
+    const trace = createRecoveryControllerStages(); let bytes, receipt, acceptanceWrites = 0
+    const privateError = Object.assign(new Error("private SQL password token"), { exitCode: 0, code: 0 })
+    const gcs = {
+      uploadImmutable: async () => { acceptanceWrites++; throw privateError },
+      uploadRecoveryFailure: async input => {
+        if (fault === "upload") throw privateError
+        bytes = input.bytes; receipt = { target: { ...manifestReceipt.target,
+          objectName: manifestReceipt.target.objectName.replace("manifest.json", `failures/${buildId}.json`), generation: "123" }, sizeBytes: bytes.length, crc32c: crc(bytes) }
+        return fault === "receipt" ? { ...receipt, sizeBytes: bytes.length + 1 } : receipt
+      },
+      readTarget: async () => {
+        if (fault === "readback") throw privateError
+        return { ...receipt, bytes: (async function* () { yield fault === "bytes" ? Buffer.alloc(bytes.length) : bytes })() }
+      },
+      inspectTarget: async () => { if (fault === "inspect") throw privateError; return receipt },
+    }
+    await assert.rejects(recordRecoveryFailureAndReject({ gcs, context: context(), plan: { manifest: manifestReceipt,
+      buildId: fault === "input" ? "invalid" : buildId, sourceCommit: "f".repeat(40) }, host, diagnostic: null, stage: trace.enter }))
+    assert.equal(trace.exitCode(), code); assert.equal(acceptanceWrites, 0)
+    if (bytes) { assert.equal(JSON.parse(bytes).diagnostic, null); assert.ok(!bytes.includes(Buffer.from("private SQL password token"))) }
+  }
+})
+
+test("actual controller CLI returns numeric stage without printing injected private input", async () => {
+  const run = promisify(execFile), script = new URL("../scripts/postgres-recovery/cloud.mjs", import.meta.url)
+  const privateInput = "private SQL password token"
+  await assert.rejects(run(process.execPath, ["--no-warnings", script.pathname, privateInput], { env: { PATH: process.env.PATH || "" } }), error => {
+    assert.equal(error.code, 20); assert.equal(error.stdout, ""); assert.equal(error.stderr, ""); return true
+  })
+  await assert.rejects(run(process.execPath, ["--no-warnings", script.pathname, "publish"], { env: { PATH: process.env.PATH || "" } }), error => {
+    assert.equal(error.code, 21); assert.equal(error.stdout, ""); assert.equal(error.stderr, ""); return true
+  })
 })
 
 test("diagnostics source closure is explicit and no raw error output was enabled", async () => {

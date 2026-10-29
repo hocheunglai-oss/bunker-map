@@ -19,6 +19,29 @@ const hash = bytes => createHash("sha256").update(bytes).digest("hex")
 const failure = () => { throw new Error("Private cloud recovery could not be verified") }
 const exact = (value, keys) => { if (!value || typeof value !== "object" || Object.keys(value).sort().join(",") !== [...keys].sort().join(",")) failure() }
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+// Only fixed technical stages leave the private controller, as numeric CLI
+// exit codes. Never derive a code from an exception, message, provider body,
+// object name, identifier, SQL or environment. Every failure remains nonzero.
+export const RECOVERY_CONTROLLER_EXIT_CODES = Object.freeze({
+  "controller-arguments": 20, "controller-runtime": 21, "controller-input": 22, "controller-client": 23,
+  "download-budget": 24, "download-workspace": 25, "download-archive": 26, "download-input": 27,
+  "publish-plan-read": 30, "publish-plan-validation": 31, "publish-manifest-read": 32,
+  "publish-manifest-validation": 33, "publish-outcome-read": 34, "publish-outcome-validation": 35,
+  "failure-input-validation": 40, "failure-upload": 41, "failure-receipt-validation": 42,
+  "failure-readback": 43, "failure-readback-validation": 44, "failure-final-inspection": 45, "failure-recorded": 46,
+  "acceptance-containment": 50, "acceptance-result": 51, "acceptance-upload": 52,
+  "acceptance-readback": 53, "acceptance-final-inspection": 54, "acceptance-local-receipt": 55, "acceptance-cleanup": 56,
+})
+export function createRecoveryControllerStages() {
+  let code = 20
+  return Object.freeze({
+    enter(value) {
+      if (typeof value !== "string" || !Object.hasOwn(RECOVERY_CONTROLLER_EXIT_CODES, value)) { code = 90; failure() }
+      code = RECOVERY_CONTROLLER_EXIT_CODES[value]
+    },
+    exitCode: () => code,
+  })
+}
 async function smallFile(path, maximum = 16384) {
   const info = await lstat(path)
   if (!info.isFile() || info.isSymbolicLink() || info.size > maximum) failure()
@@ -30,7 +53,8 @@ async function optionalPrivateJson(path, maximum = 16384) {
 }
 // This branch always rejects, even after its immutable private receipt was
 // durably read back. It cannot publish an acceptance or make the Build pass.
-export async function recordRecoveryFailureAndReject({ gcs, context, plan, host, diagnostic }) {
+export async function recordRecoveryFailureAndReject({ gcs, context, plan, host, diagnostic, stage = () => {} }) {
+  stage("failure-input-validation")
   validatePostgresManifestReceipt(plan.manifest)
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(plan.buildId) || !/^[0-9a-f]{40}$/.test(plan.sourceCommit)) failure()
   if (host !== null) validateRecoveryFailureHost(host)
@@ -40,18 +64,53 @@ export async function recordRecoveryFailureAndReject({ gcs, context, plan, host,
     manifest: plan.manifest, build: { projectId: fcunoConnectionPolicy.storageMediaBackup.googleProjectId, id: plan.buildId, sourceCommit: plan.sourceCommit }, host, diagnostic }
   const bytes = Buffer.from(JSON.stringify(report))
   if (bytes.length > 16384) failure()
+  stage("failure-upload")
   const saved = await gcs.uploadRecoveryFailure({ buildId: plan.buildId, bytes }, context)
+  stage("failure-receipt-validation")
   const expectedName = plan.manifest.target.objectName.replace(/manifest\.json$/, `failures/${plan.buildId}.json`)
   if (saved.target.bucket !== plan.manifest.target.bucket || saved.target.objectName !== expectedName || saved.sizeBytes !== bytes.length) failure()
+  stage("failure-readback")
   const readback = await gcs.readTarget(saved.target, context)
+  stage("failure-readback-validation")
   if (!same(readback.target, saved.target) || readback.crc32c !== saved.crc32c) failure()
   await measureByteStream(readback.bytes, { expectedBytes: bytes.length, expectedSha256: hash(bytes), expectedCrc32c: saved.crc32c }, context)
+  stage("failure-final-inspection")
   if (!same(await gcs.inspectTarget(saved.target, context), saved)) failure()
+  stage("failure-recorded")
   throw new Error("Isolated recovery failed; private diagnostic recorded")
 }
-export async function cloudMain({ args = process.argv.slice(2), runtime = process.env, fetch: fetchImpl = fetch, now = Date.now } = {}) {
+// Separated only for local filesystem verification. Production always uses
+// the fixed workspace; no CLI argument or environment can redirect it.
+export async function readRecoveryPublicationInputs({ runtime, descriptor, publicKey, workspace = RECOVERY_WORKSPACE, stage = () => {} }) {
+  stage("publish-plan-read")
+  const plan = JSON.parse(await smallFile(`${workspace}/plan.json`))
+  stage("publish-plan-validation")
+  exact(plan, ["buildId", "sourceCommit", "manifest", "verificationKeySha256"])
+  if (plan.buildId !== runtime.FCUNO_POSTGRES_RECOVERY_BUILD_ID || plan.sourceCommit !== runtime.FCUNO_RECOVERY_SOURCE_COMMIT ||
+      !same(plan.manifest, descriptor) || plan.verificationKeySha256 !== hash(Buffer.from(runtime.POSTGRES_BACKUP_VERIFICATION_KEY_PEM))) failure()
+  stage("publish-manifest-read")
+  const manifest = JSON.parse(await smallFile(`${workspace}/input/manifest.json`, fcunoConnectionPolicy.postgresBackup.maximumMetadataBytes))
+  stage("publish-manifest-validation")
+  validatePostgresManifest(manifest)
+  const runId = descriptor.target.objectName.split("/").at(-2)
+  if (manifest.runId !== runId || hash(Buffer.from(JSON.stringify(manifest.metadata))) !== manifest.completion.metadataSha256 ||
+      !verify(null, Buffer.from(JSON.stringify(manifest.completion)), publicKey, Buffer.from(manifest.signature, "base64url"))) failure()
+  stage("publish-outcome-read")
+  const hostOutcome = await optionalPrivateJson(`${workspace}/host-outcome.json`)
+  const diagnostic = await optionalPrivateJson(`${workspace}/output/diagnostic.json`)
+  stage("publish-outcome-validation")
+  // These are the same validators previously reached through recoveryFailure
+  // and the failure recorder. Missing files remain an explicit failed restore.
+  if (hostOutcome !== null) validateRecoveryFailureHost(hostOutcome)
+  if (diagnostic !== null) validateRecoveryDiagnostic(diagnostic)
+  return { plan, manifest, hostOutcome, diagnostic }
+}
+export async function cloudMain({ args = process.argv.slice(2), runtime = process.env, fetch: fetchImpl = fetch, now = Date.now, stage = () => {} } = {}) {
+  stage("controller-arguments")
   if (args.length !== 1 || !["download", "publish"].includes(args[0])) failure()
+  stage("controller-runtime")
   requirePostgresRecoveryBuildRuntime(runtime)
+  stage("controller-input")
   if (!/^[0-9a-f]{40}$/.test(runtime.FCUNO_RECOVERY_SOURCE_COMMIT || "") || typeof runtime.POSTGRES_RECOVERY_MANIFEST_JSON !== "string" ||
       runtime.POSTGRES_RECOVERY_MANIFEST_JSON.length > 8192 || typeof runtime.POSTGRES_BACKUP_VERIFICATION_KEY_PEM !== "string" ||
       runtime.POSTGRES_BACKUP_VERIFICATION_KEY_PEM.length > 2048) failure()
@@ -60,15 +119,18 @@ export async function cloudMain({ args = process.argv.slice(2), runtime = proces
   if (publicKey.asymmetricKeyType !== "ed25519") failure()
   const runId = descriptor.target.objectName.split("/").at(-2)
   const context = { signal: AbortSignal.timeout(300000), deadline: now() + 300000, now }
+  stage("controller-client")
   const runtimeMode = "postgres-recovery-build"
   const getAccessToken = createMetadataAccessTokenProvider({ runtime, fetch: fetchImpl, now, runtimeMode })
   const gcs = createStorageMediaGcsAdapter({ fetch: fetchImpl, getAccessToken, runId, now, mode: "postgres-recovery" })
   if (args[0] === "download") {
+    stage("download-budget")
     const budget = createStorageMediaBudgetRuntime({ runtime, fetch: fetchImpl, now, getAccessToken, runtimeMode })
     const decision = await budget.checkOptionalWork({ plannedWriteBytes: 16384 }, context)
     if (decision?.allowed !== true) failure()
     // Deliberately nonrecursive: a second invocation cannot overwrite, resume
     // or quietly adopt another build's private files.
+    stage("download-workspace")
     await mkdir(RECOVERY_WORKSPACE, { mode: 0o700 })
     for (const name of ["input", "scratch", "output"]) {
       const path = `${RECOVERY_WORKSPACE}/${name}`
@@ -78,12 +140,14 @@ export async function cloudMain({ args = process.argv.slice(2), runtime = proces
     const file = await open(incomplete, "wx", 0o600)
     let manifest
     try {
+      stage("download-archive")
       manifest = await readPostgresManifest(gcs, descriptor, publicKey, context, async bytes => {
         let offset = 0
         while (offset < bytes.length) { const written = await file.write(bytes.subarray(offset)); if (!written.bytesWritten) failure(); offset += written.bytesWritten }
       })
       await file.sync()
     } finally { await file.close() }
+    stage("download-input")
     await rename(incomplete, destination); await chown(destination, 1000, 1000)
     for (const [name, bytes] of [["manifest.json", JSON.stringify(manifest)], ["verification-key.pem", runtime.POSTGRES_BACKUP_VERIFICATION_KEY_PEM]]) {
       const path = `${RECOVERY_WORKSPACE}/input/${name}`
@@ -93,34 +157,38 @@ export async function cloudMain({ args = process.argv.slice(2), runtime = proces
       sourceCommit: runtime.FCUNO_RECOVERY_SOURCE_COMMIT, manifest: descriptor, verificationKeySha256: hash(Buffer.from(runtime.POSTGRES_BACKUP_VERIFICATION_KEY_PEM)) }), { mode: 0o600, flag: "wx" })
     return { status: "private-copy-ready-for-isolated-recovery" }
   }
-  const plan = JSON.parse(await smallFile(`${RECOVERY_WORKSPACE}/plan.json`))
-  exact(plan, ["buildId", "sourceCommit", "manifest", "verificationKeySha256"])
-  if (plan.buildId !== runtime.FCUNO_POSTGRES_RECOVERY_BUILD_ID || plan.sourceCommit !== runtime.FCUNO_RECOVERY_SOURCE_COMMIT ||
-      !same(plan.manifest, descriptor) || plan.verificationKeySha256 !== hash(Buffer.from(runtime.POSTGRES_BACKUP_VERIFICATION_KEY_PEM))) failure()
-  const manifest = validatePostgresManifest(JSON.parse(await smallFile(`${RECOVERY_WORKSPACE}/input/manifest.json`, fcunoConnectionPolicy.postgresBackup.maximumMetadataBytes)))
-  if (manifest.runId !== runId || hash(Buffer.from(JSON.stringify(manifest.metadata))) !== manifest.completion.metadataSha256 ||
-      !verify(null, Buffer.from(JSON.stringify(manifest.completion)), publicKey, Buffer.from(manifest.signature, "base64url"))) failure()
-  const hostOutcome = await optionalPrivateJson(`${RECOVERY_WORKSPACE}/host-outcome.json`)
-  const diagnostic = await optionalPrivateJson(`${RECOVERY_WORKSPACE}/output/diagnostic.json`)
+  const { plan, manifest, hostOutcome, diagnostic } = await readRecoveryPublicationInputs({ runtime, descriptor, publicKey, stage })
   if (hostOutcome === null || recoveryFailure({ host: hostOutcome, diagnostic }))
-    await recordRecoveryFailureAndReject({ gcs, context, plan, host: hostOutcome, diagnostic })
+    await recordRecoveryFailureAndReject({ gcs, context, plan, host: hostOutcome, diagnostic, stage })
+  stage("acceptance-containment")
   const containment = validateRecoveryHostInspection(JSON.parse(await smallFile(`${RECOVERY_WORKSPACE}/host-inspection.json`, 1024 * 1024)))
+  stage("acceptance-result")
   const result = validateOfflineRecoveryResult(JSON.parse(await smallFile(`${RECOVERY_WORKSPACE}/output/recovery.json`)), manifest, now())
   const acceptance = { schema: "fcuno.postgresql-recovery-acceptance/v1", status: "cloud-isolated-logical-recovery-verified", manifest: descriptor,
     build: { projectId: fcunoConnectionPolicy.storageMediaBackup.googleProjectId, id: plan.buildId, sourceCommit: plan.sourceCommit,
       imageId: containment.Image, privateLogsDisabled: true, network: "none", credentialsDelegatedToDatabase: false }, result }
   const bytes = Buffer.from(JSON.stringify(acceptance))
   if (bytes.length > 16384) failure()
+  stage("acceptance-upload")
   const saved = await gcs.uploadImmutable({ objectName: gcs.manifestObjectName, bytes, sizeBytes: bytes.length, contentType: "application/json" }, context)
   if (saved.sizeBytes !== bytes.length) failure()
+  stage("acceptance-readback")
   const readback = await gcs.readTarget(saved.target, context)
   if (!same(readback.target, saved.target) || readback.crc32c !== saved.crc32c) failure()
   await measureByteStream(readback.bytes, { expectedBytes: bytes.length, expectedSha256: hash(bytes), expectedCrc32c: saved.crc32c }, context)
+  stage("acceptance-final-inspection")
   if (!same(await gcs.inspectTarget(saved.target, context), saved)) failure()
   // This small descriptor is non-business evidence. The verified private
   // acceptance itself stays in the existing protected backup bucket.
+  stage("acceptance-local-receipt")
   await writeFile("/workspace/fcuno-recovery-acceptance-receipt.json", JSON.stringify({ ...saved, byteSha256: hash(bytes) }), { mode: 0o600, flag: "wx" })
+  stage("acceptance-cleanup")
   await rm(RECOVERY_WORKSPACE, { recursive: true, force: true })
   return { status: acceptance.status }
 }
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) cloudMain().catch(() => { process.exitCode = 1 })
+export async function runCloudRecoveryCli(options = {}) {
+  const stages = createRecoveryControllerStages()
+  try { await cloudMain({ ...options, stage: stages.enter }); return 0 }
+  catch { return stages.exitCode() }
+}
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = await runCloudRecoveryCli()
