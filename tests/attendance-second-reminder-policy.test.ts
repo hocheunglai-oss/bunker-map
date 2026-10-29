@@ -125,9 +125,11 @@ test("sender uses the real identity/group/start policy rather than selecting wor
 })
 
 test("manual reminder display names remain HTML-escaped", () => {
-  const email = buildAttendanceSecondReminderEmail({
-    displayName: "<script>bad</script>", year: 2026, month: 11, manualEntryOnly: true,
-  })
-  assert.doesNotMatch(email.html, /<script>/)
-  assert.match(email.html, /&lt;script&gt;bad&lt;\/script&gt;/)
+  for (const tag of ["script", "SCRIPT", "ScRiPt"]) {
+    const email = buildAttendanceSecondReminderEmail({
+      displayName: `<${tag}>bad</${tag}>`, year: 2026, month: 11, manualEntryOnly: true,
+    })
+    assert.doesNotMatch(email.html, /<script\b/i)
+    assert.ok(email.html.includes(`&lt;${tag}&gt;bad&lt;/${tag}&gt;`))
+  }
 })
