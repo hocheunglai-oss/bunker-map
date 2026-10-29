@@ -18,7 +18,7 @@ const modules = {
       globalThis.__attendanceCronFixture.requery(options)
   `,
   "@/lib/attendanceMonthEnd": `
-    export const previousMonthPeriod = () => ({ year: 2026, month: 10 })
+    export const previousMonthPeriod = () => globalThis.__attendanceCronFixture.period || ({ year: 2026, month: 10 })
   `,
   "next/server": `
     export class NextResponse {
@@ -37,8 +37,8 @@ const built = await build({
     builder.onResolve({ filter: /^(?:@\/lib\/attendanceData|@\/lib\/attendanceSync|@\/lib\/attendanceMonthEnd|next\/server)$/ },
       ({ path }) => ({ path, namespace: "fixture" }))
     builder.onLoad({ filter: /.*/, namespace: "fixture" }, ({ path }) => ({ contents: modules[path], loader: "js" }))
-    builder.onResolve({ filter: /^@\/lib\/attendanceAutoConfirmPolicy$/ }, () => ({
-      path: join(root, "lib/attendanceAutoConfirmPolicy.ts"),
+    builder.onResolve({ filter: /^@\/lib\/(?:attendanceAutoConfirmPolicy|attendanceManualEntryPolicy)$/ }, ({ path }) => ({
+      path: join(root, `lib/${path.split("/").at(-1)}.ts`),
     }))
   } }],
 })
@@ -50,6 +50,12 @@ const { GET } = loaded.exports
 const cy = { id: "e2cd1a9d-95c1-4292-940a-884537f35cf3", staffCode: "CY", dingTalkUserId: null }
 const jz = { id: "50988b84-4d6c-4089-9112-d6bfad1ed72d", adminUserId: "3cf2bff0-4eda-4c36-8827-a8f7be0c764d", staffCode: "JZ", dingTalkUserId: null }
 const other = { id: "other-person", staffCode: "ZZ", dingTalkUserId: "ding-other" }
+const manualEntryPeople = [
+  { id: "4c5d73e6-63a9-4b05-93a7-7354b3e668ad", adminUserId: "84bb808c-e188-43ce-9ddf-e7e2fe2e997d", staffCode: "NN",
+    dingTalkUserId: null, team: "BT", employmentStartDate: "2026-11-02" },
+  { id: "96142f45-373f-47e2-9104-e33804f2fb1e", adminUserId: "7c2f5a90-09ae-4d3b-9996-d189f0154d53", staffCode: "TL",
+    dingTalkUserId: null, team: "BT", employmentStartDate: "2026-11-02" },
+]
 
 async function invoke(fixture) {
   const oldSecret = process.env.CRON_SECRET
@@ -238,4 +244,48 @@ test("actual cron does not apply JZ's policy to a mismatched account tuple", asy
   assert.deepEqual(requeries, [[jz.id], []])
   assert.deepEqual(confirmations, ["cyDingTalkException", "ordinary"])
   assert.equal(body.jzSystemConfirmed, 0)
+})
+
+test("actual cron keeps manual-entry people out of automatic-confirmation requeries before and after linkage", async () => {
+  for (const linked of [false, true]) {
+    const requeries = [], confirmations = []
+    const manual = manualEntryPeople.map(person => ({ ...person,
+      dingTalkUserId: linked ? `later-${person.staffCode}` : null }))
+    const { response, body } = await invoke({
+      period: { year: 2026, month: 11 }, people: [...manual, other],
+      async requery({ people }) {
+        requeries.push(people.map(person => person.id))
+        if (people.some(person => manual.some(entry => entry.id === person.id))) {
+          throw new Error("manual-period DingTalk requery must not block ordinary staff")
+        }
+      },
+      async confirm(scope) {
+        confirmations.push(scope)
+        return { systemConfirmed: scope === "ordinary" ? 1 : 0 }
+      },
+    })
+    assert.equal(response.status, 200)
+    assert.deepEqual(requeries, [[other.id], []])
+    assert.deepEqual(confirmations, ["cyDingTalkException", "ordinary"])
+    assert.equal(body.systemConfirmed, 1)
+  }
+})
+
+test("actual cron does not skip a requery for drifted manual identity, group, join date or earlier period", async () => {
+  const manual = { ...manualEntryPeople[0], dingTalkUserId: "later-NN" }
+  for (const { changed, period } of [
+    { changed: { adminUserId: "another-account" }, period: { year: 2026, month: 11 } },
+    { changed: { team: "AC" }, period: { year: 2026, month: 11 } },
+    { changed: { employmentStartDate: "2026-11-03" }, period: { year: 2026, month: 11 } },
+    { changed: {}, period: { year: 2026, month: 10 } },
+  ]) {
+    const requeries = []
+    const { response } = await invoke({
+      period, people: [{ ...manual, ...changed }, other],
+      async requery({ people }) { requeries.push(people.map(person => person.id)) },
+      async confirm() { return { systemConfirmed: 0 } },
+    })
+    assert.equal(response.status, 200)
+    assert.deepEqual(requeries, [[manual.id, other.id], []])
+  }
 })

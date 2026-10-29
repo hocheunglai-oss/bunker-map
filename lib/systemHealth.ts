@@ -11,7 +11,8 @@ import { evaluateStorageMediaBackupHealth, readStorageMediaHealthReceipt } from 
 import { createSupabaseStorageReadProvider, readCurrentStorageMediaInventoryStatus } from "@/lib/storageMediaBackupSource"
 import { fcunoConnectionPolicy } from "@/config/fcunoConnections"
 import { hasCyDingTalkAutoConfirmException, hasJzDingTalkAutoConfirmException } from "@/lib/attendanceAutoConfirmPolicy"
-import { hktDateFromTimestamp } from "@/lib/attendanceRules"
+import { hasManualEntryOnlyAttendancePolicy } from "@/lib/attendanceManualEntryPolicy"
+import { hktDateFromTimestamp, parseIsoDate } from "@/lib/attendanceRules"
 import { getPostgresSourceMaintenanceCheck, getPostgresRecoveryMaintenanceCheck } from "@/lib/postgresBackupMaintenance"
 
 export type HealthStatus = "ok" | "warning" | "error"
@@ -1344,14 +1345,16 @@ async function checkAttendanceSync(): Promise<HealthCheckResult> {
   ] = await Promise.all([
     supabase
       .from("attendance_people")
-      .select("id,admin_user_id,staff_code,dingtalk_user_id", { count: "exact" })
+      .select("id,admin_user_id,staff_code,dingtalk_user_id,team,employment_start_date,employment_end_date", { count: "exact" })
       .eq("is_active", true)
       .order("id", { ascending: true })
       .limit(SUPABASE_HEALTH_PAGE_SIZE),
     supabase
       .from("attendance_team_assignments")
-      .select("person_id", { count: "exact", head: true })
-      .is("effective_to", null),
+      .select("person_id,team,effective_from,effective_to", { count: "exact" })
+      .is("effective_to", null)
+      .order("person_id", { ascending: true })
+      .limit(SUPABASE_HEALTH_PAGE_SIZE),
     supabase
       .from("attendance_sync_runs")
       .select(
@@ -1366,34 +1369,72 @@ async function checkAttendanceSync(): Promise<HealthCheckResult> {
   if (currentGroupResponse.error) throw currentGroupResponse.error
   if (latestResponse.error) throw latestResponse.error
 
-  // Counts alone cannot distinguish an approved exception from a missing
-  // employee link. Use the same identity-pinned, effective-period policy as
-  // monthly confirmation, without changing that policy or any attendance data.
+  // Keep the full active registry for group-history integrity, but only require
+  // today's employed people to be mapped or covered by an explicit policy.
+  // Manual entry is not a DingTalk mapping or an auto-confirmation exception.
   const people = activeResponse.data
   if (!Array.isArray(people) || !Number.isSafeInteger(activeResponse.count) ||
       activeResponse.count !== people.length) throw new Error("Active attendance mapping inventory is incomplete")
+  const groups = currentGroupResponse.data
+  if (!Array.isArray(groups) || !Number.isSafeInteger(currentGroupResponse.count) ||
+      currentGroupResponse.count !== groups.length) throw new Error("Current attendance group inventory is incomplete")
   const now = Date.now()
-  const [year, month] = hktDateFromTimestamp(now).split("-").map(Number)
+  const today = hktDateFromTimestamp(now)
+  const [year, month] = today.split("-").map(Number)
   const period = { year, month }, personIds = new Set<string>()
-  let mappedPeople = 0, approvedMappingExceptions = 0
+  const validDate = (value: unknown) => typeof value === "string" && Boolean(parseIsoDate(value))
+  let mappedPeople = 0, approvedMappingExceptions = 0, approvedManualEntryPeople = 0
+  let effectiveActivePeople = 0, futureStarters = 0, employmentEndedPeople = 0
   for (const row of people) {
-    if (typeof row.id !== "string" || !row.id || personIds.has(row.id) ||
+    if (!row || typeof row.id !== "string" || !row.id || personIds.has(row.id) ||
         typeof row.staff_code !== "string" ||
+        !["BT", "BS", "AC"].includes(row.team) ||
         (row.admin_user_id !== null && typeof row.admin_user_id !== "string") ||
-        (row.dingtalk_user_id !== null && typeof row.dingtalk_user_id !== "string")) {
+        (row.dingtalk_user_id !== null && typeof row.dingtalk_user_id !== "string") ||
+        (row.employment_start_date !== null && !validDate(row.employment_start_date)) ||
+        (row.employment_end_date !== null && !validDate(row.employment_end_date)) ||
+        (row.employment_start_date !== null && row.employment_end_date !== null &&
+          row.employment_end_date < row.employment_start_date)) {
       throw new Error("Active attendance mapping inventory could not be verified")
     }
     personIds.add(row.id)
+    if (row.employment_start_date !== null && row.employment_start_date > today) {
+      futureStarters++
+      continue
+    }
+    if (row.employment_end_date !== null && row.employment_end_date < today) {
+      employmentEndedPeople++
+      continue
+    }
+    effectiveActivePeople++
     if (typeof row.dingtalk_user_id === "string" && row.dingtalk_user_id.trim()) {
       mappedPeople++
     } else {
-      const person = { id: row.id, adminUserId: row.admin_user_id, staffCode: row.staff_code }
+      const person = {
+        id: row.id, adminUserId: row.admin_user_id, staffCode: row.staff_code,
+        dingTalkUserId: row.dingtalk_user_id, team: row.team, employmentStartDate: row.employment_start_date,
+      }
       if (hasCyDingTalkAutoConfirmException(person, period) || hasJzDingTalkAutoConfirmException(person, period)) approvedMappingExceptions++
+      else if (hasManualEntryOnlyAttendancePolicy(person, today)) approvedManualEntryPeople++
     }
   }
   const activePeople = people.length
-  const missingRequiredMappings = activePeople - mappedPeople - approvedMappingExceptions
-  const currentGroupAssignments = currentGroupResponse.count || 0
+  const missingRequiredMappings = effectiveActivePeople - mappedPeople - approvedMappingExceptions - approvedManualEntryPeople
+  const currentGroupAssignments = groups.length
+  const peopleById = new Map(people.map(row => [row.id, row]))
+  const groupPersonIds = new Set<string>()
+  let groupHistoryMismatch = currentGroupAssignments !== activePeople
+  for (const row of groups) {
+    if (!row || typeof row.person_id !== "string" || !row.person_id || groupPersonIds.has(row.person_id) ||
+        !["BT", "BS", "AC"].includes(row.team) || !validDate(row.effective_from) || row.effective_to !== null) {
+      throw new Error("Current attendance group inventory could not be verified")
+    }
+    groupPersonIds.add(row.person_id)
+    const person = peopleById.get(row.person_id)
+    const requiredFrom = person?.employment_start_date && person.employment_start_date > today
+      ? person.employment_start_date : today
+    if (!person || row.team !== person.team || row.effective_from > requiredFrom) groupHistoryMismatch = true
+  }
   const latest = latestResponse.data
   const startedAt = latest?.started_at ? Date.parse(latest.started_at) : 0
   const ageMinutes = startedAt
@@ -1407,10 +1448,11 @@ async function checkAttendanceSync(): Promise<HealthCheckResult> {
   const warnings: string[] = []
   if (!configured) warnings.push("DingTalk credentials are not configured")
   if (!activePeople) warnings.push("no active attendance people are configured")
+  if (employmentEndedPeople) warnings.push(`${employmentEndedPeople} active registry people have ended employment`)
   if (incompleteMappings) {
     warnings.push(`${missingRequiredMappings} active people need a DingTalk user mapping`)
   }
-  if (currentGroupAssignments !== activePeople) {
+  if (groupHistoryMismatch) {
     warnings.push("active attendance people and current group history do not match")
   }
   if (configured && mappedPeople && !latest) warnings.push("the automatic sync has not run yet")
@@ -1421,12 +1463,16 @@ async function checkAttendanceSync(): Promise<HealthCheckResult> {
     status: warnings.length ? "warning" : "ok",
     message: warnings.length
       ? `Attendance sync needs attention: ${warnings.join("; ")}`
-      : "Attendance sync is configured, current, and covers every active mapped person",
+      : "Attendance sync is configured and current; every person active today is mapped or covered by an approved attendance policy",
     details: {
       configured,
       activePeople,
+      effectiveActivePeople,
+      futureStarters,
+      employmentEndedPeople,
       mappedPeople,
       approvedMappingExceptions,
+      approvedManualEntryPeople,
       missingRequiredMappings,
       currentGroupAssignments,
       latestStatus,

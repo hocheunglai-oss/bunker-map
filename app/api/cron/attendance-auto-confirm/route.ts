@@ -8,6 +8,7 @@ import {
 import { requeryAttendanceMonthForAutoConfirmation } from "@/lib/attendanceSync"
 import { previousMonthPeriod } from "@/lib/attendanceMonthEnd"
 import { hasCyDingTalkAutoConfirmException, hasJzDingTalkAutoConfirmException } from "@/lib/attendanceAutoConfirmPolicy"
+import { hasManualEntryOnlyAttendancePolicyForPeriod } from "@/lib/attendanceManualEntryPolicy"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -34,6 +35,7 @@ export async function GET(request: Request) {
     const linkedPeople = periodPeople
       .filter((person) => person.dingTalkUserId?.trim())
     const ordinaryPeople = linkedPeople
+      .filter((person) => !hasManualEntryOnlyAttendancePolicyForPeriod(person, period))
       .filter((person) => !hasCyDingTalkAutoConfirmException(person, period))
       .filter((person) => !hasJzDingTalkAutoConfirmException(person, period))
       .map((person) => ({ id: person.id, dingtalkUserId: person.dingTalkUserId!.trim() }))

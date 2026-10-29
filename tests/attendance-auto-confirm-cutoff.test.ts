@@ -79,6 +79,43 @@ const historicalSyncs = coverageBoundaries.slice(0, -1).map((from, index) => {
   }
 })
 
+const manualEntryPeople = [
+  {
+    ...person, id: "4c5d73e6-63a9-4b05-93a7-7354b3e668ad",
+    admin_user_id: "84bb808c-e188-43ce-9ddf-e7e2fe2e997d", staff_code: "NN",
+    dingtalk_user_id: null, employment_start_date: "2026-11-02",
+  },
+  {
+    ...person, id: "96142f45-373f-47e2-9104-e33804f2fb1e",
+    admin_user_id: "7c2f5a90-09ae-4d3b-9996-d189f0154d53", staff_code: "TL",
+    dingtalk_user_id: null, employment_start_date: "2026-11-02",
+  },
+]
+const manualNovemberNow = new Date("2026-12-03T10:00:29.000Z")
+const novemberCoverageBoundaries = [
+  "2026-10-31T16:00:00.000Z", "2026-11-06T16:00:00.000Z", "2026-11-12T16:00:00.000Z",
+  "2026-11-18T16:00:00.000Z", "2026-11-24T16:00:00.000Z", "2026-11-30T16:00:00.000Z",
+]
+
+function manualNovemberInput(people: Row[] = manualEntryPeople) {
+  return {
+    people: people.map(value => ({ ...value })),
+    assignments: people.map(value => ({ ...assignment, person_id: value.id,
+      effective_from: value.employment_start_date })),
+    reminders: people.map(value => ({ ...reminder, person_id: value.id, month: 11 })),
+    confirmations: people.map(value => ({ ...pending, id: `pending-${value.id}`,
+      person_id: value.id, month: 11, updated_at: "2026-12-03T09:00:00.000Z" })),
+    syncHistory: novemberCoverageBoundaries.slice(0, -1).map((from, index) => ({
+      ...successfulSync, id: `november-${index}`, window_from: from,
+      window_to: novemberCoverageBoundaries[index + 1],
+      started_at: new Date(Date.parse("2026-12-03T10:00:01.000Z") + index * 2_000).toISOString(),
+      completed_at: new Date(Date.parse("2026-12-03T10:00:02.000Z") + index * 2_000).toISOString(),
+    })),
+    sync: null,
+    expectedCutoff: "2026-12-03T10:00:00.000Z",
+  }
+}
+
 function fakeClient(input: {
   people?: Row[]
   assignments?: Row[]
@@ -864,4 +901,56 @@ test("a fresh snapshot rejects JZ tuple, link, reminder or policy-source changes
       index === 0 ? /no DingTalk identity/ : { name: "AttendanceSourceChangedError" })
     assert.deepEqual(app.writes, [])
   }
+})
+
+test("approved NN/TL manual-entry statements are never automatically approved in any scope", async () => {
+  for (const scope of ["all", "ordinary", "cyDingTalkException", "jzDingTalkException"] as const) {
+    const app = fakeClient(manualNovemberInput())
+    const before = structuredClone(app.tables)
+    const result = await autoConfirmOverdueAttendance(app.client, manualNovemberNow, undefined, scope)
+    assert.equal(result.systemConfirmed, 0)
+    assert.deepEqual(app.writes, [])
+    assert.deepEqual(app.tables, before, "manual reminders and pending reviews must stay untouched")
+    assert.equal(app.readTables.includes("attendance_sync_runs"), false)
+  }
+})
+
+test("manual-entry people do not block an ordinary colleague's fully verified confirmation", async () => {
+  for (const scope of ["all", "ordinary"] as const) {
+    const app = fakeClient(manualNovemberInput([person, ...manualEntryPeople]))
+    const manualPending = structuredClone(app.tables.attendance_monthly_confirmations.slice(1))
+    const reminders = structuredClone(app.tables.attendance_reminder_dispatches)
+    assert.equal((await autoConfirmOverdueAttendance(app.client, manualNovemberNow, undefined, scope)).systemConfirmed, 1)
+    assert.deepEqual(app.writes.map(value => value.person_id), [person.id])
+    assert.equal(app.writes[0].confirmed_by, "system:attendance-auto-confirm")
+    assert.deepEqual(app.tables.attendance_monthly_confirmations.slice(1), manualPending)
+    assert.deepEqual(app.tables.attendance_reminder_dispatches, reminders)
+  }
+})
+
+test("later DingTalk linkage cannot retroactively auto-approve NN/TL manual statements", async () => {
+  const linkedPeople = manualEntryPeople.map(value => ({ ...value, dingtalk_user_id: `new-${value.staff_code}` }))
+  const app = fakeClient(manualNovemberInput([person, ...linkedPeople]))
+  const manualPending = structuredClone(app.tables.attendance_monthly_confirmations.slice(1))
+  assert.equal((await autoConfirmOverdueAttendance(app.client, manualNovemberNow)).systemConfirmed, 1)
+  assert.deepEqual(app.writes.map(value => value.person_id), [person.id])
+  assert.deepEqual(app.tables.attendance_monthly_confirmations.slice(1), manualPending)
+})
+
+test("a changed manual-entry identity, group or join date retains the ordinary missing-ID guard", async () => {
+  for (const approved of manualEntryPeople) {
+    for (const change of [{ id: "reassigned-person" }, { admin_user_id: "reassigned-account" },
+      { admin_user_id: null }, { staff_code: "OTHER" }, { team: "AC" },
+      { employment_start_date: "2026-11-03" }]) {
+      const app = fakeClient(manualNovemberInput([person, { ...approved, ...change }]))
+      await assert.rejects(autoConfirmOverdueAttendance(app.client, manualNovemberNow), /no DingTalk identity/)
+      assert.deepEqual(app.writes, [], "identity drift must fail before any batch writes")
+    }
+  }
+})
+
+test("another unmapped person cannot inherit NN/TL's manual-entry policy", async () => {
+  const app = fakeClient(manualNovemberInput([...manualEntryPeople, { ...person, dingtalk_user_id: null }]))
+  await assert.rejects(autoConfirmOverdueAttendance(app.client, manualNovemberNow), /no DingTalk identity/)
+  assert.deepEqual(app.writes, [])
 })
