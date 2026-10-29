@@ -111,7 +111,7 @@ jobs:
           import assert from "node:assert/strict"
           import {readFileSync} from "node:fs"
           const text=readFileSync("postgres-fixed-export-tests.tap","utf8")
-          for(const [name,expected] of [["tests",256],["pass",256],["fail",0],["cancelled",0],["skipped",0]]){
+          for(const [name,expected] of [["tests",272],["pass",272],["fail",0],["cancelled",0],["skipped",0]]){
             const values=[...text.matchAll(new RegExp("^# "+name+" (\\d+)","gm"))]
             assert.equal(Number(values.at(-1)?.[1]),expected,name)
           }

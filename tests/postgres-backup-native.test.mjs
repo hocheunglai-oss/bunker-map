@@ -236,6 +236,40 @@ test("real PG17 TLS export, signed streaming decode and isolated restore preserv
       GRANT USAGE ON TYPE public.acl_color TO fixture_recipient;
       REVOKE ALL ON TYPE public.acl_color FROM PUBLIC;
       GRANT USAGE ON TYPE public.acl_color TO PUBLIC;`)
+    // pg_dump also omits an explicit ACL equal to PostgreSQL's hard-wired
+    // default. A simple GRANT then REVOKE leaves that representation behind.
+    // Keep bootstrap/database/object owners distinct and prove quoted names
+    // against native acldefault(), not a test copy of the comparison formula.
+    await sql(clusters[0], `GRANT USAGE ON SCHEMA auth TO fixture_recipient;
+      REVOKE USAGE ON SCHEMA auth FROM fixture_recipient;
+      GRANT SELECT ON auth.fixture_users TO fixture_recipient;
+      REVOKE SELECT ON auth.fixture_users FROM fixture_recipient;`)
+    const defaultOwners = ["fixture_default_owner", "MixedCase", "123name", "select", "NULL", "space owner", "slash/equals=owner", 'double"quote', "back\\slash", "香港owner", "braces{},comma", "single'quote"]
+    const quoteIdentifier = value => `"${value.replaceAll('"', '""')}"`
+    for (const [index, owner] of defaultOwners.entries()) {
+      const role = quoteIdentifier(owner), schema = `default_acl_${index}`
+      await sql(clusters[0], `CREATE ROLE ${role} NOLOGIN;
+        CREATE SCHEMA ${schema} AUTHORIZATION ${role};
+        CREATE VIEW ${schema}.example AS SELECT 1 AS id;
+        ALTER VIEW ${schema}.example OWNER TO ${role};
+        CREATE SEQUENCE ${schema}.example_sequence;
+        ALTER SEQUENCE ${schema}.example_sequence OWNER TO ${role};
+        GRANT ALL ON SCHEMA ${schema} TO ${role};
+        GRANT ALL ON ${schema}.example TO ${role};
+        GRANT ALL ON SEQUENCE ${schema}.example_sequence TO ${role};`)
+      const nativeDefaults = JSON.parse(await sql(clusters[0], `SELECT json_build_object(
+        'schema',(SELECT acldefault('n',nspowner)::text FROM pg_namespace WHERE nspname='${schema}'),
+        'relation',(SELECT acldefault('r',relowner)::text FROM pg_class WHERE oid='${schema}.example'::regclass),
+        'sequence',(SELECT acldefault('s',relowner)::text FROM pg_class WHERE oid='${schema}.example_sequence'::regclass),
+        'actualSchema',(SELECT nspacl::text FROM pg_namespace WHERE nspname='${schema}'),
+        'actualRelation',(SELECT relacl::text FROM pg_class WHERE oid='${schema}.example'::regclass),
+        'actualSequence',(SELECT relacl::text FROM pg_class WHERE oid='${schema}.example_sequence'::regclass));`))
+      // The full production recovery verifier below must accept all these
+      // native defaults after pg_dump restores their ACL columns as NULL.
+      assert.equal(nativeDefaults.actualSchema, nativeDefaults.schema)
+      assert.equal(nativeDefaults.actualRelation, nativeDefaults.relation)
+      assert.equal(nativeDefaults.actualSequence, nativeDefaults.sequence)
+    }
     const cloudExport = await open(context), cloudParts = []; let cloudMetadata, cloudComplete
     for await (const item of decodePostgresExport(cloudExport.bytes, publicKey, context)) {
       if (item.type === "metadata") cloudMetadata = item.metadata

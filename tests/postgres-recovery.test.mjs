@@ -17,6 +17,7 @@ import { requirePostgresRecoveryBuildRuntime, createMetadataAccessTokenProvider 
 import { validateOfflineRecoveryResult } from "../lib/postgresRecoveryEvidence.mjs"
 import { RECOVERY_CATALOG_KEYS, validateRecoveryCatalog } from "../lib/postgresRecoveryCatalog.mjs"
 import { equivalentRecoveryColumns } from "../lib/postgresRecoveryColumns.mjs"
+import { equivalentRecoverySchemas, equivalentRecoveryAclSection } from "../lib/postgresRecoveryAcl.mjs"
 import { POSTGRES_BACKUP_PROTOCOL } from "../lib/postgresBackupProtocol.mjs"
 import { main as backupMain } from "../scripts/backup-postgres-to-gcs.mjs"
 
@@ -162,6 +163,146 @@ test("catalog diagnostics contain only twelve fixed section counts and equality 
   assert.equal(trace.snapshot().catalog.length, 12)
   assert.deepEqual(trace.snapshot().catalog.find(value => value.section === "columns"), { section: "columns", expectedCount: 1, actualCount: 1, equal: false })
   assert.doesNotMatch(JSON.stringify(trace.snapshot()), /publish|secret|privateSql/)
+})
+
+test("catalog failure details classify field types and ACL changes without retaining private data", async () => {
+  const expected = Object.fromEntries(RECOVERY_CATALOG_KEYS.map(key => [key, []])), actual = structuredClone(expected)
+  expected.schemas = [
+    { name: "PRIVATE_SCHEMA", owner: "PRIVATE_OWNER", acl: "{a=U/b,c=U/b}", comment: null },
+    { name: "PRIVATE_SCHEMA_2", owner: "PRIVATE_OWNER", acl: "{a=U/b}", comment: "PRIVATE_COMMENT" },
+    { name: "PRIVATE_SCHEMA_3", owner: "PRIVATE_OWNER", acl: null, comment: null },
+    { name: "PRIVATE_SCHEMA_4", owner: "PRIVATE_OWNER", acl: "{a=U/b,a=U/b}", comment: null },
+    { name: "PRIVATE_SCHEMA_5", owner: "PRIVATE_OWNER", acl: "{PRIVATE_INVALID", comment: null },
+  ]
+  actual.schemas = structuredClone(expected.schemas)
+  actual.schemas[0].owner = "PRIVATE_NEW_OWNER"; actual.schemas[0].acl = "{c=U/b,a=U/b}"
+  actual.schemas[1].acl = null; delete actual.schemas[1].comment
+  actual.schemas[2].acl = "{}"; actual.schemas[2].PRIVATE_DYNAMIC_FIELD = "PRIVATE_SQL"
+  actual.schemas[3].acl = "{a=U/b,c=U/b}"; actual.schemas[4].acl = "{}"
+  expected.relations = [{ schema: "PRIVATE_SCHEMA", name: "PRIVATE_TABLE", kind: "r", owner: "PRIVATE_OWNER", acl: null, rls: true, force_rls: false, options: ["PRIVATE_OPTION"], comment: null }]
+  actual.relations = structuredClone(expected.relations); actual.relations[0].rls = false; actual.relations[0].options = null
+  const before = JSON.stringify([expected, actual]), trace = createRecoveryDiagnostics({ now })
+  await trace.catalog(expected, actual, (a, b, key) => key === "schemas" ? equivalentRecoverySchemas(a, b) :
+    key === "relations" ? equivalentRecoveryAclSection(a, b, key) : JSON.stringify(a) === JSON.stringify(b))
+  await trace.failed()
+  const report = trace.snapshot(), schema = report.catalogDifferences.find(item => item.section === "schemas")
+  assert.equal(report.schema, "fcuno.private-recovery-diagnostic/v2"); assert.equal(schema.alignment, "array-position")
+  assert.equal(schema.rowsCompared, 5); assert.equal(schema.unknownFieldRows, 1)
+  const acl = schema.fields.find(item => item.field === "acl")
+  assert.equal(acl.typeMismatch, 2); assert.equal(acl.stringMismatch, 3)
+  assert.deepEqual(acl.acl, { nullToValue: 1, valueToNull: 1, equivalent: 1, changed: 1, invalid: 1, missingEntries: 1, extraEntries: 1 })
+  assert.equal(schema.fields.find(item => item.field === "owner").stringMismatch, 1)
+  assert.equal(schema.fields.find(item => item.field === "comment").missingActual, 1)
+  const relation = report.catalogDifferences.find(item => item.section === "relations")
+  assert.equal(relation.fields.find(item => item.field === "rls").otherMismatch, 1)
+  assert.equal(relation.fields.find(item => item.field === "options").typeMismatch, 1)
+  assert.doesNotMatch(JSON.stringify(report), /PRIVATE|=U\/b|c=U|SQL/)
+  assert.equal(JSON.stringify([expected, actual]), before)
+})
+
+test("catalog detail has a closed v2 schema while old v1 diagnostics remain readable", async () => {
+  const expected = Object.fromEntries(RECOVERY_CATALOG_KEYS.map(key => [key, []])), actual = structuredClone(expected)
+  expected.schemas = [{ name: "private", owner: "one", acl: "{a=U/b}", comment: null }]
+  actual.schemas = [{ name: "private", owner: "two", acl: null, comment: null }]
+  const trace = createRecoveryDiagnostics({ now }); await trace.catalog(expected, actual, (a, b) => JSON.stringify(a) === JSON.stringify(b)); await trace.failed()
+  const valid = trace.snapshot(); assert.equal(validateRecoveryDiagnostic(valid), valid)
+  for (const change of [
+    v => { v.catalogDifferences[0].section = "PRIVATE_SCHEMA" },
+    v => { v.catalogDifferences[0].alignment = "PRIVATE_SQL" },
+    v => { v.catalogDifferences[0].fields[0].field = "PRIVATE_NAME" },
+    v => { v.catalogDifferences[0].fields[0].value = "PRIVATE_VALUE" },
+    v => { v.catalogDifferences[0].fields[0].stringMismatch = "PRIVATE_SQL" },
+    v => { v.catalogDifferences[0].fields[0].stringMismatch = 100001 },
+    v => { v.catalogDifferences[0].fields[0].otherMismatch = 1 },
+    v => { v.catalogDifferences[0].fields[0].acl = {} },
+    v => { v.catalogDifferences[0].fields.find(item => item.field === "acl").acl.valueToNull = 0 },
+    v => { v.catalogDifferences[0].fields.find(item => item.field === "acl").acl.missingEntries = 10000000001 },
+    v => { v.catalogDifferences[0].fields.push(v.catalogDifferences[0].fields[0]) },
+    v => { v.catalogDifferences.push(v.catalogDifferences[0]) },
+    v => { v.catalogDifferences[0].rowsCompared = 0 },
+    v => { v.catalogDifferences[0].truncated = "PRIVATE" },
+    v => { v.catalog[0].equal = true },
+    v => { v.status = "complete"; v.stage = "complete" },
+  ]) { const value = structuredClone(valid); change(value); assert.throws(() => validateRecoveryDiagnostic(value)) }
+  const legacy = structuredClone(valid); legacy.schema = "fcuno.private-recovery-diagnostic/v1"; delete legacy.catalogDifferences
+  assert.equal(validateRecoveryDiagnostic(legacy), legacy)
+  assert.throws(() => validateRecoveryDiagnostic({ ...legacy, catalogDifferences: [] }))
+  assert.throws(() => validateRecoveryDiagnostic({ ...valid, schema: "fcuno.private-recovery-diagnostic/v3" }))
+})
+
+test("all catalog sections use bounded known-field aggregates with explicit truncation", async () => {
+  const keys = ["name", "owner", "acl", "comment", "schema", "kind", "rls", "force_rls", "options", "relation", "position", "type", "not_null", "identity", "generated", "storage", "compression", "default", "collation", "collation_schema", "validated", "deferrable", "deferred", "definition", "valid", "ready", "enabled", "permissive", "roles", "cmd", "qual", "with_check", "start", "increment", "max", "min", "cache", "cycle", "base_type", "enum_values", "extension", "config", "condition"]
+  const expected = {}, actual = {}
+  for (const section of RECOVERY_CATALOG_KEYS) {
+    expected[section] = [Object.fromEntries(keys.map(field => [field, field === "acl" ? "{PRIVATE_SOURCE=U/PRIVATE_OWNER}" : "PRIVATE_SOURCE"]))]
+    actual[section] = [Object.fromEntries(keys.map(field => [field, field === "acl" ? "{PRIVATE_TARGET=U/PRIVATE_OWNER}" : "PRIVATE_TARGET"]))]
+  }
+  const trace = createRecoveryDiagnostics({ now }); await trace.catalog(expected, actual, () => false); await trace.failed()
+  const report = trace.snapshot()
+  assert.deepEqual(report.catalogDifferences.map(item => item.section), RECOVERY_CATALOG_KEYS)
+  assert.equal(report.catalogDifferences.reduce((sum, item) => sum + item.fields.length, 0), 24)
+  assert.ok(report.catalogDifferences.some(item => item.truncated))
+  assert.doesNotMatch(JSON.stringify(report), /PRIVATE_SOURCE|PRIVATE_TARGET|PRIVATE_OWNER|=U/)
+  assert.ok(Buffer.byteLength(JSON.stringify(report)) < 12288)
+  // A maximum-count report still leaves room for pinned failure-envelope data.
+  for (const item of report.catalog) { item.expectedCount = 100000; item.actualCount = 100000 }
+  for (const detail of report.catalogDifferences) {
+    detail.rowsCompared = 100000; detail.unknownFieldRows = 100000
+    for (const entry of detail.fields) {
+      entry.stringMismatch = 100000
+      if (entry.acl) { entry.acl.changed = 100000; entry.acl.missingEntries = 10000000000; entry.acl.extraEntries = 10000000000 }
+    }
+  }
+  validateRecoveryDiagnostic(report); assert.ok(Buffer.byteLength(JSON.stringify(report)) < 12288)
+  const largestDescriptor = structuredClone(manifestReceipt)
+  largestDescriptor.target.objectName = `${pins.postgresBackup.targetPrefix}/runs/${"x".repeat(80)}/manifest.json`
+  largestDescriptor.target.generation = "9".repeat(20)
+  const failureEnvelope = { schema: "fcuno.postgresql-recovery-failure/v1", status: "cloud-isolated-recovery-failed", recoveryVerified: false,
+    manifest: largestDescriptor, build: { projectId: pins.storageMediaBackup.googleProjectId, id: runtime.FCUNO_POSTGRES_RECOVERY_BUILD_ID, sourceCommit: "f".repeat(40) },
+    hostReadStatus: "invalid-json", host: null, diagnostic: report }
+  assert.ok(Buffer.byteLength(JSON.stringify(failureEnvelope)) < 16384)
+})
+
+test("detailed v2 failure survives real private-file preflight and verified failure-only publication", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "fcuno-v2-failure-"))
+  const pubRuntime = { ...runtime, FCUNO_RECOVERY_SOURCE_COMMIT: "f".repeat(40), POSTGRES_BACKUP_VERIFICATION_KEY_PEM: publicPem }
+  const plan = { buildId: runtime.FCUNO_POSTGRES_RECOVERY_BUILD_ID, sourceCommit: pubRuntime.FCUNO_RECOVERY_SOURCE_COMMIT,
+    manifest: manifestReceipt, verificationKeySha256: sha(Buffer.from(publicPem)) }
+  const expected = Object.fromEntries(RECOVERY_CATALOG_KEYS.map(key => [key, []])), actual = structuredClone(expected)
+  expected.schemas = [{ name: "PRIVATE_SCHEMA", owner: "PRIVATE_OWNER", acl: "{PRIVATE_OWNER=UC/PRIVATE_OWNER}", comment: null }]
+  actual.schemas = [{ ...expected.schemas[0], acl: null }]
+  const trace = createRecoveryDiagnostics({ now }); await trace.stage("verify-catalog"); await trace.catalog(expected, actual, (a, b) => JSON.stringify(a) === JSON.stringify(b)); await trace.failed(); await trace.cleanup("ok")
+  try {
+    await mkdir(join(directory, "input")); await mkdir(join(directory, "output"))
+    await writeFile(join(directory, "plan.json"), JSON.stringify(plan), { mode: 0o600 })
+    await writeFile(join(directory, "input/manifest.json"), manifestBytes, { mode: 0o600 })
+    await writeFile(join(directory, "host-outcome.json"), JSON.stringify({ schema: "fcuno.private-recovery-host-outcome/v1", dockerRunExitCode: 1,
+      state: { Status: "exited", Running: false, ExitCode: 1, OOMKilled: false } }), { mode: 0o600 })
+    await writeFile(join(directory, "output/diagnostic.json"), JSON.stringify(trace.snapshot()), { mode: 0o600 })
+    const input = await readRecoveryPublicationInputs({ workspace: directory, runtime: pubRuntime, descriptor: manifestReceipt, publicKey })
+    assert.deepEqual(input.diagnostic, trace.snapshot()); assert.equal(recoveryPublicationFailed(input), true)
+    let bytes, receipt, acceptanceWrites = 0
+    const gcs = { uploadImmutable: async () => { acceptanceWrites++ }, uploadRecoveryFailure: async value => {
+      bytes = value.bytes; receipt = { target: { ...manifestReceipt.target, objectName: manifestReceipt.target.objectName.replace("manifest.json", `failures/${plan.buildId}.json`), generation: "123" }, sizeBytes: bytes.length, crc32c: crc(bytes) }; return receipt
+    }, readTarget: async () => ({ ...receipt, bytes: (async function* () { yield bytes })() }), inspectTarget: async () => receipt }
+    const stages = createRecoveryControllerStages()
+    await assert.rejects(recordRecoveryFailureAndReject({ gcs, context: context(), ...input, host: input.hostOutcome, stage: stages.enter }))
+    assert.equal(stages.exitCode(), 46); assert.equal(acceptanceWrites, 0); assert.ok(bytes.length < 16384)
+    assert.doesNotMatch(bytes.toString(), /PRIVATE_SCHEMA|PRIVATE_OWNER|=UC/)
+    assert.equal(JSON.parse(bytes).diagnostic.catalogDifferences[0].fields[0].acl.valueToNull, 1)
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test("diagnostic v2 adds no failure details to unchanged or semantically equal successful catalog", async () => {
+  const expected = Object.fromEntries(RECOVERY_CATALOG_KEYS.map(key => [key, []])), actual = structuredClone(expected)
+  expected.schemas = [{ name: "private", owner: "owner", acl: "{a=U/b,c=U/b}", comment: null }]
+  actual.schemas = [{ ...expected.schemas[0], acl: "{c=U/b,a=U/b}" }]
+  const trace = createRecoveryDiagnostics({ now })
+  await trace.catalog(expected, actual, (a, b, section) => section === "schemas" ? equivalentRecoverySchemas(a, b) : JSON.stringify(a) === JSON.stringify(b))
+  await trace.cleanup("ok"); await trace.complete()
+  assert.deepEqual(trace.snapshot().catalogDifferences, []); assert.ok(trace.snapshot().catalog.every(item => item.equal))
+  assert.equal(recoveryFailure({ host: { schema: "fcuno.private-recovery-host-outcome/v1", dockerRunExitCode: 0,
+    state: { Status: "exited", Running: false, ExitCode: 0, OOMKilled: false } }, diagnostic: trace.snapshot() }), false)
 })
 
 test("native stderr hints are bounded heuristic enums and cannot publish private text", () => {
