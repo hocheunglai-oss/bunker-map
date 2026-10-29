@@ -9,6 +9,7 @@ import * as attendanceSchema from "../lib/backupAttendanceSchema.mjs"
 import * as mediaHealth from "../lib/storageMediaBackupHealthService.ts"
 import * as mediaSource from "../lib/storageMediaBackupSource.ts"
 import * as attendanceExceptions from "../lib/attendanceAutoConfirmPolicy.ts"
+import * as attendanceManualEntry from "../lib/attendanceManualEntryPolicy.ts"
 import * as attendanceRules from "../lib/attendanceRules.ts"
 import * as recoveryAcceptance from "../lib/postgresRecoveryAcceptance.mjs"
 import * as backupReceipt from "../lib/postgresBackupReceipt.mjs"
@@ -80,6 +81,7 @@ function actualFileHealth(activeFiles, manifests, now, observer) {
     "@/lib/storageMediaBackupHealthService": mediaHealth, "@/lib/storageMediaBackupSource": mediaSource,
     "@/config/fcunoConnections": config,
     "@/lib/attendanceAutoConfirmPolicy": attendanceExceptions, "@/lib/attendanceRules": attendanceRules,
+    "@/lib/attendanceManualEntryPolicy": attendanceManualEntry,
     "@/lib/postgresBackupMaintenance": backupMaintenance,
   }
   const loaded = { exports: {} }

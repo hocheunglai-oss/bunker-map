@@ -11,6 +11,7 @@ import * as mediaHealth from "../lib/storageMediaBackupHealthService"
 import * as mediaSource from "../lib/storageMediaBackupSource"
 import * as connections from "../config/fcunoConnections"
 import * as attendanceExceptions from "../lib/attendanceAutoConfirmPolicy"
+import * as attendanceManualEntry from "../lib/attendanceManualEntryPolicy"
 import * as attendanceRules from "../lib/attendanceRules"
 import type { HealthCheckResult, SystemHealth } from "../lib/systemHealth"
 import * as backupMaintenance from "../lib/postgresBackupMaintenance"
@@ -44,6 +45,7 @@ function fixture(options: { active?: boolean; driveError?: boolean; verified?: R
     "@/lib/storageMediaBackupHealthService": mediaHealth, "@/lib/storageMediaBackupSource": mediaSource,
     "@/config/fcunoConnections": connections,
     "@/lib/attendanceAutoConfirmPolicy": attendanceExceptions, "@/lib/attendanceRules": attendanceRules,
+    "@/lib/attendanceManualEntryPolicy": attendanceManualEntry,
     "@/lib/postgresBackupMaintenance": backupMaintenance,
   }
   const loaded = { exports: {} as { getSystemHealth(options?: { backupGapObserver?: policy.BackupGapObserver }): Promise<SystemHealth>; fixture: {

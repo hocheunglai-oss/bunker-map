@@ -1,6 +1,7 @@
 import "server-only"
 
 import { randomUUID } from "node:crypto"
+import { fcunoConnectionPolicy } from "@/config/fcunoConnections"
 import { attendanceBackupSchemaFromInventory, attendanceBackupSchemaVersion } from "@/lib/backupAttendanceSchema.mjs"
 import { DINGTALK_ATTENDANCE_MAX_USERS } from "@/lib/dingTalkAttendance"
 import { DINGTALK_ATTENDANCE_IMPORT_CUTOFF } from "@/lib/attendanceSyncRecords"
@@ -24,6 +25,7 @@ import {
   JZ_DINGTALK_EXCEPTION_NOTE,
   hasJzDingTalkAutoConfirmException,
 } from "@/lib/attendanceAutoConfirmPolicy"
+import { hasManualEntryOnlyAttendancePolicyForPeriod } from "@/lib/attendanceManualEntryPolicy"
 import {
   loadAttendanceCalendarContext,
   sortAttendancePeople,
@@ -2716,8 +2718,24 @@ export function buildAttendanceSecondReminderEmail(input: {
   displayName: string
   year: number
   month: number
+  manualEntryOnly?: boolean
 }) {
   const monthLabel = attendanceMonthLabel(input.year, input.month)
+  if (input.manualEntryOnly) {
+    return {
+      subject: `***** Attendance Confirmation Reminder - ${monthLabel}`,
+      html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;color:#10243a;background:#ffffff;padding:16px;line-height:1.45">
+        <p style="margin:0 0 10px">Hello ${escapeHtml(input.displayName)},</p>
+        <p style="margin:0 0 10px">Please review and confirm your attendance record for <strong>${escapeHtml(monthLabel)}</strong>.</p>
+        <p style="margin:0 0 10px"><strong>Instruction:</strong> Open Attendance Record using the link below, select <strong>MONTHLY STATEMENT</strong>, review the month and click <strong>CONFIRM</strong> when the entries are accurate.</p>
+        <p style="margin:0 0 10px">This is a manual-entry attendance period. Unconfirmed records will remain pending until you or an authorized administrator reviews and confirms them. They will not be automatically confirmed after a deadline.</p>
+        <p style="margin:0 0 10px">Please contact an administrator directly if any sign-in or sign-out entry is missing or any correction is required. You retain the right to dispute the record.</p>
+        <p style="margin:14px 0 0"><a href="${fcunoConnectionPolicy.vercel.productionOrigins[0]}/admin/attendancerecord" style="color:#0a73c9">Open Attendance Record</a></p>
+      </div>
+    `,
+    }
+  }
   return {
     subject: `***** Attendance Confirmation Reminder - ${monthLabel}`,
     html: `
@@ -2916,7 +2934,8 @@ export async function sendAttendanceSecondReminders(
     const user = usersById.get(person.adminUserId || "")
     const emails = normalizeEmailList(user?.username || "")
     if (!user?.isActive || emails.length !== 1) return []
-    return [{ personId, displayName: user.displayName || person.displayName, email: emails[0] }]
+    return [{ personId, displayName: user.displayName || person.displayName, email: emails[0],
+      manualEntryOnly: hasManualEntryOnlyAttendancePolicyForPeriod(person, period) }]
   })
 
   const results: Array<"sent" | "failed" | "already-sent"> = []
@@ -2929,7 +2948,9 @@ export async function sendAttendanceSecondReminders(
     if (pending.error?.code === "23505") { results.push("already-sent"); continue }
     throwIfError(pending.error, "Could not record a second attendance reminder.")
     const dispatchId = String(asRow(pending.data).id || "")
-    const email = buildAttendanceSecondReminderEmail({ displayName: target.displayName, ...period })
+    const email = buildAttendanceSecondReminderEmail({
+      displayName: target.displayName, manualEntryOnly: target.manualEntryOnly, ...period,
+    })
     let messageId: string
     try {
       const sent = await sendNoticeEmail({ to: [target.email], subject: email.subject, html: email.html })
@@ -3163,6 +3184,10 @@ async function loadAutoConfirmSnapshot(
       const person = eligiblePeople.get(personId)
       if (!person || seen.has(personId)) continue
       seen.add(personId)
+      // Manual-entry onboarding requires genuine review, not a system
+      // approval. Exclude it in every scope before the ordinary missing-ID
+      // guard, without suppressing reminders or blocking other staff.
+      if (hasManualEntryOnlyAttendancePolicyForPeriod(person, period)) continue
       const existing = byPerson.get(personId)
       const updatedAt = existing ? stringOrNull(existing.updated_at) : null
       // A review reopened after the original deadline must stay open. The
