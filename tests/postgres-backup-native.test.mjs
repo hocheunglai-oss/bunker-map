@@ -12,8 +12,11 @@ import { createFixedNativeExporter, createNativeChild, fixedDumpArguments, fixed
 import { decodePostgresExport } from "../lib/postgresBackupProtocol.mjs"
 import { createPostgresBackupHandler, POSTGRES_BACKUP_URL } from "../lib/postgresBackupCapability.mjs"
 import { fcunoConnectionPolicy } from "../config/fcunoConnections.ts"
-import { runOfflineRecovery } from "../scripts/postgres-recovery/offline.mjs"
+import { runOfflineRecovery, buildRecoveryRoleSettingSql } from "../scripts/postgres-recovery/offline.mjs"
 import { POSTGRES_RECEIPT_SCHEMA } from "../lib/postgresBackupReceipt.mjs"
+import { RECOVERY_CATALOG_EXPRESSION } from "../lib/postgresRecoveryCatalog.mjs"
+import { equivalentRecoveryColumns } from "../lib/postgresRecoveryColumns.mjs"
+import { buildMissingSchemaAclReplay } from "../lib/postgresRecoveryAcl.mjs"
 
 const exec = promisify(execFile), hash = bytes => createHash("sha256").update(bytes).digest("hex")
 const bin = process.env.NATIVE_PG_BIN
@@ -79,7 +82,10 @@ test("real PG17 TLS export, signed streaming decode and isolated restore preserv
       RESET ROLE;
       CREATE ROLE application_user NOLOGIN;
       CREATE SCHEMA auth; CREATE SCHEMA storage;
-      CREATE TABLE public.rows(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, body text NOT NULL, extra jsonb);
+      CREATE TABLE public.rows(removed_leading text, id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        removed_before_body text, body text NOT NULL, removed_before_extra text, extra jsonb, removed_trailing text);
+      ALTER TABLE public.rows DROP COLUMN removed_leading, DROP COLUMN removed_before_body,
+        DROP COLUMN removed_before_extra, DROP COLUMN removed_trailing;
       INSERT INTO public.rows(body,extra) SELECT repeat('synthetic-'||n::text,200), jsonb_build_object('number',n,'unicode','香港') FROM generate_series(1,200) n;
       ALTER TABLE public.rows ENABLE ROW LEVEL SECURITY;
       CREATE POLICY own_rows ON public.rows FOR SELECT TO application_user USING(id > 0);
@@ -181,12 +187,125 @@ test("real PG17 TLS export, signed streaming decode and isolated restore preserv
       'comment',obj_description('public.rows'::regclass,'pg_class'),
       'acl',(select relacl::text from pg_class where oid='public.rows'::regclass));`
     assert.equal(await sql(clusters[1], fingerprint), await sql(clusters[0], fingerprint))
+    const restoredColumns = JSON.parse(await sql(clusters[1], `SELECT ${RECOVERY_CATALOG_EXPRESSION};`)).columns
+    assert.notDeepEqual(metadata.catalog.recovery.columns, restoredColumns, "logical restore compacts dropped physical slots")
+    assert.equal(equivalentRecoveryColumns(metadata.catalog.recovery.columns, restoredColumns), true,
+      "every visible column property and its order must survive the real logical restore")
     assert.equal(await sql(clusters[1], "select rolcanlogin from pg_roles where rolname='application_user'"), "f")
     assert.equal(await sql(clusters[0], "select count(*) from pg_stat_activity where application_name='fcuno-fixed-weekly-export-v1'"), "0")
     // Exercise the SAME native restore/content verifier that runs sealed in
     // Cloud Build. Unsupported matview and LO recovery remain fail-closed;
     // this second synthetic source represents the current supported scope.
     await sql(clusters[0], "DROP MATERIALIZED VIEW public.row_count; SELECT lo_unlink(70001);")
+    // Exact grants can occupy different ACL array positions after pg_dump
+    // omits unchanged defaults. Preserve all grantors/options, including a
+    // delegated chain and role names requiring PostgreSQL array escaping.
+    await sql(clusters[0], `CREATE ROLE fixture_db_owner NOLOGIN; CREATE ROLE fixture_grantor NOLOGIN;
+        CREATE ROLE fixture_recipient NOLOGIN;
+        ALTER DATABASE postgres OWNER TO fixture_db_owner;
+        CREATE SCHEMA acl_fixture AUTHORIZATION fixture_db_owner;
+        SET ROLE fixture_db_owner;
+        GRANT USAGE ON SCHEMA acl_fixture TO fixture_grantor WITH GRANT OPTION;
+        GRANT CONNECT ON DATABASE postgres TO fixture_grantor WITH GRANT OPTION;
+        RESET ROLE; SET ROLE fixture_grantor;
+        GRANT USAGE ON SCHEMA acl_fixture TO fixture_recipient;
+        GRANT CONNECT ON DATABASE postgres TO fixture_recipient;
+        RESET ROLE; SET ROLE fixture_db_owner;
+          REVOKE ALL ON DATABASE postgres FROM PUBLIC;
+          GRANT TEMPORARY,CONNECT ON DATABASE postgres TO PUBLIC;
+          GRANT USAGE ON SCHEMA public TO fixture_grantor WITH GRANT OPTION;
+          REVOKE ALL ON SCHEMA public FROM PUBLIC;
+          GRANT USAGE ON SCHEMA public TO PUBLIC;
+          RESET ROLE; SET ROLE fixture_grantor;
+          GRANT USAGE ON SCHEMA public TO fixture_recipient;
+          RESET ROLE;
+          CREATE ROLE "acl,reader ""quoted"" {} / =\\back" NOLOGIN;
+          SET ROLE fixture_db_owner;
+          GRANT USAGE ON SCHEMA public TO "acl,reader ""quoted"" {} / =\\back";
+          RESET ROLE; SET ROLE fixture_grantor;
+          GRANT CONNECT ON DATABASE postgres TO "acl,reader ""quoted"" {} / =\\back";
+          RESET ROLE;`)
+    // The same default omission can reorder ACLs on every other known ACL
+    // catalog object. Nothing except ACL item order may compare differently.
+    await sql(clusters[0], `GRANT EXECUTE ON FUNCTION public.fixture_answer() TO fixture_recipient;
+      REVOKE ALL ON FUNCTION public.fixture_answer() FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION public.fixture_answer() TO PUBLIC;
+      GRANT SELECT ON TABLE public.rows TO fixture_recipient;
+      REVOKE ALL ON TABLE public.rows FROM fixture_owner;
+      GRANT ALL ON TABLE public.rows TO fixture_owner;
+      CREATE TYPE public.acl_color AS ENUM ('red','green');
+      GRANT USAGE ON TYPE public.acl_color TO fixture_recipient;
+      REVOKE ALL ON TYPE public.acl_color FROM PUBLIC;
+      GRANT USAGE ON TYPE public.acl_color TO PUBLIC;`)
+    // pg_dump also omits an explicit ACL equal to PostgreSQL's hard-wired
+    // default. A simple GRANT then REVOKE leaves that representation behind.
+    // Keep bootstrap/database/object owners distinct and prove quoted names
+    // against native acldefault(), not a test copy of the comparison formula.
+    await sql(clusters[0], `GRANT USAGE ON SCHEMA auth TO fixture_recipient;
+      REVOKE USAGE ON SCHEMA auth FROM fixture_recipient;
+      GRANT SELECT ON auth.fixture_users TO fixture_recipient;
+      REVOKE SELECT ON auth.fixture_users FROM fixture_recipient;`)
+    const defaultOwners = ["fixture_default_owner", "MixedCase", "123name", "select", "NULL", "space owner", "slash/equals=owner", 'double"quote', "back\\slash", "香港owner", "braces{},comma", "single'quote"]
+    const quoteIdentifier = value => `"${value.replaceAll('"', '""')}"`
+    for (const [index, owner] of defaultOwners.entries()) {
+      const role = quoteIdentifier(owner), schema = `default_acl_${index}`
+      await sql(clusters[0], `CREATE ROLE ${role} NOLOGIN;
+        CREATE SCHEMA ${schema} AUTHORIZATION ${role};
+        CREATE VIEW ${schema}.example AS SELECT 1 AS id;
+        ALTER VIEW ${schema}.example OWNER TO ${role};
+        CREATE SEQUENCE ${schema}.example_sequence;
+        ALTER SEQUENCE ${schema}.example_sequence OWNER TO ${role};
+        GRANT ALL ON SCHEMA ${schema} TO ${role};
+        GRANT ALL ON ${schema}.example TO ${role};
+        GRANT ALL ON SEQUENCE ${schema}.example_sequence TO ${role};`)
+      const nativeDefaults = JSON.parse(await sql(clusters[0], `SELECT json_build_object(
+        'schema',(SELECT acldefault('n',nspowner)::text FROM pg_namespace WHERE nspname='${schema}'),
+        'relation',(SELECT acldefault('r',relowner)::text FROM pg_class WHERE oid='${schema}.example'::regclass),
+        'sequence',(SELECT acldefault('s',relowner)::text FROM pg_class WHERE oid='${schema}.example_sequence'::regclass),
+        'actualSchema',(SELECT nspacl::text FROM pg_namespace WHERE nspname='${schema}'),
+        'actualRelation',(SELECT relacl::text FROM pg_class WHERE oid='${schema}.example'::regclass),
+        'actualSequence',(SELECT relacl::text FROM pg_class WHERE oid='${schema}.example_sequence'::regclass));`))
+      // The full production recovery verifier below must accept all these
+      // native defaults after pg_dump restores their ACL columns as NULL.
+      assert.equal(nativeDefaults.actualSchema, nativeDefaults.schema)
+      assert.equal(nativeDefaults.actualRelation, nativeDefaults.relation)
+      assert.equal(nativeDefaults.actualSequence, nativeDefaults.sequence)
+    }
+    // Managed-server initial grants are omitted from pg_dump when identical to
+    // pg_init_privs. Model that ONLY in this disposable synthetic source;
+    // the recovery code must rebuild the signed actual ACL, not ignore it.
+    for (let index = 0; index < defaultOwners.length; index++)
+      await sql(clusters[0], `GRANT USAGE ON SCHEMA default_acl_${index} TO fixture_recipient WITH GRANT OPTION;`)
+    await sql(clusters[0], `GRANT USAGE ON SCHEMA auth TO fixture_grantor WITH GRANT OPTION;
+      REVOKE CREATE ON SCHEMA auth FROM fixture_owner;
+      SET ROLE fixture_grantor; GRANT USAGE ON SCHEMA auth TO fixture_recipient; RESET ROLE;
+      GRANT USAGE,CREATE ON SCHEMA storage TO "slash/equals=owner" WITH GRANT OPTION;
+      SET ROLE "slash/equals=owner"; GRANT USAGE ON SCHEMA storage TO application_user; RESET ROLE;
+      CREATE ROLE "PUBLIC" NOLOGIN; GRANT USAGE ON SCHEMA storage TO "PUBLIC";
+      GRANT USAGE ON SCHEMA storage TO PUBLIC;
+      CREATE SCHEMA empty_initial_acl; REVOKE ALL ON SCHEMA empty_initial_acl FROM fixture_owner;
+      INSERT INTO pg_catalog.pg_init_privs(objoid,classoid,objsubid,privtype,initprivs)
+      SELECT oid,'pg_catalog.pg_namespace'::regclass,0,'i',nspacl
+      FROM pg_catalog.pg_namespace WHERE nspname IN ('auth','storage','empty_initial_acl') OR nspname ~ '^default_acl_[0-9]+$';
+      ALTER DATABASE postgres SET standard_conforming_strings=off;`)
+    assert.equal(await sql(clusters[0], `SELECT count(*) FROM pg_init_privs i JOIN pg_namespace n ON n.oid=i.objoid
+      WHERE i.classoid='pg_namespace'::regclass AND (n.nspname IN ('auth','storage','empty_initial_acl') OR n.nspname ~ '^default_acl_[0-9]+$') AND i.initprivs=n.nspacl;`), "15")
+    // FROM CURRENT normalizes these native stored literals (20000 -> 20s,
+    // 1024kB -> 1MB, true -> on). Preserve original text and setting order,
+    // including list-valued search_path and all three setting scopes.
+    await sql(clusters[0], `ALTER ROLE application_user SET statement_timeout='20000';
+      ALTER ROLE application_user SET lock_timeout='2000';
+      ALTER ROLE application_user SET idle_in_transaction_session_timeout='250000';
+      ALTER ROLE application_user SET work_mem='1024kB';
+      ALTER ROLE application_user SET default_transaction_read_only='true';
+      ALTER ROLE application_user SET search_path TO "$user",public,"space schema","back\\slash schema";
+      ALTER ROLE application_user IN DATABASE postgres SET statement_timeout='60000';
+      ALTER ROLE fixture_owner SET log_statement='none';
+      ALTER DATABASE postgres SET lock_timeout='2000';
+      ALTER ROLE "single'quote" SET fcuno.synthetic TO E'quote\\\\slash''; END; $$,=香港';`)
+    const expectedApplicationConfig = JSON.parse(await sql(clusters[0], "SELECT to_json(rolconfig) FROM pg_roles WHERE rolname='application_user'"))
+    assert.deepEqual(expectedApplicationConfig.slice(0, 5), ["statement_timeout=20000", "lock_timeout=2000",
+      "idle_in_transaction_session_timeout=250000", "work_mem=1024kB", "default_transaction_read_only=true"])
     const cloudExport = await open(context), cloudParts = []; let cloudMetadata, cloudComplete
     for await (const item of decodePostgresExport(cloudExport.bytes, publicKey, context)) {
       if (item.type === "metadata") cloudMetadata = item.metadata
@@ -195,8 +314,14 @@ test("real PG17 TLS export, signed streaming decode and isolated restore preserv
     }
     await cloudExport.close()
     assert.equal(String(cloudMetadata.catalog.roles.find(role => role.rolname === "fixture_owner").oid), "10")
+    assert.deepEqual(cloudMetadata.catalog.roles.find(role => role.rolname === "application_user").rolconfig, expectedApplicationConfig)
+    assert.deepEqual(cloudMetadata.catalog.recovery.columns.filter(column => column.schema === "public" && column.relation === "rows")
+      .map(column => [column.name, column.position]), [["id", 2], ["body", 4], ["extra", 6]])
     const cloudBytes = Buffer.concat(cloudParts), cloudPath = join(root, "cloud.dump"), cloudRun = "native-cloud-fixture"
     await writeFile(cloudPath, cloudBytes, { flag: "wx", mode: 0o600 })
+    const initialToc = (await native("pg_restore", ["--list", cloudPath])).stdout
+    assert.equal(/ACL - SCHEMA (auth|storage|empty_initial_acl|default_acl_[0-9]+) /m.test(initialToc), false,
+      "unchanged managed-bootstrap grants are absent from logical archive ACL entries")
     const cloudManifest = { schema: POSTGRES_RECEIPT_SCHEMA, status: "copied-and-byte-verified", runId: cloudRun, week: (await import("../lib/postgresBackupProtocol.mjs")).postgresBackupWeek(start),
       metadata: cloudMetadata, completion: cloudComplete.completion, signature: cloudComplete.signature,
       parts: [{ target: { bucket: fcunoConnectionPolicy.storageMediaBackup.targetBucket,
@@ -209,6 +334,47 @@ test("real PG17 TLS export, signed streaming decode and isolated restore preserv
         pgRestore: join(bin, "pg_restore"), sort: "/usr/bin/sort", ...(cloudProof ? { localeArchive: environment.LOCALE_ARCHIVE } : { preload: "" }) } })
     assert.equal(proof.status, "isolated-logical-recovery-verified")
     assert.equal(proof.tables, cloudProof ? 4 : 3); assert.equal(proof.catalogSections, 12); assert.equal(proof.unaccountedTocEntries, 0)
+    // Real PostgreSQL can remap a superuser grantor to the object owner. The
+    // pre-COMMIT exact assertion must reject that and roll back earlier grants.
+    await sql(clusters[1], `CREATE ROLE replay_supergrantor SUPERUSER NOLOGIN; CREATE ROLE replay_reader NOLOGIN;
+      CREATE SCHEMA replay_first; CREATE SCHEMA replay_rollback;`)
+    const rollbackSource = { name: "replay_rollback", owner: "fixture_owner", comment: null,
+      acl: "{fixture_owner=UC/fixture_owner,replay_supergrantor=U*/fixture_owner,replay_reader=U/replay_supergrantor}" }
+    const firstSource = { ...rollbackSource, name: "replay_first", acl: "{fixture_owner=UC/fixture_owner,replay_reader=U/fixture_owner}" }
+    const rollbackPlan = buildMissingSchemaAclReplay([firstSource, rollbackSource], [{ ...firstSource, acl: null }, { ...rollbackSource, acl: null }],
+      ["fixture_owner", "replay_supergrantor", "replay_reader"].map(rolname => ({ rolname })))
+    await assert.rejects(sql(clusters[1], rollbackPlan.sql))
+    assert.equal(await sql(clusters[1], "SELECT count(*) FROM pg_namespace WHERE nspname IN ('replay_first','replay_rollback') AND nspacl IS NULL;"), "2",
+      "failed grantor assertion rolls back the entire transaction, including a previously verified schema")
+    // Exercise the actual SQL builder independently under nonstandard strings,
+    // including an explicit postcondition fault to prove transaction rollback.
+    await sql(clusters[1], `CREATE ROLE "guc\\owner's" NOLOGIN; ALTER DATABASE postgres SET standard_conforming_strings=off;`)
+    const gucRole = "guc\\owner's", gucLiteral = value => `E'${value.replaceAll("\\", "\\\\").replaceAll("'", "''")}'`
+    const globalSetting = { role: gucRole, database: null }, databaseSetting = { role: gucRole, database: "postgres" }
+    const readSetting = async (setting, name) => sql(clusters[1], `SELECT value FROM pg_db_role_setting s,
+      unnest(s.setconfig) value WHERE setrole=${setting.role === "ALL" ? "0" : `(SELECT oid FROM pg_roles WHERE rolname=${gucLiteral(setting.role)})`}
+      AND setdatabase=${setting.database === null ? "0" : "(SELECT oid FROM pg_database WHERE datname='postgres')"}
+      AND split_part(value,'=',1)=${gucLiteral(name)};`)
+    for (const [setting, item] of [[globalSetting, "work_mem=1024kB"], [globalSetting, "default_transaction_read_only=true"],
+      [globalSetting, "search_path=public, auth"], [databaseSetting, "statement_timeout=20000"],
+      [{ role: "ALL", database: "postgres" }, "lock_timeout=2000"],
+      [globalSetting, "fcuno.synthetic=quote\\slash'; END; $$\n香港,=true"], [globalSetting, "fcuno.empty="]]) {
+      await sql(clusters[1], buildRecoveryRoleSettingSql(setting, item))
+      assert.equal(await readSetting(setting, item.slice(0, item.indexOf("="))), item)
+    }
+    const beforeGucRollback = await sql(clusters[1], "SELECT coalesce(jsonb_agg(to_jsonb(s) ORDER BY setdatabase,setrole),'[]') FROM pg_db_role_setting s")
+    const gucPlan = buildRecoveryRoleSettingSql(globalSetting, "work_mem=2048kB")
+    const postconditionAt = gucPlan.lastIndexOf("IF stored_values IS DISTINCT FROM ARRAY")
+    assert.ok(postconditionAt > gucPlan.indexOf("IF stored_values IS DISTINCT FROM ARRAY"))
+    // Flip ONLY the final assertion in this synthetic SQL to force failure
+    // after both real writes. Production code has no bypass or test hook.
+    const faultedGucPlan = gucPlan.slice(0, postconditionAt) + gucPlan.slice(postconditionAt)
+      .replace("IF stored_values IS DISTINCT FROM ARRAY", "IF stored_values IS NOT DISTINCT FROM ARRAY")
+    await assert.rejects(sql(clusters[1], faultedGucPlan), /representation mismatch/)
+    await assert.rejects(sql(clusters[1], buildRecoveryRoleSettingSql({ role: "missing_guc_role", database: null }, "work_mem=1024kB")), /target missing/)
+    assert.throws(() => buildRecoveryRoleSettingSql({ role: gucRole, database: "other" }, "work_mem=1024kB"))
+    assert.equal(await sql(clusters[1], "SELECT coalesce(jsonb_agg(to_jsonb(s) ORDER BY setdatabase,setrole),'[]') FROM pg_db_role_setting s"), beforeGucRollback,
+      "failed exact stored-setting assertion rolls back the attempted FROM CURRENT and literal writes")
     // A real extension config WHERE filter can silently exclude source rows.
     // Reproduce only in this disposable synthetic catalog and reject before
     // launching pg_dump, even though a filtered archive could restore cleanly.

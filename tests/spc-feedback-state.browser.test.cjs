@@ -173,7 +173,16 @@ async function main() {
             assert.equal(await response.isDisabled(), true); assert.equal(await save().isDisabled(), true)
             assert.equal(await page.getByRole("button", { name: "Send Feedback", exact: true }).isDisabled(), true)
             await page.screenshot({ path: path.join(output, label + "-view-only.png"), fullPage: true })
+            const readsBeforeEditSession = await page.evaluate(() => window.__spcFeedbackHarness.reads)
             await changeSession({ permissions: { "spc-feedback": "edit" } })
+            // React may not have committed the keyed replacement yet. The old
+            // view-only textarea is still visible until it does, so wait for
+            // the new edit session's completed initial read before holding GETs.
+            await page.waitForFunction(previousReads => {
+              const response = document.querySelector(".spc-feedback-review textarea")
+              const refresh = [...document.querySelectorAll("button")].find(button => button.textContent === "Refresh Feedback")
+              return window.__spcFeedbackHarness.reads > previousReads && response?.disabled === false && refresh?.disabled === false
+            }, readsBeforeEditSession)
             await response.waitFor()
             // A held GET is ignored after another authenticated identity loads.
             await page.evaluate(() => { const h = window.__spcFeedbackHarness; h.readMode = "defer"; h.pending = [] })

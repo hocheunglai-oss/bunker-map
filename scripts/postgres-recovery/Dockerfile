@@ -18,7 +18,7 @@ ENTRYPOINT ["/usr/local/bin/node", "/opt/fcuno/compatibility-proof.mjs"]
 # Production recovery contains no source adapter, credential or cloud SDK.
 FROM compatibility AS recovery
 COPY config/fcunoConnections.ts /opt/fcuno/config/fcunoConnections.ts
-COPY lib/postgresBackupReceipt.mjs lib/postgresBackupProtocol.mjs lib/postgresRecoveryCatalog.mjs lib/storageMediaBackup.mjs /opt/fcuno/lib/
+COPY lib/postgresBackupReceipt.mjs lib/postgresBackupProtocol.mjs lib/postgresRecoveryCatalog.mjs lib/postgresRecoveryDiagnostics.mjs lib/postgresRecoveryColumns.mjs lib/postgresRecoveryAcl.mjs lib/storageMediaBackup.mjs /opt/fcuno/lib/
 COPY scripts/postgres-recovery/offline.mjs /opt/fcuno/scripts/postgres-recovery/offline.mjs
 ENTRYPOINT ["/usr/local/bin/node", "/opt/fcuno/scripts/postgres-recovery/offline.mjs", "--verify-cloud-input"]
 

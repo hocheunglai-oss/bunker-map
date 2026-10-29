@@ -90,7 +90,7 @@ export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAcce
   function target(value) {
     const result = validateTargetIdentity(value)
     generation(result.generation)
-    if (result.bucket !== BUCKET || !new RegExp(`^${scopedPrefix}/runs/[A-Za-z0-9][A-Za-z0-9_-]{0,79}/(?:${postgres ? "archive/[0-9]{6}" : "objects/[0-9a-f]{64}"}|manifest\\.json${recovery ? "|recovery\\.json" : ""})$`).test(result.objectName)) fail("unapproved_target")
+    if (result.bucket !== BUCKET || !new RegExp(`^${scopedPrefix}/runs/[A-Za-z0-9][A-Za-z0-9_-]{0,79}/(?:${postgres ? "archive/[0-9]{6}" : "objects/[0-9a-f]{64}"}|manifest\\.json${recovery ? "|recovery\\.json|failures/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.json" : ""})$`).test(result.objectName)) fail("unapproved_target")
     return result
   }
   function objectUrl(name, query = {}) {
@@ -170,7 +170,7 @@ export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAcce
   function receipt(metadata, name) {
     const info = record(metadata)
     if (info.bucket !== BUCKET || info.name !== name) fail("receipt_identity_mismatch")
-    const sizeBytes = size(info.size), maximum = name === controlName ? JSON_LIMIT : name.endsWith("/recovery.json") ? 16384 : name.endsWith("/manifest.json") ? MANIFEST_LIMIT : maximumObjectBytes
+    const sizeBytes = size(info.size), maximum = name === controlName ? JSON_LIMIT : (name.endsWith("/recovery.json") || name.includes("/failures/")) ? 16384 : name.endsWith("/manifest.json") ? MANIFEST_LIMIT : maximumObjectBytes
     if (sizeBytes > maximum) fail("receipt_size_exceeded")
     return Object.freeze({ target: Object.freeze({ bucket: BUCKET, objectName: name, generation: generation(info.generation) }), sizeBytes, crc32c: crc(info.crc32c) })
   }
@@ -267,6 +267,13 @@ export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAcce
         (input.sizeBytes !== undefined && (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes < 0 || input.sizeBytes > maximum || Object.is(input.sizeBytes, -0)))) fail("unapproved_immutable_write")
     return upload(input.objectName, input.bytes, "0", context, { maximum, expectedBytes: input.sizeBytes, contentType: "application/json" })
   }
+  async function uploadRecoveryFailure(input, context) {
+    if (!recovery || !input || Object.keys(input).sort().join(",") !== "buildId,bytes" || typeof input.buildId !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(input.buildId) ||
+        !(input.bytes instanceof Uint8Array) || input.bytes.length < 1 || input.bytes.length > 16384) fail("unapproved_failure_write")
+    return upload(`${runPrefix}/failures/${input.buildId}.json`, input.bytes, "0", context,
+      { maximum: 16384, expectedBytes: input.bytes.length, contentType: "application/json" })
+  }
   async function inspectTarget(value, context) {
     const selected = target(value), op = operation(context, 20_000)
     await ensureBucket(op)
@@ -347,5 +354,5 @@ export function createStorageMediaGcsAdapter({ fetch: fetchImpl = fetch, getAcce
       return verified.snapshot
     },
   })
-  return Object.freeze({ validateBucket, writeTarget, writeArchivePart, inspectTarget, readTarget, uploadImmutable, control, objectNameForSource, manifestObjectName })
+  return Object.freeze({ validateBucket, writeTarget, writeArchivePart, inspectTarget, readTarget, uploadImmutable, uploadRecoveryFailure, control, objectNameForSource, manifestObjectName })
 }

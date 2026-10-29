@@ -1,13 +1,16 @@
 import { spawn } from "node:child_process"
-import { createHash, createPublicKey, verify } from "node:crypto"
+import { createHash, createPublicKey, verify, randomUUID } from "node:crypto"
 import { createReadStream } from "node:fs"
-import { readFile, writeFile, mkdir, mkdtemp, rm, lstat, realpath } from "node:fs/promises"
+import { readFile, writeFile, mkdir, mkdtemp, rm, lstat, realpath, rename } from "node:fs/promises"
 import { once } from "node:events"
 import { join, resolve, isAbsolute } from "node:path"
 import { fileURLToPath } from "node:url"
 import { networkInterfaces } from "node:os"
 import { validatePostgresManifest } from "../../lib/postgresBackupReceipt.mjs"
-import { RECOVERY_CATALOG_EXPRESSION, validateRecoveryCatalog } from "../../lib/postgresRecoveryCatalog.mjs"
+import { RECOVERY_CATALOG_EXPRESSION, RECOVERY_CATALOG_KEYS, validateRecoveryCatalog } from "../../lib/postgresRecoveryCatalog.mjs"
+import { createRecoveryDiagnostics, createNativeStderrHint } from "../../lib/postgresRecoveryDiagnostics.mjs"
+import { equivalentRecoveryColumns } from "../../lib/postgresRecoveryColumns.mjs"
+import { equivalentRecoverySchemas, equivalentRecoveryDatabase, equivalentRecoveryAclSection, buildMissingSchemaAclReplay } from "../../lib/postgresRecoveryAcl.mjs"
 
 const MAX_LINE = 64 * 1024 * 1024, MAX_TEXT = 16 * 1024 * 1024
 const operator = "fcuno_recovery_operator"
@@ -17,6 +20,56 @@ const quote = name => { if (typeof name !== "string" || !name || name.includes("
 const literal = value => { if (typeof value !== "string" || value.includes("\0")) failure(); return `'${value.replaceAll("'", "''")}'` }
 const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value
 const same = (a, b) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b))
+const sameCatalogSection = (expected, actual, section) => section === "columns" ? equivalentRecoveryColumns(expected, actual) :
+  section === "schemas" ? equivalentRecoverySchemas(expected, actual) :
+  ["relations", "functions", "types"].includes(section) ? equivalentRecoveryAclSection(expected, actual, section) : same(expected, actual)
+
+// FROM CURRENT preserves PostgreSQL's list-valued GUC syntax, but canonicalizes
+// typed values (8000 -> 8s, 1024kB -> 1MB, true -> on). Retain that safe list
+// handling, then use a literal only when required to reproduce the signed
+// stored text. Both attempts and the exact catalog postcondition share one
+// transaction; an unsupported representation rolls back, never compares equal.
+export function buildRecoveryRoleSettingSql(setting, item) {
+  if (!setting || typeof setting !== "object" || Array.isArray(setting) ||
+      typeof item !== "string" || Buffer.byteLength(item) > MAX_TEXT || item.includes("\0") ||
+      ![null, "postgres"].includes(setting.database) || typeof setting.role !== "string" ||
+      !setting.role || setting.role === operator || (setting.role === "ALL" && setting.database === null)) failure()
+  const at = item.indexOf("="); if (at <= 0) failure()
+  const name = item.slice(0, at), value = item.slice(at + 1)
+  if (!/^[A-Za-z][A-Za-z0-9_.]*$/.test(name)) failure()
+  // Explicit E strings remain safe even when the recovered database defaults
+  // standard_conforming_strings to off. This also quotes the entire DO body.
+  const escape = text => `E'${text.replaceAll("\\", "\\\\").replaceAll("'", "''")}'`
+  const target = setting.role === "ALL" ? "ALTER DATABASE postgres" :
+    `ALTER ROLE ${quote(setting.role)}${setting.database === null ? "" : " IN DATABASE postgres"}`
+  const roleId = setting.role === "ALL" ? "0::pg_catalog.oid" :
+    `(SELECT oid FROM pg_catalog.pg_roles WHERE rolname=${escape(setting.role)})`
+  const databaseId = setting.database === null ? "0::pg_catalog.oid" :
+    "(SELECT oid FROM pg_catalog.pg_database WHERE datname='postgres')"
+  const readback = `SELECT pg_catalog.array_agg(config.value) INTO stored_values
+      FROM pg_catalog.pg_db_role_setting AS settings
+      CROSS JOIN LATERAL pg_catalog.unnest(settings.setconfig) AS config(value)
+      WHERE settings.setrole=role_id AND settings.setdatabase=database_id
+        AND pg_catalog.split_part(config.value,'=',1)=${escape(name)};`
+  const body = `DECLARE role_id pg_catalog.oid := ${roleId};
+    database_id pg_catalog.oid := ${databaseId}; stored_values pg_catalog.text[];
+    BEGIN
+      IF role_id IS NULL OR database_id IS NULL THEN RAISE EXCEPTION 'Private recovery setting target missing'; END IF;
+      PERFORM pg_catalog.set_config(${escape(name)},${escape(value)},true);
+      EXECUTE ${escape(`${target} SET ${quote(name)} FROM CURRENT`)};
+      ${readback}
+      IF stored_values IS DISTINCT FROM ARRAY[${escape(item)}]::pg_catalog.text[] THEN
+        EXECUTE ${escape(`${target} SET ${quote(name)} TO ${escape(value)}`)};
+      END IF;
+      ${readback}
+      IF stored_values IS DISTINCT FROM ARRAY[${escape(item)}]::pg_catalog.text[] THEN
+        RAISE EXCEPTION 'Private recovery setting representation mismatch';
+      END IF;
+    END`
+  const statement = `BEGIN; DO ${escape(body)} LANGUAGE plpgsql; COMMIT;`
+  if (Buffer.byteLength(statement) > MAX_TEXT) failure()
+  return statement
+}
 
 export async function* boundedLines(stream) {
   let pending = Buffer.alloc(0)
@@ -79,11 +132,14 @@ export function parseToc(text) {
 // Whole-row SHA-256 leaves are externally sorted. Duplicate rows remain
 // duplicated, and the final hash + row count form a cryptographic multiset
 // comparison without retaining an entire table or sorting business text.
-export async function fingerprintRows(lines, { sortBinary, directory, signal, env }) {
+export async function fingerprintRows(lines, { sortBinary, directory, signal, env, diagnostics }) {
   const process = spawn(sortBinary, ["-S", "32M", "-T", directory], { env, shell: false, stdio: ["pipe", "pipe", "pipe"], signal })
   process.stderr.on("data", () => {})
   process.stdin.on("error", () => {})
-  const ended = new Promise((resolve, reject) => { process.once("error", reject); process.once("close", code => code === 0 ? resolve() : reject(new Error("Private row comparison failed"))) })
+  const ended = new Promise((resolve, reject) => { process.once("error", reject); process.once("close", (code, signal) => {
+    if (code === 0) resolve()
+    else { diagnostics?.native("sort", code, signal); reject(new Error("Private row comparison failed")) }
+  }) })
   // Attach rejection immediately, before the producer starts.
   void ended.catch(() => {})
   let rows = 0
@@ -113,13 +169,16 @@ async function checkedFile(path) {
   return path
 }
 
-export async function runOfflineRecovery({ archivePath, manifest, publicKey, binaries, workRoot, signal, sourceImageDigest = "local-synthetic-fixture" }) {
+export async function runOfflineRecovery({ archivePath, manifest, publicKey, binaries, workRoot, signal, sourceImageDigest = "local-synthetic-fixture", diagnostics = createRecoveryDiagnostics() }) {
+  await diagnostics.stage("manifest-verification")
   validatePostgresManifest(manifest)
   if (sha(Buffer.from(JSON.stringify(manifest.metadata))) !== manifest.completion.metadataSha256 ||
       !verify(null, Buffer.from(JSON.stringify(manifest.completion)), publicKey, Buffer.from(manifest.signature, "base64url"))) failure()
+  await diagnostics.stage("archive-verification")
   await checkedFile(archivePath)
   const archive = await fileHash(archivePath, signal)
   if (archive.size !== manifest.completion.archiveBytes || archive.sha256 !== manifest.completion.archiveSha256) failure()
+  await diagnostics.stage("catalog-scope")
   const metadata = manifest.metadata, catalog = metadata.catalog
   validateRecoveryCatalog(catalog.recovery)
   // Do not pretend native pg_dump saves materialized contents (it refreshes
@@ -131,6 +190,7 @@ export async function runOfflineRecovery({ archivePath, manifest, publicKey, bin
   const sourceBootstrap = catalog.roles.filter(role => String(role.oid) === "10")
   if (sourceBootstrap.length !== 1 || sourceBootstrap[0].rolsuper !== true) failure()
   quote(sourceBootstrap[0].rolname)
+  await diagnostics.stage("workspace-setup")
   if (!isAbsolute(workRoot) || (await realpath(workRoot)) !== workRoot) failure()
   const directory = await mkdtemp(join(workRoot, "fcuno-recovery-"))
   const data = join(directory, "data"), socket = join(directory, "socket")
@@ -140,12 +200,16 @@ export async function runOfflineRecovery({ archivePath, manifest, publicKey, bin
     PGPASSFILE: join(directory, "absent-password"), PGSERVICEFILE: join(directory, "absent-service"),
     PGOPTIONS: "-c search_path=pg_catalog -c timezone=UTC -c bytea_output=hex -c client_encoding=UTF8 -c datestyle=ISO -c intervalstyle=postgres -c extra_float_digits=3 -c statement_timeout=120000 -c lock_timeout=2000",
     ...(binaries.localeArchive ? { LOCALE_ARCHIVE: binaries.localeArchive } : {}) }
-  let running = false
+  let running = false, primaryFailure = false
   function start(name, args, input) {
     const process = spawn(binaries[name], args, { env, shell: false, stdio: ["pipe", "pipe", "pipe"], signal })
-    process.stderr.on("data", () => {}) // Private failures never enter build logs.
+    const stderrHint = createNativeStderrHint()
+    process.stderr.on("data", stderrHint.write) // Only a fixed heuristic enum survives, never private text.
     process.stdin.on("error", () => {})
-    const done = new Promise((resolve, reject) => { process.once("error", reject); process.once("close", code => code === 0 ? resolve() : reject(new Error("Isolated native recovery command failed"))) })
+    const done = new Promise((resolve, reject) => { process.once("error", reject); process.once("close", (code, signal) => {
+      if (code === 0) resolve()
+      else { diagnostics.native(name, code, signal, stderrHint.value()); reject(new Error("Isolated native recovery command failed")) }
+    }) })
     void done.catch(() => {})
     process.stdin.end(input)
     return { stream: process.stdout, done, stop: () => process.kill("SIGKILL") }
@@ -157,7 +221,9 @@ export async function runOfflineRecovery({ archivePath, manifest, publicKey, bin
   }
   const sql = (query, database = "postgres") => text("psql", ["-X", "-qAt", "--set=ON_ERROR_STOP=1", "--no-password", "--dbname", database], query)
   try {
+    await diagnostics.stage("binary-validation")
     for (const name of ["initdb", "pgCtl", "psql", "pgRestore", "sort"]) if (!isAbsolute(binaries[name])) failure()
+    await diagnostics.stage("initdb")
     await text("initdb", ["-D", data, `--username=${sourceBootstrap[0].rolname}`, "--auth-local=trust", "--auth-host=reject", "--no-locale", "--encoding=UTF8"])
     const preload = binaries.preload === "" ? "" : "pg_stat_statements"
     const flags = ["-p", "55491", "-k", socket, "-h", "", "-c", `shared_preload_libraries=${preload}`, "-c", "session_preload_libraries=", "-c", "local_preload_libraries=",
@@ -165,11 +231,13 @@ export async function runOfflineRecovery({ archivePath, manifest, publicKey, bin
       "-c", "autovacuum=off", "-c", "archive_mode=off", "-c", "logging_collector=off", "-c", "log_statement=none", "-c", "log_min_error_statement=panic"]
     // pg_ctl alone requires one options string; all values are fixed or from
     // this exact mkdtemp-owned path, never archive/request strings.
+    await diagnostics.stage("start-server")
     await text("pgCtl", ["-D", data, "-l", join(directory, "postgres.log"), "-o", flags.map(value => `'${value.replaceAll("'", "'\\''")}'`).join(" "), "-w", "start"])
     running = true
     // PostgreSQL treats bootstrap role OID10 as the implicit grantor of
     // global memberships. Preserve its source identity, then create a separate
     // verification-only operator and disable the original bootstrap login.
+    await diagnostics.stage("create-operator")
     env.PGUSER = sourceBootstrap[0].rolname
     await sql(`CREATE ROLE ${quote(operator)} SUPERUSER LOGIN; ALTER ROLE ${quote(sourceBootstrap[0].rolname)} NOLOGIN;`, "template1")
     env.PGUSER = operator
@@ -177,6 +245,7 @@ export async function runOfflineRecovery({ archivePath, manifest, publicKey, bin
     // Global roles are not part of pg_dump. Preserve original attributes and
     // memberships only inside this sealed server, force EVERY source role to
     // NOLOGIN, and copy no password hash or native source credential.
+    await diagnostics.stage("restore-roles")
     const builtins = new Set(JSON.parse(await sql("select json_agg(rolname order by rolname) from pg_roles", "template1")))
     for (const role of catalog.roles) {
       if (builtins.has(role.rolname)) { if (!role.rolname.startsWith("pg_") && role.rolname !== sourceBootstrap[0].rolname) failure(); continue }
@@ -190,6 +259,7 @@ export async function runOfflineRecovery({ archivePath, manifest, publicKey, bin
           (role.rolvaliduntil !== null && typeof role.rolvaliduntil !== "string")) failure()
       await sql(`ALTER ROLE ${quote(role.rolname)} CONNECTION LIMIT ${role.rolconnlimit}${role.rolvaliduntil === null ? "" : ` VALID UNTIL ${literal(role.rolvaliduntil)}`};`, "template1")
     }
+    await diagnostics.stage("restore-memberships")
     let memberships = [...catalog.memberships]
     while (memberships.length) {
       const remaining = []
@@ -200,6 +270,7 @@ export async function runOfflineRecovery({ archivePath, manifest, publicKey, bin
       if (remaining.length === memberships.length) failure()
       memberships = remaining
     }
+    await diagnostics.stage("read-toc")
     const toc = parseToc(await text("pgRestore", ["--create", "--list", archivePath]))
     await sql("DROP DATABASE postgres;", "template1")
     const bootstrapEntries = toc.entries.filter(line => /^\d+; \d+ \d+ (?:DATABASE(?: PROPERTIES)? - |SCHEMA - |COMMENT - DATABASE |ACL - DATABASE )/.test(line))
@@ -211,11 +282,13 @@ export async function runOfflineRecovery({ archivePath, manifest, publicKey, bin
     const initialList = join(directory, "bootstrap.list"), remainingList = join(directory, "remaining.list")
     await writeFile(initialList, bootstrapEntries.join("\n") + "\n", { mode: 0o600, flag: "wx" })
     await writeFile(remainingList, remainder.join("\n") + "\n", { mode: 0o600, flag: "wx" })
+    await diagnostics.stage("bootstrap-restore")
     const bootstrap = start("pgRestore", ["--exit-on-error", "--create", "--use-list", initialList, "--dbname=template1", `--role=${sourceBootstrap[0].rolname}`, archivePath])
     bootstrap.stream.resume(); await bootstrap.done
     // pg_dump intentionally omits extension ownership. Recreate packages with
     // exact source owners BEFORE restoring their config-table contents. Any
     // temporary SUPERUSER attribute is local, NOLOGIN and restored immediately.
+    await diagnostics.stage("create-extensions")
     for (const extension of catalog.extensions) {
       const owner = catalog.roles.find(role => role.rolname === extension.owner)
       if (!owner || typeof owner.rolsuper !== "boolean") failure()
@@ -223,28 +296,44 @@ export async function runOfflineRecovery({ archivePath, manifest, publicKey, bin
       try { await sql(`SET ROLE ${quote(owner.rolname)}; CREATE EXTENSION IF NOT EXISTS ${quote(extension.name)} WITH SCHEMA ${quote(extension.schema)} VERSION ${literal(extension.version)}; RESET ROLE;`) }
       finally { if (!owner.rolsuper) await sql(`ALTER ROLE ${quote(owner.rolname)} NOSUPERUSER;`) }
     }
+    await diagnostics.stage("verify-extensions")
     const extensions = JSON.parse(await sql("select coalesce(jsonb_agg(jsonb_build_object('name',e.extname,'version',e.extversion,'schema',n.nspname,'owner',pg_get_userbyid(e.extowner)) order by e.extname),'[]'::jsonb) from pg_extension e join pg_namespace n on n.oid=e.extnamespace"))
     // pg_dump omits initdb's pinned plpgsql extension from the TOC. Its exact
     // version and owner are still checked against the independently signed
     // source catalog, alongside all explicitly archived extensions.
     if (!same(extensions, catalog.extensions) || extensionEntries.length !== catalog.extensions.filter(item => item.name !== "plpgsql").length) failure()
+    await diagnostics.stage("restore-archive")
     const restore = start("pgRestore", ["--exit-on-error", "--use-list", remainingList, "--dbname=postgres", `--role=${sourceBootstrap[0].rolname}`, archivePath])
     restore.stream.resume(); await restore.done
     // Apply captured per-role settings as exact GUC strings, not a quoted
     // whole search_path list. Passwords and login access remain excluded.
+    await diagnostics.stage("restore-role-settings")
     for (const setting of catalog.database.roleSettings || []) for (const item of setting.settings || []) {
-      const at = item.indexOf("="); if (at <= 0) failure()
-      const name = item.slice(0, at), value = item.slice(at + 1)
-      if (!/^[A-Za-z][A-Za-z0-9_.]*$/.test(name)) failure()
-      const target = setting.role === "ALL" ? `ALTER DATABASE postgres` : `ALTER ROLE ${quote(setting.role)}${setting.database === null ? "" : " IN DATABASE postgres"}`
-      await sql(`BEGIN; SELECT set_config(${literal(name)},${literal(value)},true); ${target} SET ${quote(name)} FROM CURRENT; COMMIT;`)
+      await sql(buildRecoveryRoleSettingSql(setting, item))
     }
-    const restoredCatalog = JSON.parse(await sql(`SELECT ${RECOVERY_CATALOG_EXPRESSION};`))
-    if (!same(restoredCatalog, catalog.recovery)) failure()
+    await diagnostics.stage("verify-catalog")
+    let restoredCatalog = JSON.parse(await sql(`SELECT ${RECOVERY_CATALOG_EXPRESSION};`))
+    validateRecoveryCatalog(restoredCatalog)
+    await diagnostics.catalog(catalog.recovery, restoredCatalog, sameCatalogSection)
+    // Managed bootstrap/extension initial schema grants may be absent from a
+    // logical archive's delta ACLs. Restore only a narrowly proven missing ACL
+    // from the signed metadata, never accept the missing privilege as equal.
+    // No other catalog difference may be repaired or concealed here.
+    if (!RECOVERY_CATALOG_KEYS.filter(section => section !== "schemas").every(section => sameCatalogSection(catalog.recovery[section], restoredCatalog[section], section))) failure()
+    const schemaAclReplay = buildMissingSchemaAclReplay(catalog.recovery.schemas, restoredCatalog.schemas, catalog.roles)
+    if (schemaAclReplay) {
+      await sql(schemaAclReplay.sql)
+      restoredCatalog = JSON.parse(await sql(`SELECT ${RECOVERY_CATALOG_EXPRESSION};`))
+      validateRecoveryCatalog(restoredCatalog)
+      await diagnostics.catalog(catalog.recovery, restoredCatalog, sameCatalogSection)
+    }
+    if (!RECOVERY_CATALOG_KEYS.every(section => sameCatalogSection(catalog.recovery[section], restoredCatalog[section], section))) failure()
+    await diagnostics.stage("verify-tables")
     const tables = JSON.parse(await sql(`select coalesce(json_agg(json_build_object('schema',n.nspname,'name',c.relname,'kind',c.relkind,'readable',true) order by n.nspname,c.relname),'[]'::json) from pg_class c join pg_namespace n on n.oid=c.relnamespace where c.relkind in ('r','p','m','f') and n.nspname not in ('pg_catalog','information_schema') and n.nspname !~ '^pg_toast' and n.nspname !~ '^pg_temp_'`))
     if (!same(tables, catalog.tables)) failure()
     const expectedTables = new Set(catalog.tables.filter(table => table.kind === "r").map(table => JSON.stringify([table.schema, table.name])))
     const checkedTables = new Set(), fingerprints = []
+    await diagnostics.stage("compare-table-rows")
     for (const [index, entry] of toc.tableData.entries()) {
       const list = join(directory, `table-${index}.list`)
       await writeFile(list, entry + "\n", { mode: 0o600, flag: "wx" })
@@ -261,7 +350,7 @@ export async function runOfflineRecovery({ archivePath, manifest, publicKey, bin
         if (!header || !ended) failure()
       }
       let expected
-      try { expected = await fingerprintRows(archiveRows(), { sortBinary: binaries.sort, directory, signal, env }) }
+      try { expected = await fingerprintRows(archiveRows(), { sortBinary: binaries.sort, directory, signal, env, diagnostics }) }
       catch (error) { child.stop(); throw error }
       const identity = JSON.stringify([header.schema, header.name])
       if (!expectedTables.has(identity) || checkedTables.has(identity)) failure()
@@ -270,13 +359,14 @@ export async function runOfflineRecovery({ archivePath, manifest, publicKey, bin
       const query = `COPY (SELECT ${columns} FROM ONLY ${quote(header.schema)}.${quote(header.name)}) TO STDOUT;`
       const actual = start("psql", ["-X", "-q", "--set=ON_ERROR_STOP=1", "--no-password", "--dbname=postgres"], query)
       let obtained
-      try { obtained = await fingerprintRows(boundedLines(actual.stream), { sortBinary: binaries.sort, directory, signal, env }); await actual.done }
+      try { obtained = await fingerprintRows(boundedLines(actual.stream), { sortBinary: binaries.sort, directory, signal, env, diagnostics }); await actual.done }
       catch (error) { actual.stop(); throw error }
       if (!same(obtained, expected)) failure()
       fingerprints.push({ table: identity, ...expected })
       await rm(list)
     }
     if (checkedTables.size !== expectedTables.size) failure()
+    await diagnostics.stage("compare-sequences")
     const sequenceProofs = [], expectedSequences = new Set(catalog.recovery.sequences.map(item => JSON.stringify([item.schema, item.name])))
     for (const [index, entry] of toc.sequenceData.entries()) {
       const path = join(directory, `sequence-${index}.list`)
@@ -289,16 +379,21 @@ export async function runOfflineRecovery({ archivePath, manifest, publicKey, bin
       sequenceProofs.push(expected); await rm(path)
     }
     if (expectedSequences.size) failure()
+    await diagnostics.stage("verify-database")
     const database = JSON.parse(await sql(`select jsonb_build_object('name',d.datname,'owner',pg_get_userbyid(d.datdba),'encoding',pg_encoding_to_char(d.encoding),'localeProvider',d.datlocprovider,'collate',d.datcollate,'ctype',d.datctype,'icuLocale',d.datlocale,'collationVersion',d.datcollversion,'actualCollationVersion',pg_database_collation_actual_version(d.oid),'acl',d.datacl,'comment',shobj_description(d.oid,'pg_database')) from pg_database d where d.datname=current_database()`))
     const expectedDatabase = Object.fromEntries(Object.entries(catalog.database).filter(([key]) => key !== "roleSettings"))
-    if (!same(database, expectedDatabase)) failure()
+    if (!equivalentRecoveryDatabase(expectedDatabase, database)) failure()
+    await diagnostics.stage("verify-memberships")
     const restoredMemberships = JSON.parse(await sql(`select coalesce(jsonb_agg(jsonb_build_object('role',r.rolname,'member',m.rolname,'grantor',g.rolname,'admin',a.admin_option,'inherit',a.inherit_option,'set',a.set_option) order by r.rolname,m.rolname),'[]'::jsonb) from pg_auth_members a join pg_roles r on r.oid=a.roleid join pg_roles m on m.oid=a.member join pg_roles g on g.oid=a.grantor`))
     if (!same(restoredMemberships, catalog.memberships)) failure()
+    await diagnostics.stage("verify-roles")
     const roleFacts = roles => roles.filter(role => role.rolname !== operator).map(role => Object.fromEntries(Object.entries(role).filter(([key]) => !["oid", "rolpassword", "rolcanlogin"].includes(key))))
     const restoredRoles = JSON.parse(await sql("select jsonb_agg(to_jsonb(r)-'rolpassword' order by r.rolname) from pg_roles r"))
     if (!same(roleFacts(restoredRoles), roleFacts(catalog.roles))) failure()
+    await diagnostics.stage("verify-login-roles")
     const loginRoles = JSON.parse(await sql("select json_agg(rolname order by rolname) from pg_roles where rolcanlogin"))
     if (!same(loginRoles, [operator])) failure()
+    await diagnostics.stage("verify-vault")
     const vault = catalog.tables.find(table => table.schema === "vault" && table.name === "secrets")
     if (vault && await sql('select count(*) from "vault"."secrets"') !== "0") failure()
     return { schema: "fcuno.cloud-postgresql-recovery/v1", status: "isolated-logical-recovery-verified", projectRef: metadata.projectRef,
@@ -308,27 +403,50 @@ export async function runOfflineRecovery({ archivePath, manifest, publicKey, bin
       tocEntries: toc.entries.length, unaccountedTocEntries: 0, sequences: sequenceProofs.length, sequenceProofSha256: sha(Buffer.from(JSON.stringify(sequenceProofs))),
       sourceRoleCopiesNoLogin: true, productionConnections: 0,
       excludes: ["hosted-service configuration", "role passwords", "external storage bytes", "Vault root encryption key"] }
+  } catch (error) {
+    primaryFailure = true
+    try { await diagnostics.failed() } catch { /* Diagnostic IO cannot replace the primary failure. */ }
+    throw error
   } finally {
-    if (running) {
-      // Cleanup gets an independent bounded opportunity even after work aborts.
-      const stopped = spawn(binaries.pgCtl, ["-D", data, "-m", "immediate", "-w", "stop"], { env, shell: false, stdio: "ignore", timeout: 10000, killSignal: "SIGKILL" })
-      await new Promise((resolve, reject) => { stopped.once("error", reject); stopped.once("close", code => code === 0 ? resolve() : reject(new Error("Recovery cleanup unconfirmed"))) })
-    }
-    await rm(directory, { recursive: true, force: true })
+    let diagnosticFailure, cleanupFailure
+    try { await diagnostics.cleanup("pending") } catch (error) { diagnosticFailure = error }
+    try {
+      if (running) {
+        // Cleanup gets an independent bounded opportunity even after work aborts.
+        const stopped = spawn(binaries.pgCtl, ["-D", data, "-m", "immediate", "-w", "stop"], { env, shell: false, stdio: "ignore", timeout: 10000, killSignal: "SIGKILL" })
+        await new Promise((resolve, reject) => { stopped.once("error", reject); stopped.once("close", code => code === 0 ? resolve() : reject(new Error("Recovery cleanup unconfirmed"))) })
+      }
+      await rm(directory, { recursive: true, force: true })
+    } catch (error) { cleanupFailure = error }
+    try { await diagnostics.cleanup(cleanupFailure ? "failed" : "ok") } catch (error) { diagnosticFailure ||= error }
+    // A failed diagnostic write must never skip stopping the owned database.
+    // Preserve the primary stage; cleanup/diagnostic failure still fails closed.
+    if (!primaryFailure && (cleanupFailure || diagnosticFailure)) throw cleanupFailure || diagnosticFailure
   }
 }
 
 export async function runCloudOfflineCli() {
+  const diagnostics = createRecoveryDiagnostics({ save: async value => {
+    const temporary = `/output/.diagnostic-${randomUUID()}.json`
+    await writeFile(temporary, JSON.stringify(value), { mode: 0o600, flag: "wx" })
+    await rename(temporary, "/output/diagnostic.json")
+  } })
+  try {
+  await diagnostics.stage("runtime-check")
   if (process.argv.slice(2).join(" ") !== "--verify-cloud-input" || process.platform !== "linux" || process.getuid() !== 1000 ||
       Object.values(networkInterfaces()).flat().some(item => item && !item.internal)) failure()
   const status = await readFile("/proc/self/status", "utf8")
   if (!/^CapEff:\s+0+$/m.test(status) || !/^NoNewPrivs:\s+1$/m.test(status)) failure()
+  await diagnostics.stage("input-read")
   const manifest = JSON.parse(await readFile("/input/manifest.json", "utf8")), publicKey = createPublicKey(await readFile("/input/verification-key.pem"))
   const binary = name => `/nix/var/nix/profiles/default/bin/${name}`
-  const result = await runOfflineRecovery({ archivePath: "/input/archive.dump", manifest, publicKey, workRoot: "/recovery", signal: AbortSignal.timeout(1500000),
+  const result = await runOfflineRecovery({ archivePath: "/input/archive.dump", manifest, publicKey, workRoot: "/recovery", signal: AbortSignal.timeout(1500000), diagnostics,
     sourceImageDigest: "sha256:b75a42959151593e90d6ad7f0ef69abb329916caa397556976375da4c333412e",
     binaries: { initdb: binary("initdb"), pgCtl: binary("pg_ctl"), psql: binary("psql"), pgRestore: binary("pg_restore"), sort: "/usr/bin/sort",
       localeArchive: "/nix/var/nix/profiles/default/lib/locale/locale-archive" } })
+  await diagnostics.stage("write-success")
   await writeFile("/output/recovery.json", JSON.stringify(result), { mode: 0o600, flag: "wx" })
+  await diagnostics.complete()
+  } catch (error) { try { await diagnostics.failed() } catch { /* No raw diagnostic IO error output. */ } throw error }
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) runCloudOfflineCli().catch(() => { process.exitCode = 1 })

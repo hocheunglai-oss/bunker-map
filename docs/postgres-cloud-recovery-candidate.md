@@ -21,3 +21,20 @@ The existing1GiB Cloud Run job cannot safely host the2.9GB restored database. Cl
 ## Local verification
 
 `tests/postgres-backup-native.test.mjs` executes a real synthetic TLS native export, signed stream decode and the **same offline recovery controller** used in Cloud Build. It verifies all synthetic rows, metadata, memberships/grantors and sequence states; it is not a mocked restore. `tests/postgres-recovery.test.mjs` adds adversarial activation, hash/generation, containment, credential, timing and SQL-identifier tests. Linux image/controller proof and the first real cloud archive remain separate gates; passing local tests must not be presented as those completed gates.
+
+## Private controller failure diagnosis
+
+Cloud Build logging stays `NONE`. The download/publisher CLI exposes only a fixed numeric exit code for its last trusted stage; it never prints the caught error, provider body, SQL, identifiers or environment. `RECOVERY_CONTROLLER_EXIT_CODES` in `cloud.mjs` is the exact mapping:
+
+| Codes | Stages, in numeric order |
+| --- | --- |
+| 20–23 | Arguments; pinned runtime; supplied input/key; client construction |
+| 24–27 | Budget; private workspace; archive download; local input publication |
+| 30–35 | Plan read; plan binding; manifest read; signed manifest verification; outcome-file read; outcome validation |
+| 40–46 | Failure-input validation; immutable failure upload; upload receipt; readback request; readback integrity; final inspection; failure successfully recorded |
+| 50–56 | Successful-container containment; recovery result; acceptance upload; acceptance readback; final inspection; local descriptor; cleanup |
+| 90 | Invalid internal diagnostic stage |
+
+All these codes remain failures. In particular, `46` means only that a failed restore's private diagnostic was verified, **not** that recovery succeeded. Exit `0` means the selected command completed; download completion alone is not recovery acceptance. Exit `1` or a signal before the CLI loads remains unclassified, for example an unreadable packaged module. Source archives must preserve reviewed Git bytes and normalize their recorded modes so the non-root runtime can read them (ordinary code `0644`, executable Git files `0755`, source directories `0755`); private backup inputs and output retain their existing `0600`/`0700` protections.
+
+To diagnose publication without another archive download, a separately reviewed metadata-only smoke can prepare the same exact-build plan, independently verified signed manifest and an explicitly failed host outcome, then invoke the normal publisher. It must use a unique build ID, can create only that build's immutable **failure** receipt, and must still finish nonzero. Never fabricate a successful host outcome, `recovery.json`, or acceptance, and never replay another build's plan. This is an operator diagnostic proposal, not an automatic job or a change to weekly authorization.
