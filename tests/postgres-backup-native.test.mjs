@@ -196,6 +196,34 @@ test("real PG17 TLS export, signed streaming decode and isolated restore preserv
     // Cloud Build. Unsupported matview and LO recovery remain fail-closed;
     // this second synthetic source represents the current supported scope.
     await sql(clusters[0], "DROP MATERIALIZED VIEW public.row_count; SELECT lo_unlink(70001);")
+    // Exact grants can occupy different ACL array positions after pg_dump
+    // omits unchanged defaults. Preserve all grantors/options, including a
+    // delegated chain and role names requiring PostgreSQL array escaping.
+    await sql(clusters[0], `CREATE ROLE fixture_db_owner NOLOGIN; CREATE ROLE fixture_grantor NOLOGIN;
+        CREATE ROLE fixture_recipient NOLOGIN;
+        ALTER DATABASE postgres OWNER TO fixture_db_owner;
+        CREATE SCHEMA acl_fixture AUTHORIZATION fixture_db_owner;
+        SET ROLE fixture_db_owner;
+        GRANT USAGE ON SCHEMA acl_fixture TO fixture_grantor WITH GRANT OPTION;
+        GRANT CONNECT ON DATABASE postgres TO fixture_grantor WITH GRANT OPTION;
+        RESET ROLE; SET ROLE fixture_grantor;
+        GRANT USAGE ON SCHEMA acl_fixture TO fixture_recipient;
+        GRANT CONNECT ON DATABASE postgres TO fixture_recipient;
+        RESET ROLE; SET ROLE fixture_db_owner;
+          REVOKE ALL ON DATABASE postgres FROM PUBLIC;
+          GRANT TEMPORARY,CONNECT ON DATABASE postgres TO PUBLIC;
+          GRANT USAGE ON SCHEMA public TO fixture_grantor WITH GRANT OPTION;
+          REVOKE ALL ON SCHEMA public FROM PUBLIC;
+          GRANT USAGE ON SCHEMA public TO PUBLIC;
+          RESET ROLE; SET ROLE fixture_grantor;
+          GRANT USAGE ON SCHEMA public TO fixture_recipient;
+          RESET ROLE;
+          CREATE ROLE "acl,reader ""quoted"" {} / =\\back" NOLOGIN;
+          SET ROLE fixture_db_owner;
+          GRANT USAGE ON SCHEMA public TO "acl,reader ""quoted"" {} / =\\back";
+          RESET ROLE; SET ROLE fixture_grantor;
+          GRANT CONNECT ON DATABASE postgres TO "acl,reader ""quoted"" {} / =\\back";
+          RESET ROLE;`)
     const cloudExport = await open(context), cloudParts = []; let cloudMetadata, cloudComplete
     for await (const item of decodePostgresExport(cloudExport.bytes, publicKey, context)) {
       if (item.type === "metadata") cloudMetadata = item.metadata

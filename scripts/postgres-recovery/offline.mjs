@@ -10,6 +10,7 @@ import { validatePostgresManifest } from "../../lib/postgresBackupReceipt.mjs"
 import { RECOVERY_CATALOG_EXPRESSION, RECOVERY_CATALOG_KEYS, validateRecoveryCatalog } from "../../lib/postgresRecoveryCatalog.mjs"
 import { createRecoveryDiagnostics, createNativeStderrHint } from "../../lib/postgresRecoveryDiagnostics.mjs"
 import { equivalentRecoveryColumns } from "../../lib/postgresRecoveryColumns.mjs"
+import { equivalentRecoverySchemas, equivalentRecoveryDatabase } from "../../lib/postgresRecoveryAcl.mjs"
 
 const MAX_LINE = 64 * 1024 * 1024, MAX_TEXT = 16 * 1024 * 1024
 const operator = "fcuno_recovery_operator"
@@ -19,7 +20,8 @@ const quote = name => { if (typeof name !== "string" || !name || name.includes("
 const literal = value => { if (typeof value !== "string" || value.includes("\0")) failure(); return `'${value.replaceAll("'", "''")}'` }
 const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value
 const same = (a, b) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b))
-const sameCatalogSection = (expected, actual, section) => section === "columns" ? equivalentRecoveryColumns(expected, actual) : same(expected, actual)
+const sameCatalogSection = (expected, actual, section) => section === "columns" ? equivalentRecoveryColumns(expected, actual) :
+  section === "schemas" ? equivalentRecoverySchemas(expected, actual) : same(expected, actual)
 
 export async function* boundedLines(stream) {
   let pending = Buffer.alloc(0)
@@ -324,7 +326,7 @@ export async function runOfflineRecovery({ archivePath, manifest, publicKey, bin
     await diagnostics.stage("verify-database")
     const database = JSON.parse(await sql(`select jsonb_build_object('name',d.datname,'owner',pg_get_userbyid(d.datdba),'encoding',pg_encoding_to_char(d.encoding),'localeProvider',d.datlocprovider,'collate',d.datcollate,'ctype',d.datctype,'icuLocale',d.datlocale,'collationVersion',d.datcollversion,'actualCollationVersion',pg_database_collation_actual_version(d.oid),'acl',d.datacl,'comment',shobj_description(d.oid,'pg_database')) from pg_database d where d.datname=current_database()`))
     const expectedDatabase = Object.fromEntries(Object.entries(catalog.database).filter(([key]) => key !== "roleSettings"))
-    if (!same(database, expectedDatabase)) failure()
+    if (!equivalentRecoveryDatabase(expectedDatabase, database)) failure()
     await diagnostics.stage("verify-memberships")
     const restoredMemberships = JSON.parse(await sql(`select coalesce(jsonb_agg(jsonb_build_object('role',r.rolname,'member',m.rolname,'grantor',g.rolname,'admin',a.admin_option,'inherit',a.inherit_option,'set',a.set_option) order by r.rolname,m.rolname),'[]'::jsonb) from pg_auth_members a join pg_roles r on r.oid=a.roleid join pg_roles m on m.oid=a.member join pg_roles g on g.oid=a.grantor`))
     if (!same(restoredMemberships, catalog.memberships)) failure()

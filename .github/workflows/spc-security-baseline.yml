@@ -106,12 +106,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --test --test-reporter=tap tests/postgres-backup-capability.test.mjs tests/postgres-backup-adapters.test.mjs tests/postgres-backup-probe.test.mjs tests/postgres-google-probe.test.mjs tests/postgres-recovery.test.mjs tests/postgres-runtime-bundle.test.mjs tests/postgres-runtime-install.test.mjs 2>&1 | tee postgres-fixed-export-tests.tap
+          node --test --test-reporter=tap tests/postgres-backup-capability.test.mjs tests/postgres-backup-adapters.test.mjs tests/postgres-backup-probe.test.mjs tests/postgres-google-probe.test.mjs tests/postgres-recovery.test.mjs tests/postgres-recovery-acl.test.mjs tests/postgres-runtime-bundle.test.mjs tests/postgres-runtime-install.test.mjs 2>&1 | tee postgres-fixed-export-tests.tap
           node --input-type=module <<'NODE'
           import assert from "node:assert/strict"
           import {readFileSync} from "node:fs"
           const text=readFileSync("postgres-fixed-export-tests.tap","utf8")
-          for(const [name,expected] of [["tests",212],["pass",212],["fail",0],["cancelled",0],["skipped",0]]){
+          for(const [name,expected] of [["tests",249],["pass",249],["fail",0],["cancelled",0],["skipped",0]]){
             const values=[...text.matchAll(new RegExp("^# "+name+" (\\d+)","gm"))]
             assert.equal(Number(values.at(-1)?.[1]),expected,name)
           }

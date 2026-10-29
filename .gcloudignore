@@ -29,6 +29,7 @@
 !lib/postgresRecoveryCatalog.mjs
 !lib/postgresRecoveryDiagnostics.mjs
 !lib/postgresRecoveryColumns.mjs
+!lib/postgresRecoveryAcl.mjs
 !lib/postgresRecoveryAcceptance.mjs
 !lib/postgresRecoveryEvidence.mjs
 !lib/postgresRecoveryBuild.mjs

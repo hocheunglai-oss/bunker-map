@@ -469,7 +469,10 @@ test("diagnostics source closure is explicit and no raw error output was enabled
     ["../scripts/postgres-recovery/Dockerfile", /COPY lib\/postgresBackupReceipt\.mjs[^\n]*lib\/postgresRecoveryDiagnostics\.mjs/],
     ["../.gcloudignore", /!lib\/postgresRecoveryColumns\.mjs/],
     ["../scripts/postgres-recovery/Dockerfile.dockerignore", /!lib\/postgresRecoveryColumns\.mjs/],
-    ["../scripts/postgres-recovery/Dockerfile", /COPY lib\/postgresBackupReceipt\.mjs[^\n]*lib\/postgresRecoveryColumns\.mjs/]])
+    ["../scripts/postgres-recovery/Dockerfile", /COPY lib\/postgresBackupReceipt\.mjs[^\n]*lib\/postgresRecoveryColumns\.mjs/],
+    ["../.gcloudignore", /!lib\/postgresRecoveryAcl\.mjs/],
+    ["../scripts/postgres-recovery/Dockerfile.dockerignore", /!lib\/postgresRecoveryAcl\.mjs/],
+    ["../scripts/postgres-recovery/Dockerfile", /COPY lib\/postgresBackupReceipt\.mjs[^\n]*lib\/postgresRecoveryAcl\.mjs/]])
     assert.match(await readFile(new URL(path, import.meta.url), "utf8"), pattern)
 })
 test("CI host checks private proof only after the sealed container exits and ownership returns", async () => {
