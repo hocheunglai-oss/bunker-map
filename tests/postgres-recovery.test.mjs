@@ -11,7 +11,7 @@ import { createRecoveryBuild, validateRecoveryHostInspection, RECOVERY_WORKSPACE
 import { requireCloudRecoveryAcceptance, validateRecoveryAcceptanceDescriptor } from "../lib/postgresRecoveryAcceptance.mjs"
 import { parseCopyHeader, parseSequenceState, parseToc, boundedLines, fingerprintRows, runOfflineRecovery } from "../scripts/postgres-recovery/offline.mjs"
 import { createRecoveryDiagnostics, createNativeStderrHint, validateRecoveryDiagnostic, validateRecoveryFailureHost, recoveryFailure } from "../lib/postgresRecoveryDiagnostics.mjs"
-import { recordRecoveryFailureAndReject, RECOVERY_CONTROLLER_EXIT_CODES, createRecoveryControllerStages, readRecoveryPublicationInputs, runCloudRecoveryCli } from "../scripts/postgres-recovery/cloud.mjs"
+import { recordRecoveryFailureAndReject, RECOVERY_CONTROLLER_EXIT_CODES, createRecoveryControllerStages, readRecoveryPublicationInputs, readRecoveryHostOutcome, recoveryPublicationFailed, runCloudRecoveryCli } from "../scripts/postgres-recovery/cloud.mjs"
 import { createStorageMediaGcsAdapter } from "../scripts/lib/storage-media-gcs-adapter.mjs"
 import { requirePostgresRecoveryBuildRuntime, createMetadataAccessTokenProvider } from "../scripts/lib/storage-media-job-auth.mjs"
 import { validateOfflineRecoveryResult } from "../lib/postgresRecoveryEvidence.mjs"
@@ -247,7 +247,10 @@ test("shell retains safe host outcome before cleanup and preserves failure exit"
     const script = (await readFile(new URL("../scripts/postgres-recovery/run-cloud-isolated.sh", import.meta.url), "utf8"))
       .replace("work=/workspace/.fcuno-postgres-recovery", `work='${work}'`)
     await writeFile(join(root, "run.sh"), script, { mode: 0o600 })
-    await writeFile(join(bin, "docker"), `#!${process.execPath}\nimport fs from 'node:fs';\nconst args=process.argv.slice(2);fs.appendFileSync(${JSON.stringify(journal)},JSON.stringify(args)+'\\n');\nif(args[0]==='run')process.exit(1);\nif(args[0]==='inspect'){if(args[2]==='{{json .}}')throw Error('full failure inspect forbidden');process.stdout.write(JSON.stringify({Status:'exited',Running:false,ExitCode:1,OOMKilled:false}));}\n`, { mode: 0o700 })
+    // Render the four actual format placeholders instead of returning a
+    // hard-coded valid JSON object. Missing literal braces in the shell's Go
+    // template must therefore break JSON.parse here, as they do with Docker.
+    await writeFile(join(bin, "docker"), `#!${process.execPath}\nimport fs from 'node:fs';\nconst args=process.argv.slice(2);fs.appendFileSync(${JSON.stringify(journal)},JSON.stringify(args)+'\\n');\nif(args[0]==='run')process.exit(1);\nif(args[0]==='inspect'){const state={Status:'exited',Running:false,ExitCode:1,OOMKilled:false};if(args[2]==='{{json .}}')throw Error('full failure inspect forbidden');const rendered=args[2].replace(/\\{\\{json \\.State\\.(Status|Running|ExitCode|OOMKilled)\\}\\}/g,(_,key)=>JSON.stringify(state[key]));if(rendered.includes('{{'))throw Error('unknown synthetic template');process.stdout.write(rendered);}\n`, { mode: 0o700 })
     await chmod(join(bin, "docker"), 0o700)
     await assert.rejects(promisify(execFile)("/bin/bash", [join(root, "run.sh")], { env: { PATH: `${bin}:/usr/bin:/bin` } }), error => error.code === 1)
     const outcome = JSON.parse(await readFile(join(work, "host-outcome.json"), "utf8")); validateRecoveryFailureHost(outcome)
@@ -392,8 +395,6 @@ test("publisher preflight exercises real private files and reports exact failing
     [32, async dir => writeFile(join(dir, "input/manifest.json"), "{")],
     [33, async dir => json(join(dir, "input/manifest.json"), { ...manifest, signature: "a".repeat(86) })],
     [33, async dir => json(join(dir, "input/manifest.json"), { ...manifest, runId: "different-run" })],
-    [34, async dir => writeFile(join(dir, "host-outcome.json"), "{")],
-    [35, async dir => json(join(dir, "host-outcome.json"), { ...failedHost, rawError: "private SQL" })],
     [34, async dir => writeFile(join(dir, "output/diagnostic.json"), "{")],
     [34, async dir => symlink(join(dir, "input/manifest.json"), join(dir, "output/diagnostic.json"))],
     [34, async dir => mkdir(join(dir, "output/diagnostic.json"))],
@@ -413,10 +414,118 @@ test("publisher preflight exercises real private files and reports exact failing
       } else {
         const result = await readRecoveryPublicationInputs(input)
         assert.equal(result.diagnostic, null); assert.deepEqual(result.hostOutcome, index === cases.length ? null : failedHost)
+        assert.equal(result.hostReadStatus, index === cases.length ? "missing" : "valid")
         assert.equal(trace.exitCode(), 35); assert.deepEqual(result.manifest, manifest)
       }
     }
   } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test("host outcome read failures retain fixed statuses without private data or symlink following", async () => {
+  const root = await mkdtemp(join(tmpdir(), "fcuno-host-read-"))
+  const value = { schema: "fcuno.private-recovery-host-outcome/v1", dockerRunExitCode: 1,
+    state: { Status: "exited", Running: false, ExitCode: 1, OOMKilled: false } }
+  try {
+    const path = join(root, "host.json")
+    assert.deepEqual(await readRecoveryHostOutcome(path), { status: "missing", host: null })
+    for (const [bytes, expected] of [["", "invalid-json"], ["{PRIVATE_SQL_PASSWORD", "invalid-json"],
+      ["null", "invalid-evidence"], ["[]", "invalid-evidence"],
+      [JSON.stringify({ ...value, rawError: "PRIVATE_SQL_PASSWORD" }), "invalid-evidence"],
+      [Buffer.alloc(16385), "invalid-file"], [JSON.stringify(value), "valid"]]) {
+      await writeFile(path, bytes, { mode: 0o600 })
+      const result = await readRecoveryHostOutcome(path)
+      assert.equal(result.status, expected)
+      assert.deepEqual(result.host, expected === "valid" ? value : null)
+      assert.doesNotMatch(JSON.stringify(result), /PRIVATE_SQL_PASSWORD/)
+    }
+    await rm(path); await mkdir(path)
+    assert.deepEqual(await readRecoveryHostOutcome(path), { status: "invalid-file", host: null })
+    await rm(path, { recursive: true }); await writeFile(join(root, "private-target"), JSON.stringify(value), { mode: 0o600 })
+    await symlink(join(root, "private-target"), path)
+    assert.deepEqual(await readRecoveryHostOutcome(path), { status: "invalid-file", host: null })
+    for (const code of ["EACCES", "EPERM", "EIO", "PRIVATE_SQL_PASSWORD"]) {
+      const result = await readRecoveryHostOutcome(path, { openFile: async () => { throw Object.assign(new Error("PRIVATE_SQL_PASSWORD"), { code }) } })
+      assert.deepEqual(result, { status: "read-error", host: null })
+    }
+    for (const failedPhase of ["stat", "read", "close"]) {
+      let closed = false
+      const fakeFile = {
+        stat: async () => { if (failedPhase === "stat") throw Error("PRIVATE_SQL_PASSWORD"); return { isFile: () => true, size: 0 } },
+        read: async () => { if (failedPhase === "read") throw Error("PRIVATE_SQL_PASSWORD"); return { bytesRead: 0 } },
+        close: async () => { closed = true; if (failedPhase === "close") throw Error("PRIVATE_SQL_PASSWORD") },
+      }
+      assert.deepEqual(await readRecoveryHostOutcome(path, { openFile: async () => fakeFile }), { status: "read-error", host: null })
+      assert.equal(closed, true)
+    }
+    // Check the bound again after opening: a file can grow after stat.
+    let bounded = false
+    assert.deepEqual(await readRecoveryHostOutcome(path, { openFile: async () => ({
+      stat: async () => ({ isFile: () => true, size: 1 }),
+      read: async (buffer, offset, length) => { assert.equal(buffer.length, 16385); bounded = true; return { bytesRead: length } },
+      close: async () => {},
+    }) }), { status: "invalid-file", host: null })
+    assert.equal(bounded, true)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test("invalid host preflight preserves independently valid native diagnostic and remains failure-only", async () => {
+  const root = await mkdtemp(join(tmpdir(), "fcuno-host-preflight-"))
+  const pubRuntime = { ...runtime, FCUNO_RECOVERY_SOURCE_COMMIT: "f".repeat(40), POSTGRES_BACKUP_VERIFICATION_KEY_PEM: publicPem }
+  const plan = { buildId: runtime.FCUNO_POSTGRES_RECOVERY_BUILD_ID, sourceCommit: pubRuntime.FCUNO_RECOVERY_SOURCE_COMMIT,
+    manifest: manifestReceipt, verificationKeySha256: sha(Buffer.from(publicPem)) }
+  const trace = createRecoveryDiagnostics({ now }); await trace.stage("verify-catalog"); await trace.failed(); await trace.cleanup("ok")
+  try {
+    await mkdir(join(root, "input")); await mkdir(join(root, "output"))
+    await writeFile(join(root, "plan.json"), JSON.stringify(plan), { mode: 0o600 })
+    await writeFile(join(root, "input/manifest.json"), manifestBytes, { mode: 0o600 })
+    await writeFile(join(root, "output/diagnostic.json"), JSON.stringify(trace.snapshot()), { mode: 0o600 })
+    for (const [bytes, expected] of [["{PRIVATE_SQL_PASSWORD", "invalid-json"], ["null", "invalid-evidence"], [Buffer.alloc(16385), "invalid-file"]]) {
+      await writeFile(join(root, "host-outcome.json"), bytes, { mode: 0o600 })
+      const result = await readRecoveryPublicationInputs({ workspace: root, runtime: pubRuntime, descriptor: manifestReceipt, publicKey })
+      assert.equal(result.hostReadStatus, expected); assert.equal(result.hostOutcome, null)
+      assert.deepEqual(result.diagnostic, trace.snapshot()); assert.equal(recoveryPublicationFailed(result), true)
+      assert.doesNotMatch(JSON.stringify(result), /PRIVATE_SQL_PASSWORD/)
+    }
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test("every invalid host status creates only a verified failure receipt and can never authorize acceptance", async () => {
+  const trace = createRecoveryDiagnostics({ now }); await trace.cleanup("ok"); await trace.complete()
+  const diagnostic = trace.snapshot()
+  const successfulHost = { schema: "fcuno.private-recovery-host-outcome/v1", dockerRunExitCode: 0,
+    state: { Status: "exited", Running: false, ExitCode: 0, OOMKilled: false } }
+  const plan = { manifest: manifestReceipt, buildId: runtime.FCUNO_POSTGRES_RECOVERY_BUILD_ID, sourceCommit: "f".repeat(40) }
+  // Valid success takes exactly the original success predicate; any invalid
+  // host status still fails even if the native diagnostic claims completion.
+  assert.equal(recoveryPublicationFailed({ hostOutcome: successfulHost, hostReadStatus: "valid", diagnostic }), false)
+  for (const hostReadStatus of ["missing", "invalid-file", "invalid-json", "invalid-evidence", "read-error"]) {
+    let recorded, receipt, writes = 0, acceptanceWrites = 0
+    const stages = createRecoveryControllerStages()
+    const gcs = {
+      uploadImmutable: async () => { acceptanceWrites++; throw Error("acceptance forbidden") },
+      uploadRecoveryFailure: async input => { writes++; recorded = input.bytes
+        receipt = { target: { ...manifestReceipt.target, objectName: manifestReceipt.target.objectName.replace("manifest.json", `failures/${plan.buildId}.json`), generation: "123" },
+          sizeBytes: recorded.length, crc32c: crc(recorded) }; return receipt },
+      readTarget: async () => ({ ...receipt, bytes: (async function* () { yield recorded })() }),
+      inspectTarget: async () => receipt,
+    }
+    await assert.rejects(recordRecoveryFailureAndReject({ gcs, context: context(), plan, host: null, hostReadStatus, diagnostic, stage: stages.enter }))
+    assert.equal(stages.exitCode(), 46); assert.equal(writes, 1); assert.equal(acceptanceWrites, 0)
+    const report = JSON.parse(recorded)
+    assert.equal(report.hostReadStatus, hostReadStatus); assert.equal(report.host, null)
+    assert.deepEqual(report.diagnostic, diagnostic); assert.equal(report.recoveryVerified, false)
+    assert.throws(() => validateRecoveryAcceptanceDescriptor({ ...receipt, byteSha256: sha(recorded) }))
+    assert.throws(() => recoveryPublicationFailed({ hostOutcome: successfulHost, hostReadStatus, diagnostic }))
+  }
+  for (const hostReadStatus of [undefined, null, "__proto__", "constructor", 0, "PRIVATE_SQL_PASSWORD", {}])
+    assert.throws(() => recoveryPublicationFailed({ hostOutcome: null, hostReadStatus, diagnostic }))
+  assert.throws(() => recoveryPublicationFailed({ hostOutcome: null, hostReadStatus: "valid", diagnostic }))
+  let writes = 0
+  await assert.rejects(recordRecoveryFailureAndReject({ gcs: { uploadRecoveryFailure: async () => { writes++ } }, context: context(),
+    plan, host: successfulHost, hostReadStatus: "valid", diagnostic }))
+  assert.equal(writes, 0, "the failure writer must not relabel real success or publish any acceptance")
+  const source = await readFile(new URL("../scripts/postgres-recovery/cloud.mjs", import.meta.url), "utf8")
+  assert.match(source, /if \(recoveryPublicationFailed\(\{ hostOutcome, hostReadStatus, diagnostic \}\)\)\s+await recordRecoveryFailureAndReject/)
 })
 
 test("failure publisher exposes only fixed substages and never a success exit", async () => {

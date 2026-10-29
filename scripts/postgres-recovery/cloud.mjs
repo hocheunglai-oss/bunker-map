@@ -1,6 +1,7 @@
 // Network-capable controller only. Native SQL is NEVER executed here. The
 // separate inner container receives neither this environment nor ADC access.
 import { createPublicKey, createHash, verify } from "node:crypto"
+import { constants as fsConstants } from "node:fs"
 import { mkdir, open, writeFile, readFile, rename, chown, lstat, rm } from "node:fs/promises"
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -51,17 +52,56 @@ async function optionalPrivateJson(path, maximum = 16384) {
   try { return JSON.parse(await smallFile(path, maximum)) }
   catch (error) { if (error?.code === "ENOENT") return null; throw error }
 }
+const HOST_READ_STATUSES = Object.freeze(["valid", "missing", "invalid-file", "invalid-json", "invalid-evidence", "read-error"])
+function validateHostRead({ host, status }) {
+  if (!HOST_READ_STATUSES.includes(status) || (status === "valid" ? host === null : host !== null)) failure()
+  if (status === "valid") validateRecoveryFailureHost(host)
+}
+// A corrupt/unreadable host file is explicit FAILED evidence, never equivalent
+// to a successful or merely absent host. Keep only a fixed status, not bytes,
+// paths, OS errors or inspect output. The diagnostic is independently validated.
+// The optional I/O seam is for local error-injection tests; production supplies
+// neither it nor a caller-controlled path.
+export async function readRecoveryHostOutcome(path, { openFile = open } = {}) {
+  try {
+    const file = await openFile(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK)
+    try {
+      const info = await file.stat()
+      if (!info.isFile() || info.size > 16384) return { status: "invalid-file", host: null }
+      const bytes = Buffer.alloc(16385)
+      let length = 0
+      while (length < bytes.length) {
+        const { bytesRead } = await file.read(bytes, length, bytes.length - length, null)
+        if (!bytesRead) break
+        length += bytesRead
+      }
+      if (length > 16384) return { status: "invalid-file", host: null }
+      let host
+      try { host = JSON.parse(bytes.subarray(0, length)) }
+      catch { return { status: "invalid-json", host: null } }
+      try { validateRecoveryFailureHost(host) }
+      catch { return { status: "invalid-evidence", host: null } }
+      return { status: "valid", host }
+    } finally { await file.close() }
+  } catch (error) {
+    return { status: error?.code === "ENOENT" ? "missing" : error?.code === "ELOOP" ? "invalid-file" : "read-error", host: null }
+  }
+}
+export function recoveryPublicationFailed({ hostOutcome, hostReadStatus, diagnostic }) {
+  validateHostRead({ host: hostOutcome, status: hostReadStatus })
+  if (diagnostic !== null) validateRecoveryDiagnostic(diagnostic)
+  return hostReadStatus !== "valid" || recoveryFailure({ host: hostOutcome, diagnostic })
+}
 // This branch always rejects, even after its immutable private receipt was
 // durably read back. It cannot publish an acceptance or make the Build pass.
-export async function recordRecoveryFailureAndReject({ gcs, context, plan, host, diagnostic, stage = () => {} }) {
+export async function recordRecoveryFailureAndReject({ gcs, context, plan, host, diagnostic,
+  hostReadStatus = host === null ? "missing" : "valid", stage = () => {} }) {
   stage("failure-input-validation")
   validatePostgresManifestReceipt(plan.manifest)
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(plan.buildId) || !/^[0-9a-f]{40}$/.test(plan.sourceCommit)) failure()
-  if (host !== null) validateRecoveryFailureHost(host)
-  if (diagnostic !== null) validateRecoveryDiagnostic(diagnostic)
-  if (host !== null && !recoveryFailure({ host, diagnostic })) failure()
+  if (!recoveryPublicationFailed({ hostOutcome: host, hostReadStatus, diagnostic })) failure()
   const report = { schema: "fcuno.postgresql-recovery-failure/v1", status: "cloud-isolated-recovery-failed", recoveryVerified: false,
-    manifest: plan.manifest, build: { projectId: fcunoConnectionPolicy.storageMediaBackup.googleProjectId, id: plan.buildId, sourceCommit: plan.sourceCommit }, host, diagnostic }
+    manifest: plan.manifest, build: { projectId: fcunoConnectionPolicy.storageMediaBackup.googleProjectId, id: plan.buildId, sourceCommit: plan.sourceCommit }, hostReadStatus, host, diagnostic }
   const bytes = Buffer.from(JSON.stringify(report))
   if (bytes.length > 16384) failure()
   stage("failure-upload")
@@ -96,14 +136,14 @@ export async function readRecoveryPublicationInputs({ runtime, descriptor, publi
   if (manifest.runId !== runId || hash(Buffer.from(JSON.stringify(manifest.metadata))) !== manifest.completion.metadataSha256 ||
       !verify(null, Buffer.from(JSON.stringify(manifest.completion)), publicKey, Buffer.from(manifest.signature, "base64url"))) failure()
   stage("publish-outcome-read")
-  const hostOutcome = await optionalPrivateJson(`${workspace}/host-outcome.json`)
+  const { host: hostOutcome, status: hostReadStatus } = await readRecoveryHostOutcome(`${workspace}/host-outcome.json`)
   const diagnostic = await optionalPrivateJson(`${workspace}/output/diagnostic.json`)
   stage("publish-outcome-validation")
   // These are the same validators previously reached through recoveryFailure
   // and the failure recorder. Missing files remain an explicit failed restore.
-  if (hostOutcome !== null) validateRecoveryFailureHost(hostOutcome)
+  validateHostRead({ host: hostOutcome, status: hostReadStatus })
   if (diagnostic !== null) validateRecoveryDiagnostic(diagnostic)
-  return { plan, manifest, hostOutcome, diagnostic }
+  return { plan, manifest, hostOutcome, hostReadStatus, diagnostic }
 }
 export async function cloudMain({ args = process.argv.slice(2), runtime = process.env, fetch: fetchImpl = fetch, now = Date.now, stage = () => {} } = {}) {
   stage("controller-arguments")
@@ -157,9 +197,9 @@ export async function cloudMain({ args = process.argv.slice(2), runtime = proces
       sourceCommit: runtime.FCUNO_RECOVERY_SOURCE_COMMIT, manifest: descriptor, verificationKeySha256: hash(Buffer.from(runtime.POSTGRES_BACKUP_VERIFICATION_KEY_PEM)) }), { mode: 0o600, flag: "wx" })
     return { status: "private-copy-ready-for-isolated-recovery" }
   }
-  const { plan, manifest, hostOutcome, diagnostic } = await readRecoveryPublicationInputs({ runtime, descriptor, publicKey, stage })
-  if (hostOutcome === null || recoveryFailure({ host: hostOutcome, diagnostic }))
-    await recordRecoveryFailureAndReject({ gcs, context, plan, host: hostOutcome, diagnostic, stage })
+  const { plan, manifest, hostOutcome, hostReadStatus, diagnostic } = await readRecoveryPublicationInputs({ runtime, descriptor, publicKey, stage })
+  if (recoveryPublicationFailed({ hostOutcome, hostReadStatus, diagnostic }))
+    await recordRecoveryFailureAndReject({ gcs, context, plan, host: hostOutcome, hostReadStatus, diagnostic, stage })
   stage("acceptance-containment")
   const containment = validateRecoveryHostInspection(JSON.parse(await smallFile(`${RECOVERY_WORKSPACE}/host-inspection.json`, 1024 * 1024)))
   stage("acceptance-result")

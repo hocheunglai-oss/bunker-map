@@ -224,6 +224,18 @@ test("real PG17 TLS export, signed streaming decode and isolated restore preserv
           RESET ROLE; SET ROLE fixture_grantor;
           GRANT CONNECT ON DATABASE postgres TO "acl,reader ""quoted"" {} / =\\back";
           RESET ROLE;`)
+    // The same default omission can reorder ACLs on every other known ACL
+    // catalog object. Nothing except ACL item order may compare differently.
+    await sql(clusters[0], `GRANT EXECUTE ON FUNCTION public.fixture_answer() TO fixture_recipient;
+      REVOKE ALL ON FUNCTION public.fixture_answer() FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION public.fixture_answer() TO PUBLIC;
+      GRANT SELECT ON TABLE public.rows TO fixture_recipient;
+      REVOKE ALL ON TABLE public.rows FROM fixture_owner;
+      GRANT ALL ON TABLE public.rows TO fixture_owner;
+      CREATE TYPE public.acl_color AS ENUM ('red','green');
+      GRANT USAGE ON TYPE public.acl_color TO fixture_recipient;
+      REVOKE ALL ON TYPE public.acl_color FROM PUBLIC;
+      GRANT USAGE ON TYPE public.acl_color TO PUBLIC;`)
     const cloudExport = await open(context), cloudParts = []; let cloudMetadata, cloudComplete
     for await (const item of decodePostgresExport(cloudExport.bytes, publicKey, context)) {
       if (item.type === "metadata") cloudMetadata = item.metadata

@@ -10,7 +10,7 @@ import { validatePostgresManifest } from "../../lib/postgresBackupReceipt.mjs"
 import { RECOVERY_CATALOG_EXPRESSION, RECOVERY_CATALOG_KEYS, validateRecoveryCatalog } from "../../lib/postgresRecoveryCatalog.mjs"
 import { createRecoveryDiagnostics, createNativeStderrHint } from "../../lib/postgresRecoveryDiagnostics.mjs"
 import { equivalentRecoveryColumns } from "../../lib/postgresRecoveryColumns.mjs"
-import { equivalentRecoverySchemas, equivalentRecoveryDatabase } from "../../lib/postgresRecoveryAcl.mjs"
+import { equivalentRecoverySchemas, equivalentRecoveryDatabase, equivalentRecoveryAclSection } from "../../lib/postgresRecoveryAcl.mjs"
 
 const MAX_LINE = 64 * 1024 * 1024, MAX_TEXT = 16 * 1024 * 1024
 const operator = "fcuno_recovery_operator"
@@ -21,7 +21,8 @@ const literal = value => { if (typeof value !== "string" || value.includes("\0")
 const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value
 const same = (a, b) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b))
 const sameCatalogSection = (expected, actual, section) => section === "columns" ? equivalentRecoveryColumns(expected, actual) :
-  section === "schemas" ? equivalentRecoverySchemas(expected, actual) : same(expected, actual)
+  section === "schemas" ? equivalentRecoverySchemas(expected, actual) :
+  ["relations", "functions", "types"].includes(section) ? equivalentRecoveryAclSection(expected, actual, section) : same(expected, actual)
 
 export async function* boundedLines(stream) {
   let pending = Buffer.alloc(0)

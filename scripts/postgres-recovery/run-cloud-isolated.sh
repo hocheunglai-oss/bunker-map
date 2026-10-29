@@ -18,7 +18,7 @@ docker run --name "$name" --platform linux/amd64 --network none \
 # Capture only these fixed primitives on failure, never .Error, environment,
 # command arguments or logs. Inspection happens BEFORE the cleanup trap.
 state=null
-if inspected=$(docker inspect --format '{"Status":{{json .State.Status}},"Running":{{json .State.Running}},"ExitCode":{{json .State.ExitCode}},"OOMKilled":{{json .State.OOMKilled}}' "$name" 2>/dev/null); then
+if inspected=$(docker inspect --format '{"Status":{{json .State.Status}},"Running":{{json .State.Running}},"ExitCode":{{json .State.ExitCode}},"OOMKilled":{{json .State.OOMKilled}}}' "$name" 2>/dev/null); then
   state=$inspected
 fi
 printf '{"schema":"fcuno.private-recovery-host-outcome/v1","dockerRunExitCode":%d,"state":%s}\n' "$result" "$state" > "$work/host-outcome.json"

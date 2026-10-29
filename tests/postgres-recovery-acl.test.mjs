@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { equivalentRecoverySchemas, equivalentRecoveryDatabase } from "../lib/postgresRecoveryAcl.mjs"
+import { equivalentRecoverySchemas, equivalentRecoveryDatabase, equivalentRecoveryAclSection } from "../lib/postgresRecoveryAcl.mjs"
 
 const items = ["owner=CTc/owner", "delegate=c*/owner", "reader=c/delegate", "=Tc/owner"]
 const database = acl => ({ name: "postgres", owner: "owner", encoding: "UTF8", comment: null, acl })
@@ -37,6 +37,8 @@ for (const [label, changed] of [
 ]) test(`changed ${label} rejects in both ACL locations`, () => {
   assert.equal(equivalentRecoveryDatabase(database(items), database(changed)), false)
   assert.equal(equivalentRecoverySchemas([schema(text(items))], [schema(text(changed))]), false)
+  for (const section of ["relations", "functions", "types"])
+    assert.equal(equivalentRecoveryAclSection([schema(text(items))], [schema(text(changed))], section), false)
 })
 
 test("duplicate items are counted, never collapsed into a set", () => {
@@ -99,4 +101,29 @@ test("ACL array item count and byte limits fail closed", () => {
   assert.equal(equivalentRecoverySchemas([schema(text(many))], [schema(text(many))]), false)
   const large = ["x".repeat(8 * 1024 * 1024)]
   assert.equal(equivalentRecoveryDatabase(database(large), database(large)), false)
+})
+
+for (const [section, fields] of [
+  ["relations", { schema: "public", name: "example", kind: "r", rls: true, force_rls: false, options: ["a=1", "b=2"] }],
+  ["functions", { schema: "public", name: "example", identity: "integer", definition: "synthetic definition" }],
+  ["types", { schema: "public", name: "example", kind: "e", enum_values: ["first", "last"], not_null: false }],
+]) test(`${section} changes only ACL ordering and preserves every other known/unknown field and row order`, () => {
+  const original = { ...fields, owner: "owner", comment: null, acl: text(items), future: [1, 2] }
+  const reordered = { ...original, acl: text(items.toReversed()) }
+  const before = JSON.stringify([original, reordered])
+  assert.equal(equivalentRecoveryAclSection([original], [reordered], section), true)
+  for (const change of [{ owner: "other" }, { name: "other" }, { comment: "changed" }, { future: [2, 1] },
+    { unknown: true }, ...Object.entries(fields).map(([key, value]) => ({ [key]: typeof value === "boolean" ? !value : `${value}-changed` }))])
+    assert.equal(equivalentRecoveryAclSection([original], [{ ...reordered, ...change }], section), false)
+  const other = { ...original, name: "second" }
+  assert.equal(equivalentRecoveryAclSection([original, other], [other, reordered], section), false)
+  assert.equal(equivalentRecoveryAclSection([original], [reordered, other], section), false)
+  assert.equal(equivalentRecoveryAclSection([{ ...original, acl: null }], [{ ...original, acl: "{}" }], section), false)
+  assert.equal(equivalentRecoveryAclSection([{ ...original, acl: '{"broken}' }], [{ ...original, acl: '{"broken}' }], section), false)
+  assert.equal(JSON.stringify([original, reordered]), before)
+})
+
+test("ACL section selector refuses every other catalog location", () => {
+  for (const section of ["schemas", "database", "columns", "constraints", "indexes", "triggers", "policies", "views", "sequences", "extensionTables", "acl", "__proto__", "", undefined, null])
+    assert.equal(equivalentRecoveryAclSection([schema(text(items))], [schema(text(items.toReversed()))], section), false)
 })
