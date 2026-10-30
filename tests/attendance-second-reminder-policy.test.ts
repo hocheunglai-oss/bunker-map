@@ -30,7 +30,7 @@ const manualPeople: Person[] = [
   { id: "4c5d73e6-63a9-4b05-93a7-7354b3e668ad", adminUserId: "84bb808c-e188-43ce-9ddf-e7e2fe2e997d",
     staffCode: "NN", displayName: "NN", dingTalkUserId: null, team: "BT", employmentStartDate: "2026-11-02" },
   { id: "96142f45-373f-47e2-9104-e33804f2fb1e", adminUserId: "7c2f5a90-09ae-4d3b-9996-d189f0154d53",
-    staffCode: "TL", displayName: "TL", dingTalkUserId: null, team: "BT", employmentStartDate: "2026-11-02" },
+    staffCode: "ML", displayName: "ML", dingTalkUserId: null, team: "BT", employmentStartDate: "2026-11-02" },
 ]
 const ordinary: Person = { id: "ordinary-person", adminUserId: "ordinary-admin", staffCode: "OTHER",
   displayName: "Ordinary User", dingTalkUserId: "ordinary-ding", team: "BT", employmentStartDate: "2026-01-01" }
@@ -79,7 +79,7 @@ function fixture(people: Person[]) {
   return { emails, dispatches, send: (now = new Date("2026-12-01T00:00:00.000Z")) => send(client, now) }
 }
 
-test("real second-reminder sender gives NN/TL truthful manual review wording and ordinary staff unchanged wording", async () => {
+test("real second-reminder sender gives NN/ML truthful manual review wording and ordinary staff unchanged wording", async () => {
   const app = fixture([...manualPeople, ordinary])
   assert.equal((await app.send()).sent, 3)
   for (const email of app.emails.slice(0, 2)) {

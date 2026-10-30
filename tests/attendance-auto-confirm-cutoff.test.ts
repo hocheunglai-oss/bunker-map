@@ -87,7 +87,7 @@ const manualEntryPeople = [
   },
   {
     ...person, id: "96142f45-373f-47e2-9104-e33804f2fb1e",
-    admin_user_id: "7c2f5a90-09ae-4d3b-9996-d189f0154d53", staff_code: "TL",
+    admin_user_id: "7c2f5a90-09ae-4d3b-9996-d189f0154d53", staff_code: "ML",
     dingtalk_user_id: null, employment_start_date: "2026-11-02",
   },
 ]
@@ -903,7 +903,7 @@ test("a fresh snapshot rejects JZ tuple, link, reminder or policy-source changes
   }
 })
 
-test("approved NN/TL manual-entry statements are never automatically approved in any scope", async () => {
+test("approved NN/ML manual-entry statements are never automatically approved in any scope", async () => {
   for (const scope of ["all", "ordinary", "cyDingTalkException", "jzDingTalkException"] as const) {
     const app = fakeClient(manualNovemberInput())
     const before = structuredClone(app.tables)
@@ -928,7 +928,7 @@ test("manual-entry people do not block an ordinary colleague's fully verified co
   }
 })
 
-test("later DingTalk linkage cannot retroactively auto-approve NN/TL manual statements", async () => {
+test("later DingTalk linkage cannot retroactively auto-approve NN/ML manual statements", async () => {
   const linkedPeople = manualEntryPeople.map(value => ({ ...value, dingtalk_user_id: `new-${value.staff_code}` }))
   const app = fakeClient(manualNovemberInput([person, ...linkedPeople]))
   const manualPending = structuredClone(app.tables.attendance_monthly_confirmations.slice(1))
@@ -949,7 +949,7 @@ test("a changed manual-entry identity, group or join date retains the ordinary m
   }
 })
 
-test("another unmapped person cannot inherit NN/TL's manual-entry policy", async () => {
+test("another unmapped person cannot inherit NN/ML's manual-entry policy", async () => {
   const app = fakeClient(manualNovemberInput([...manualEntryPeople, { ...person, dingtalk_user_id: null }]))
   await assert.rejects(autoConfirmOverdueAttendance(app.client, manualNovemberNow), /no DingTalk identity/)
   assert.deepEqual(app.writes, [])

@@ -24,7 +24,7 @@ const ordinary = Array.from({ length: 8 }, (_, index) => ({
 const cy = { ...employment, id: "e2cd1a9d-95c1-4292-940a-884537f35cf3", admin_user_id: null, staff_code: "CY", dingtalk_user_id: null }
 const jz = { ...employment, id: "50988b84-4d6c-4089-9112-d6bfad1ed72d", admin_user_id: "3cf2bff0-4eda-4c36-8827-a8f7be0c764d", staff_code: "JZ", dingtalk_user_id: null }
 const nn = { ...employment, id: "4c5d73e6-63a9-4b05-93a7-7354b3e668ad", admin_user_id: "84bb808c-e188-43ce-9ddf-e7e2fe2e997d", staff_code: "NN", dingtalk_user_id: null, employment_start_date: "2026-11-02" }
-const tl = { ...employment, id: "96142f45-373f-47e2-9104-e33804f2fb1e", admin_user_id: "7c2f5a90-09ae-4d3b-9996-d189f0154d53", staff_code: "TL", dingtalk_user_id: null, employment_start_date: "2026-11-02" }
+const ml = { ...employment, id: "96142f45-373f-47e2-9104-e33804f2fb1e", admin_user_id: "7c2f5a90-09ae-4d3b-9996-d189f0154d53", staff_code: "ML", dingtalk_user_id: null, employment_start_date: "2026-11-02" }
 const afterJoining = Date.parse("2026-11-02T11:16:00.000Z")
 const groupRows = (people: Row[]) => people.map(person => ({
   person_id: person.id, team: person.team, effective_from: person.employment_start_date || "2000-01-01", effective_to: null,
@@ -173,7 +173,7 @@ test("provider read errors are propagated rather than presented as healthy", asy
 })
 
 test("approved manual entry is counted separately from DingTalk mappings and CY/JZ exceptions", async () => {
-  const { result } = await invoke({ people: [...ordinary, cy, jz, nn, tl], now: afterJoining })
+  const { result } = await invoke({ people: [...ordinary, cy, jz, nn, ml], now: afterJoining })
   assert.equal(result.status, "ok")
   assert.equal(result.details.activePeople, 12); assert.equal(result.details.effectiveActivePeople, 12)
   assert.equal(result.details.mappedPeople, 8); assert.equal(result.details.approvedMappingExceptions, 2)
@@ -182,13 +182,13 @@ test("approved manual entry is counted separately from DingTalk mappings and CY/
 
 test("unknown unmapped people are not covered by approved manual entry", async () => {
   const unknown = { ...ordinary[0], id: "unknown-unmapped", dingtalk_user_id: null }
-  const { result } = await invoke({ people: [nn, tl, unknown], now: afterJoining })
+  const { result } = await invoke({ people: [nn, ml, unknown], now: afterJoining })
   assert.equal(result.status, "warning"); assert.match(result.message, /1 active people need a DingTalk user mapping/)
   assert.equal(result.details.approvedManualEntryPeople, 2); assert.equal(result.details.missingRequiredMappings, 1)
 })
 
 test("manual policies cannot transfer to another person, admin, staff code, group or start date", async () => {
-  for (const original of [nn, tl]) {
+  for (const original of [nn, ml]) {
     for (const person of [
       { ...original, id: "reassigned-person" }, { ...original, admin_user_id: "reassigned-admin" },
       { ...original, staff_code: "OTHER" }, { ...original, team: "BS" },
@@ -202,25 +202,25 @@ test("manual policies cannot transfer to another person, admin, staff code, grou
 })
 
 test("a later DingTalk mapping moves manual staff into mapped count without double-counting", async () => {
-  const { result } = await invoke({ people: [{ ...nn, dingtalk_user_id: "ding-nn" }, { ...tl, dingtalk_user_id: "ding-tl" }], now: afterJoining })
+  const { result } = await invoke({ people: [{ ...nn, dingtalk_user_id: "ding-nn" }, { ...ml, dingtalk_user_id: "ding-ml" }], now: afterJoining })
   assert.equal(result.status, "ok"); assert.equal(result.details.mappedPeople, 2)
   assert.equal(result.details.approvedManualEntryPeople, 0); assert.equal(result.details.missingRequiredMappings, 0)
 })
 
 test("future starters do not warn today but remain in the full registry and group inventory", async () => {
-  const { result } = await invoke({ people: [...ordinary, cy, jz, nn, tl] })
+  const { result } = await invoke({ people: [...ordinary, cy, jz, nn, ml] })
   assert.equal(result.status, "ok"); assert.equal(result.details.activePeople, 12)
   assert.equal(result.details.currentGroupAssignments, 12); assert.equal(result.details.effectiveActivePeople, 10)
   assert.equal(result.details.futureStarters, 2); assert.equal(result.details.approvedManualEntryPeople, 0)
   assert.equal(result.details.missingRequiredMappings, 0)
-  const futureOnly = await invoke({ people: [nn, tl], latest: null })
+  const futureOnly = await invoke({ people: [nn, ml], latest: null })
   assert.equal(futureOnly.result.status, "ok"); assert.equal(futureOnly.result.details.effectiveActivePeople, 0)
 })
 
 test("effective employment starts at Hong Kong midnight, including future people without exceptions", async () => {
   const unknown = { ...nn, id: "unknown-future-person" }
-  const before = await invoke({ people: [nn, tl, unknown], now: Date.parse("2026-11-01T15:59:59.999Z") })
-  const after = await invoke({ people: [nn, tl, unknown], now: Date.parse("2026-11-01T16:00:00.000Z") })
+  const before = await invoke({ people: [nn, ml, unknown], now: Date.parse("2026-11-01T15:59:59.999Z") })
+  const after = await invoke({ people: [nn, ml, unknown], now: Date.parse("2026-11-01T16:00:00.000Z") })
   assert.equal(before.result.status, "ok"); assert.equal(before.result.details.futureStarters, 3)
   assert.equal(before.result.details.approvedManualEntryPeople, 0); assert.equal(before.result.details.missingRequiredMappings, 0)
   assert.equal(after.result.status, "warning"); assert.equal(after.result.details.futureStarters, 0)
@@ -230,11 +230,11 @@ test("effective employment starts at Hong Kong midnight, including future people
 test("future starters still require complete matching group history", async () => {
   for (const groups of [
     groupRows([nn]),
-    [...groupRows([nn]), { ...groupRows([tl])[0], person_id: "unrelated-person" }],
-    [...groupRows([nn]), { ...groupRows([tl])[0], team: "BS" }],
-    [...groupRows([nn]), { ...groupRows([tl])[0], effective_from: "2026-11-03" }],
+    [...groupRows([nn]), { ...groupRows([ml])[0], person_id: "unrelated-person" }],
+    [...groupRows([nn]), { ...groupRows([ml])[0], team: "BS" }],
+    [...groupRows([nn]), { ...groupRows([ml])[0], effective_from: "2026-11-03" }],
   ]) {
-    const { result } = await invoke({ people: [nn, tl], groups })
+    const { result } = await invoke({ people: [nn, ml], groups })
     assert.equal(result.status, "warning"); assert.match(result.message, /current group history do not match/)
   }
 })
