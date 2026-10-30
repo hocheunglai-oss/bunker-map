@@ -53,7 +53,7 @@ const other = { id: "other-person", staffCode: "ZZ", dingTalkUserId: "ding-other
 const manualEntryPeople = [
   { id: "4c5d73e6-63a9-4b05-93a7-7354b3e668ad", adminUserId: "84bb808c-e188-43ce-9ddf-e7e2fe2e997d", staffCode: "NN",
     dingTalkUserId: null, team: "BT", employmentStartDate: "2026-11-02" },
-  { id: "96142f45-373f-47e2-9104-e33804f2fb1e", adminUserId: "7c2f5a90-09ae-4d3b-9996-d189f0154d53", staffCode: "TL",
+  { id: "96142f45-373f-47e2-9104-e33804f2fb1e", adminUserId: "7c2f5a90-09ae-4d3b-9996-d189f0154d53", staffCode: "ML",
     dingTalkUserId: null, team: "BT", employmentStartDate: "2026-11-02" },
 ]
 

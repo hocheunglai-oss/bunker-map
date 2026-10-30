@@ -23,7 +23,7 @@ const MANUAL_ENTRY_PEOPLE = Object.freeze([
   Object.freeze({
     id: "96142f45-373f-47e2-9104-e33804f2fb1e",
     adminUserId: "7c2f5a90-09ae-4d3b-9996-d189f0154d53",
-    staffCode: "TL",
+    staffCode: "ML",
   }),
 ])
 
