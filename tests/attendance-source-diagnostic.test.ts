@@ -85,9 +85,20 @@ test("source diagnostic reports rejected records without accepting unknown/secur
     { ...record, checkType: null, invalidRecordType: "Security", invalidRecordMsg: "review needed" },
     { ...record, userId: "different" },
     { ...record, userCheckTime: "invalid" },
-  ], personId, "provider-id")
+  ], personId, "provider-id", date)
   assert.ok(records.every((r) => !r.acceptedByNormalizer))
   assert.equal(records[0].invalidRecordType, "Security")
   assert.equal(records[1].identityMatches, false)
   assert.equal(records[2].punchTime, null)
+})
+
+test("source diagnostic distinguishes a corroborated repeated arrival from an invalid punch", () => {
+  const rows = diagnostic.summarizeAttendanceSource([record, {
+    ...record, id: "repeat-id", checkType: null, userCheckTime: record.userCheckTime + 60000,
+    invalidRecordType: "Other", invalidRecordMsg: "已经打过卡了，上班时间以最早打卡时间为准",
+  }], personId, "provider-id", date)
+  assert.equal(rows[0].acceptedByNormalizer, true)
+  assert.equal(rows[0].redundantArrival, false)
+  assert.equal(rows[1].acceptedByNormalizer, false)
+  assert.equal(rows[1].redundantArrival, true)
 })

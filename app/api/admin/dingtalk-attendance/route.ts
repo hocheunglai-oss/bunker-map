@@ -82,7 +82,7 @@ export async function GET(request: Request) {
     })
     return privateJson({ staffCode: person.staff_code, date: input.date,
       fetchedAt: new Date().toISOString(),
-      records: summarizeAttendanceSource(records, input.personId, person.dingtalk_user_id) })
+      records: summarizeAttendanceSource(records, input.personId, person.dingtalk_user_id, input.date) })
   } catch (error) {
     return privateJson({ message: publicErrorMessage(error) }, { status: errorStatus(error) })
   }
