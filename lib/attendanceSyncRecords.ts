@@ -116,3 +116,50 @@ export function normalizeDingTalkPunch(
     },
   }
 }
+
+// DingTalk may return an extra physical scan without a direction and explicitly
+// say that the earlier arrival is authoritative. It is redundant only when that
+// earlier, valid arrival is present in this same complete response/window.
+// Never turn a repeat arrival into an inferred departure or ignore it on text
+// alone: unknown/security exceptions and missing primary evidence still fail.
+export function classifyDingTalkPunches(
+  records: DingTalkAttendanceRecord[],
+  people: Map<string, AttendanceSyncPerson>,
+  window: { from: Date; to: Date },
+) {
+  const mapped = records.map((record) => normalizeDingTalkPunch(record, people))
+  const inWindow = (time: number) => Number.isFinite(time) && time > 0 &&
+    time >= window.from.getTime() && time <= window.to.getTime()
+  const primaryArrivals = new Map<string, { time: number; id: string }>()
+  const acceptedIds = new Set<string>()
+  for (let index = 0; index < mapped.length; index += 1) {
+    const punch = mapped[index]
+    if (!punch || !inWindow(Date.parse(punch.punch_time))) continue
+    acceptedIds.add(`${punch.person_id}:${punch.source_record_id}`)
+    const raw = records[index]
+    if (punch.check_type !== "OnDuty" || raw.sourceType !== "ATM" ||
+        cleanString(raw.invalidRecordType) || cleanString(raw.invalidRecordMsg)) continue
+    const key = `${punch.person_id}:${punch.work_date}`
+    const time = Date.parse(punch.punch_time)
+    const previous = primaryArrivals.get(key)
+    if (!previous || time < previous.time) {
+      primaryArrivals.set(key, { time, id: punch.source_record_id! })
+    }
+  }
+  const redundantArrivalIndexes = new Set<number>()
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index]
+    if (mapped[index] || cleanString(record.checkType) || record.sourceType !== "ATM" ||
+        record.invalidRecordType !== "Other" ||
+        record.invalidRecordMsg !== "已经打过卡了，上班时间以最早打卡时间为准") continue
+    const userId = cleanString(record.userId, 128)
+    const person = userId ? people.get(userId) : undefined
+    const id = cleanString(record.id, 200)
+    const time = Number(record.userCheckTime)
+    if (!person || !id || !inWindow(time) || !Number.isFinite(new Date(time).getTime()) ||
+        acceptedIds.has(`${person.id}:${id}`)) continue
+    const primary = primaryArrivals.get(`${person.id}:${hktDateFromTimestamp(new Date(time))}`)
+    if (primary && primary.id !== id && primary.time < time) redundantArrivalIndexes.add(index)
+  }
+  return { mapped, redundantArrivalIndexes }
+}

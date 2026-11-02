@@ -12,7 +12,7 @@ import { getAttendanceServiceClient } from "@/lib/attendanceData"
 import {
   isImportableDingTalkPunch,
   type AttendanceSyncPerson,
-  normalizeDingTalkPunch,
+  classifyDingTalkPunches,
 } from "@/lib/attendanceSyncRecords"
 import {
   formatDingTalkHktTimestamp,
@@ -178,7 +178,7 @@ export async function runAttendanceSync(options: AttendanceSyncOptions = {}) {
         }, { signal: options.signal })
         options.signal?.throwIfAborted()
         recordsFetched += result.records.length
-        const mapped = result.records.map((record) => normalizeDingTalkPunch(record, personByDingTalkId))
+        const { mapped, redundantArrivalIndexes } = classifyDingTalkPunches(result.records, personByDingTalkId, window)
         const inRequestedWindow = (punch: NonNullable<(typeof mapped)[number]>) => {
           const at = Date.parse(punch.punch_time)
           return at >= window.from.getTime() && at <= window.to.getTime()
@@ -187,6 +187,7 @@ export async function runAttendanceSync(options: AttendanceSyncOptions = {}) {
         for (let index = 0; index < mapped.length; index += 1) {
           const punch = mapped[index]
           if (punch && inRequestedWindow(punch)) continue
+          if (redundantArrivalIndexes.has(index)) continue
           invalidCount += 1
           const record = result.records[index]
           const timestamp = Number(record.userCheckTime)

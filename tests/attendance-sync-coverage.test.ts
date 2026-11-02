@@ -64,6 +64,88 @@ function syncFixture(
   return { supabase, client, updates, queriedUserIds, queries, rpcCalls }
 }
 
+const duplicateArrivalPrimary = {
+  id: "primary-arrival", userId: "ding-one", checkType: "OnDuty", sourceType: "ATM",
+  userCheckTime: Date.parse("2026-10-14T01:50:00.000Z"), timeResult: "Normal",
+}
+const duplicateArrival = {
+  id: "repeat-arrival", userId: "ding-one", sourceType: "ATM",
+  userCheckTime: Date.parse("2026-10-14T01:56:00.000Z"),
+  invalidRecordType: "Other", invalidRecordMsg: "已经打过卡了，上班时间以最早打卡时间为准",
+}
+async function syncDuplicateRecords(records: Array<Record<string, unknown>>, missingCount = 0) {
+  const fixture = syncFixture([{ id: "person-1", dingtalk_user_id: "ding-one" }], { records, missingCount })
+  const result = await runAttendanceSync({ now: new Date("2026-10-14T10:10:00.000Z"), ...fixture })
+  return { result, fixture }
+}
+
+test("a corroborated provider-declared repeat arrival does not block sync or create an OUT punch", async () => {
+  for (const records of [[duplicateArrivalPrimary, duplicateArrival], [duplicateArrival, duplicateArrivalPrimary]]) {
+    const { result, fixture } = await syncDuplicateRecords(records)
+    assert.equal(result.status, "succeeded")
+    assert.equal(result.recordsFetched, 2)
+    assert.equal(result.errorSummary, null)
+    const inserted = fixture.rpcCalls.find((r) => r.name === "insert_attendance_raw_punches_checked")!.args.p_rows as Array<Record<string, unknown>>
+    assert.equal(inserted.length, 1)
+    assert.equal(inserted[0].check_type, "OnDuty")
+    assert.equal(inserted[0].punch_time, "2026-10-14T01:50:00.000Z")
+    const reconciliation = fixture.rpcCalls.find((r) => r.name === "reconcile_attendance_dingtalk_punch_window")!
+    assert.ok(reconciliation)
+    assert.doesNotMatch(JSON.stringify(reconciliation.args), /repeat-arrival/)
+    assert.deepEqual(fixture.updates.at(-1)?.failure_scope, { unknown: false, affected: [] })
+  }
+})
+
+test("repeat-arrival wording alone never suppresses missing, late, different-day or invalid primary evidence", async () => {
+  const cases = [
+    [duplicateArrival],
+    [{ ...duplicateArrivalPrimary, userCheckTime: duplicateArrival.userCheckTime + 1 }, duplicateArrival],
+    [{ ...duplicateArrivalPrimary, userCheckTime: duplicateArrival.userCheckTime }, duplicateArrival],
+    [{ ...duplicateArrivalPrimary, userCheckTime: Date.parse("2026-10-13T01:50:00Z") }, duplicateArrival],
+    [{ ...duplicateArrivalPrimary, userId: "another-person" }, duplicateArrival],
+    [{ ...duplicateArrivalPrimary, checkType: "OffDuty" }, duplicateArrival],
+    [{ ...duplicateArrivalPrimary, sourceType: "USER" }, duplicateArrival],
+    [{ ...duplicateArrivalPrimary, invalidRecordType: "Security" }, duplicateArrival],
+    [{ ...duplicateArrivalPrimary, invalidRecordMsg: "review required" }, duplicateArrival],
+    [{ ...duplicateArrivalPrimary, id: null }, duplicateArrival],
+    [duplicateArrivalPrimary, { ...duplicateArrival, id: duplicateArrivalPrimary.id }],
+  ]
+  for (const records of cases) {
+    const { result, fixture } = await syncDuplicateRecords(records)
+    assert.equal(result.status, "partial")
+    assert.match(result.errorSummary || "", /invalid or unmapped/)
+    assert.equal(fixture.rpcCalls.filter((r) => r.name === "reconcile_attendance_dingtalk_punch_window").length, 0)
+  }
+})
+
+test("repeat-arrival exception stays restricted to identified ATM scans with the exact provider reason", async () => {
+  for (const patch of [
+    { invalidRecordType: "Security" }, { invalidRecordType: null },
+    { invalidRecordMsg: "需要二次确认" }, { invalidRecordMsg: "already checked in" },
+    { sourceType: "USER" }, { sourceType: null }, { id: null },
+    { checkType: "UnknownDuty" }, { checkType: "Unclassified" },
+    { userId: "another-person" }, { userCheckTime: 0 }, { userCheckTime: 1e20 },
+  ]) {
+    const { result } = await syncDuplicateRecords([duplicateArrivalPrimary, { ...duplicateArrival, ...patch }])
+    assert.equal(result.status, "partial")
+  }
+})
+
+test("repeat-arrival exception still detects a previously imported source record disappearing", async () => {
+  const { result, fixture } = await syncDuplicateRecords([duplicateArrivalPrimary, duplicateArrival], 1)
+  assert.equal(result.status, "partial")
+  assert.match(result.errorSummary || "", /missing DingTalk record/)
+  assert.ok(fixture.rpcCalls.some((r) => r.name === "reconcile_attendance_dingtalk_punch_window"))
+})
+
+test("an arrival outside the queried window cannot corroborate a repeat scan inside it", async () => {
+  const fixture = syncFixture([{ id: "person-1", dingtalk_user_id: "ding-one" }], { records: [duplicateArrivalPrimary, duplicateArrival] })
+  const result = await runAttendanceSync({ now: new Date("2026-10-14T10:10:00Z"), ...fixture,
+    window: { from: new Date("2026-10-14T01:55:00Z"), to: new Date("2026-10-14T10:10:00Z") } })
+  assert.equal(result.status, "partial")
+  assert.match(result.errorSummary || "", /2 DingTalk record/)
+})
+
 test("a successful sync records the exact DingTalk identities queried", async () => {
   const fixture = syncFixture([
     { id: "person-1", dingtalk_user_id: " ding-one " },
