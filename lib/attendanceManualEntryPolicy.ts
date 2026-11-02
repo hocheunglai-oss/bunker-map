@@ -14,6 +14,10 @@ type ManualEntryAttendancePerson = {
 // Pin both identities, the initials, group and start date so reassignment or
 // roster drift cannot silently inherit this policy.
 const MANUAL_ENTRY_START_DATE = "2026-11-02"
+// Owner confirmed both DingTalk identities and enabled links on 2 November.
+// Keep the transition day manual-review protected; later months use the normal
+// DingTalk evidence, reminder and confirmation checks (never an exemption).
+const MANUAL_ENTRY_END_DATE = "2026-11-02"
 const MANUAL_ENTRY_PEOPLE = Object.freeze([
   Object.freeze({
     id: "4c5d73e6-63a9-4b05-93a7-7354b3e668ad",
@@ -41,6 +45,7 @@ export function hasManualEntryOnlyAttendancePolicy(
   asOfDate: string,
 ) {
   return Boolean(parseIsoDate(asOfDate)) && asOfDate >= MANUAL_ENTRY_START_DATE &&
+    asOfDate <= MANUAL_ENTRY_END_DATE &&
     matchesManualEntryIdentity(person) &&
     (person.dingTalkUserId === null ||
       (typeof person.dingTalkUserId === "string" && !person.dingTalkUserId.trim()))
@@ -48,10 +53,8 @@ export function hasManualEntryOnlyAttendancePolicy(
 
 // A monthly statement overlapping the manual-entry period must stay pending
 // for genuine manual review. Linking DingTalk later is NOT permission to
-// auto-approve earlier manual months. Before onboarding DingTalk, explicitly
-// close this policy with a reviewed effective end date and preserve exclusion
-// for every month overlapping that historical manual period. Until then the
-// period is open-ended, even if a DingTalk link has already been added.
+// auto-approve earlier manual months. Preserve exclusion for every month
+// overlapping the closed historical manual period, regardless of linkage.
 export function hasManualEntryOnlyAttendancePolicyForPeriod(
   person: ManualEntryAttendancePerson,
   period: { year: number; month: number },
@@ -59,5 +62,7 @@ export function hasManualEntryOnlyAttendancePolicyForPeriod(
   if (!Number.isInteger(period.year) || period.year < 2000 || period.year > 2200 ||
     !Number.isInteger(period.month) || period.month < 1 || period.month > 12) return false
   const monthEnd = formatIsoDate(new Date(Date.UTC(period.year, period.month, 0)))
-  return monthEnd >= MANUAL_ENTRY_START_DATE && matchesManualEntryIdentity(person)
+  const monthStart = formatIsoDate(new Date(Date.UTC(period.year, period.month - 1, 1)))
+  return monthEnd >= MANUAL_ENTRY_START_DATE && monthStart <= MANUAL_ENTRY_END_DATE &&
+    matchesManualEntryIdentity(person)
 }
