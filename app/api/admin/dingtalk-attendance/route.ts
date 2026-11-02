@@ -3,6 +3,8 @@ import {
   requireAdminSessionForRequest,
 } from "@/lib/adminAuth"
 import { isAdminRole } from "@/lib/adminPages"
+import { getAttendanceServiceClient } from "@/lib/attendanceData"
+import { summarizeAttendanceSource, validateAttendanceSourceDiagnostic } from "@/lib/attendanceSourceDiagnostic"
 import {
   DingTalkAttendanceConfigurationError,
   DingTalkAttendanceUpstreamError,
@@ -51,6 +53,39 @@ function publicErrorMessage(error: unknown) {
       : error.message
   }
   return "Could not load DingTalk attendance records."
+}
+
+// Read-only, single-person/day support view. No raw payload, device identifier,
+// provider identity or credentials are returned. POST retains its existing API.
+export async function GET(request: Request) {
+  try {
+    const session = await requireAdminSessionForRequest(request)
+    if (!isAdminRole(session.role)) throw new Error("Forbidden")
+    let input: { personId: string; date: string }
+    try {
+      input = validateAttendanceSourceDiagnostic(new URL(request.url).searchParams)
+    } catch {
+      return privateJson({ message: "Select one employee and one valid date within the last 180 days." }, { status: 400 })
+    }
+    const { data: person, error } = await getAttendanceServiceClient()
+      .from("attendance_people").select("id,staff_code,dingtalk_user_id")
+      .eq("id", input.personId).maybeSingle()
+    if (error) throw new Error("Attendance employee lookup failed.")
+    if (!person?.dingtalk_user_id) {
+      return privateJson({ message: "Employee has no linked DingTalk account." }, { status: 404 })
+    }
+    const { records } = await getDingTalkAttendanceClient().listRecords({
+      userIds: [person.dingtalk_user_id],
+      checkDateFrom: `${input.date} 00:00:00`,
+      checkDateTo: `${input.date} 23:59:59`,
+      isI18n: false,
+    })
+    return privateJson({ staffCode: person.staff_code, date: input.date,
+      fetchedAt: new Date().toISOString(),
+      records: summarizeAttendanceSource(records, input.personId, person.dingtalk_user_id) })
+  } catch (error) {
+    return privateJson({ message: publicErrorMessage(error) }, { status: errorStatus(error) })
+  }
 }
 
 export async function POST(request: Request) {
