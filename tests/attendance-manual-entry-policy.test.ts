@@ -60,7 +60,19 @@ test("linking DingTalk changes health classification but never retroactively aut
     const linked = { ...person, dingTalkUserId: "new-real-dingtalk-link" }
     assert.equal(hasManualEntryOnlyAttendancePolicy(linked, "2026-12-01"), false)
     assert.equal(hasManualEntryOnlyAttendancePolicyForPeriod(linked, { year: 2026, month: 11 }), true)
-    assert.equal(hasManualEntryOnlyAttendancePolicyForPeriod(linked, { year: 2027, month: 1 }), true)
+    assert.equal(hasManualEntryOnlyAttendancePolicyForPeriod(linked, { year: 2026, month: 12 }), false)
+    assert.equal(hasManualEntryOnlyAttendancePolicyForPeriod(linked, { year: 2027, month: 1 }), false)
+  }
+})
+
+test("closed onboarding policy ends at the next Hong Kong midnight even if a link disappears", () => {
+  for (const person of [nn, ml]) {
+    assert.equal(hasManualEntryOnlyAttendancePolicy(person,
+      hktDateFromTimestamp(new Date("2026-11-02T15:59:59.999Z"))), true)
+    assert.equal(hasManualEntryOnlyAttendancePolicy(person,
+      hktDateFromTimestamp(new Date("2026-11-02T16:00:00.000Z"))), false)
+    assert.equal(hasManualEntryOnlyAttendancePolicyForPeriod(person, { year: 2026, month: 11 }), true)
+    assert.equal(hasManualEntryOnlyAttendancePolicyForPeriod(person, { year: 2026, month: 12 }), false)
   }
 })
 

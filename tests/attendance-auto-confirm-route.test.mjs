@@ -278,6 +278,7 @@ test("actual cron does not skip a requery for drifted manual identity, group, jo
     { changed: { team: "AC" }, period: { year: 2026, month: 11 } },
     { changed: { employmentStartDate: "2026-11-03" }, period: { year: 2026, month: 11 } },
     { changed: {}, period: { year: 2026, month: 10 } },
+    { changed: {}, period: { year: 2026, month: 12 } },
   ]) {
     const requeries = []
     const { response } = await invoke({
