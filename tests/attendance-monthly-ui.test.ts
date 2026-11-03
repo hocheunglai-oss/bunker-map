@@ -10,6 +10,7 @@ const client = source("../app/admin/attendancerecord/AttendanceRecordClient.tsx"
 const styles = source("../app/admin/attendancerecord/attendanceRecord.module.css")
 const adminUsers = source("../lib/adminUsers.ts")
 const userManagement = source("../app/admin/usermanagement/page.tsx")
+const dayEditor = source("../app/admin/attendancerecord/attendanceDayEditor.ts")
 
 test("Attendance Record exposes only the requested three compact views", () => {
   assert.match(
@@ -49,10 +50,10 @@ test("Monthly Record edits only the leave portion represented by the clicked cel
   assert.doesNotMatch(client, /\|\| entries\[0\]/)
 })
 
-test("either side of a HOME or OS day edits the same portioned record", () => {
+test("each side of a split day edits only its matching portioned record", () => {
   assert.match(
-    client,
-    /function editableAttendanceEntry[\s\S]*?leaveEntryForDirection\(item, direction\)[\s\S]*?entry\.code === "HO" \|\| entry\.code === "OS"/,
+    dayEditor,
+    /function editableAttendanceEntry[\s\S]*?entry\.portion === "full"[\s\S]*?direction === "in" \? "am" : "pm"/,
   )
   assert.match(client, /entryId: matching\?\.id/)
   assert.match(client, /portion: matching\?\.portion/)
@@ -85,11 +86,12 @@ test("half-day leave stacks the working-session punches in chronological order",
   assert.match(styles, /\.cellButton[\s\S]*?white-space: pre-line/)
 })
 
-test("either cell edits the sole half-day status governing its paired punches", () => {
-  assert.match(
-    client,
-    /function editableAttendanceEntry[\s\S]*?const entries = leaveEntries\(item\)[\s\S]*?if \(entries\.length === 1\) return entries\[0\]/,
-  )
+test("opposite half is preserved and shown in the day editor", () => {
+  assert.doesNotMatch(dayEditor, /entries\.length === 1|return entries\[0\]/)
+  assert.match(client, /otherEntries = record \? leaveEntries\(record\)\.filter\(\(entry\) => entry\.id !== matching\?\.id\)/)
+  assert.match(client, /kept unchanged/)
+  assert.match(client, /disabled=\{attendancePortionConflicts\(value, leaveDraft\.otherEntries\)\}/)
+  assert.match(client, /leaveDraft\.signOutTime !== leaveDraft\.initialSignOutTime[\s\S]*?leaveDraft\.signOutTime < "17:00"/)
 })
 
 test("Monthly view includes required Excel totals, confirmation, and reminders", () => {
@@ -226,7 +228,9 @@ test("day editor gives HOME and OS auditable AM, PM, and full-day portions", () 
   assert.doesNotMatch(leaveCodes, /value: "HO"|value: "OS"/)
   assert.match(client, /value === "home-office" \|\| value === "business-trip"/)
   assert.match(client, /code: value === "home-office" \? "HO" : "OS"/)
-  assert.match(client, /attendanceModeCode \? "full"/)
+  assert.match(client, /attendanceModeCode && otherEntries\.length === 0 \? "full"/)
+  const homeOfficeSelection = client.slice(client.indexOf('if (value === "home-office"'), client.indexOf("const selectedMode"))
+  assert.doesNotMatch(homeOfficeSelection, /portion: "full"/)
   assert.match(client, /leaveDraft\.entryId[\s\S]*?deleteLeave\(\)/)
 })
 
