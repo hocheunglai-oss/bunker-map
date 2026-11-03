@@ -17,11 +17,14 @@ afterEach(() => mock.timers.reset())
 
 function harness(annualRows: unknown[] = [], error: { message: string } | null = null,
   inventory: unknown = { tables: [annualTable], appliedMigrations: [annualMigration], annualConfirmationColumns: annualColumns },
-  inventoryError: string | null = null) {
+  inventoryError: string | null = null, tableRows: Record<string, unknown[]> = {},
+  readView: "annual" | "monthly" = "annual") {
   const reads: Array<{ table: string; filters: Record<string, unknown> }> = []
   const client = {
     from(table: string) {
-      assert.notEqual(table, "attendance_monthly_confirmations", "annual reads must not infer approvals from December")
+      if (readView === "annual") {
+        assert.notEqual(table, "attendance_monthly_confirmations", "annual reads must not infer approvals from December")
+      }
       const filters: Record<string, unknown> = {}
       const query = {
         select() { return query }, order() { return query }, limit() { return query },
@@ -33,7 +36,7 @@ function harness(annualRows: unknown[] = [], error: { message: string } | null =
             { id: PERSON, admin_user_id: USER, staff_code: "AT", display_name: "Alice Test", team: "BT", is_active: true },
             { id: "33333333-3333-4333-8333-333333333333", admin_user_id: null, staff_code: "UT", display_name: "Unlinked Test", team: "BT", is_active: true },
           ]
-          return Promise.resolve({ data: table === "attendance_people" ? people : table === "attendance_annual_confirmations" ? annualRows : [],
+          return Promise.resolve({ data: table === "attendance_people" ? people : table === "attendance_annual_confirmations" ? annualRows : tableRows[table] || [],
             error: table === "attendance_annual_confirmations" ? error : null }).then(resolve)
         },
       }
@@ -59,15 +62,70 @@ function harness(annualRows: unknown[] = [], error: { message: string } | null =
     },
     "@/lib/emailNotice": { normalizeEmailList() { throw new Error("No email access") }, sendNoticeEmail() { throw new Error("No email access") } },
   }
-  const loaded: { exports: { getAllTimeAttendance?: (year: number, options: object) => Promise<Record<string, unknown>> } } = { exports: {} }
+  const loaded: { exports: {
+    getAllTimeAttendance?: (year: number, options: object) => Promise<Record<string, unknown>>
+    getMonthlyAttendance?: (year: number, month: number, options: object) => Promise<Record<string, unknown>>
+  } } = { exports: {} }
   new Function("require", "module", "exports", "process", code)((name: string) =>
     Object.hasOwn(boundaries, name) ? boundaries[name] : localRequire(name.startsWith("@/") ? `../${name.slice(2)}` : name),
   loaded, loaded.exports, { env: { NEXT_PUBLIC_SUPABASE_URL: "https://synthetic.invalid", SUPABASE_SERVICE_ROLE_KEY: "synthetic-only" } })
-  return { reads, read: (year = 2025, options: object = { adminUserId: USER, canEdit: false }) => loaded.exports.getAllTimeAttendance!(year, options) }
+  return {
+    reads,
+    read: (year = 2025, options: object = { adminUserId: USER, canEdit: false }) => {
+      assert.equal(readView, "annual", "annual reads must retain their monthly-table guard")
+      return loaded.exports.getAllTimeAttendance!(year, options)
+    },
+    readMonthly: (year: number, month: number) => {
+      assert.equal(readView, "monthly")
+      return loaded.exports.getMonthlyAttendance!(year, month, { adminUserId: USER, canEdit: false })
+    },
+  }
 }
 
 const annual = { id: "synthetic-annual", person_id: PERSON, year: 2025, status: "confirmed", note: "Reviewed totals",
   confirmed_at: "2026-01-01T00:00:00Z", confirmed_by: "synthetic-user", confirmed_source_revision: "7" }
+
+for (const homePortion of ["am", "pm"]) {
+  test(`${homePortion.toUpperCase()} HOME plus opposite annual leave deducts only half a day from annual balance`, async () => {
+    const response = await harness([], null, undefined, null, {
+      attendance_entitlements: [{ person_id: PERSON, year: 2025, allowance_units: 15, opening_carry_forward_units: 2 }],
+      attendance_leave_entries: [
+        { id: "home-half", person_id: PERSON, leave_date: "2025-09-15", portion: homePortion, code: "HO", units: 0.5 },
+        { id: "leave-half", person_id: PERSON, leave_date: "2025-09-15", portion: homePortion === "am" ? "pm" : "am", code: "ALS", units: 0.5 },
+      ],
+    }).read()
+    const summary = (response.annualSummaries as Array<Record<string, unknown>>).find(row => row.personId === PERSON)!
+    const totals = summary.codeTotals as Record<string, number>
+    assert.equal(totals.HO, 0.5, "stored HO must not be counted again as derived whole-day HOME")
+    assert.equal(totals.ALS, 0.5)
+    assert.equal(totals.ALU, 0)
+    assert.equal(summary.closingBalanceUnits, 16.5)
+  })
+}
+
+for (const leavePortion of ["am", "pm"]) {
+  test(`legacy manual HOME and ${leavePortion.toUpperCase()} annual leave keep half-day monthly and annual totals`, async () => {
+    const rows = {
+      attendance_entitlements: [{ person_id: PERSON, year: 2025, allowance_units: 15, opening_carry_forward_units: 2 }],
+      attendance_leave_entries: [
+        { id: "leave-half", person_id: PERSON, leave_date: "2025-09-15", portion: leavePortion, code: "ALS", units: 0.5 },
+      ],
+      attendance_work_mode_overrides: [
+        { id: "legacy-home", person_id: PERSON, work_date: "2025-09-15", mode: "home-office", note: "Existing manual HOME" },
+      ],
+    }
+    const annualResponse = await harness([], null, undefined, null, rows).read()
+    const annualSummary = (annualResponse.annualSummaries as Array<Record<string, unknown>>).find(row => row.personId === PERSON)!
+    const monthlyResponse = await harness([], null, undefined, null, rows, "monthly").readMonthly(2025, 9)
+    const monthlySummary = (monthlyResponse.summaries as Array<{ person: { id: string }; codeTotals: Record<string, number>; balance: number }>).find(row => row.person.id === PERSON)!
+    for (const totals of [annualSummary.codeTotals as Record<string, number>, monthlySummary.codeTotals]) {
+      assert.equal(totals.HO, 0.5, "legacy whole-day HOME only counts the half not on annual leave")
+      assert.equal(totals.ALS, 0.5)
+    }
+    assert.equal(annualSummary.closingBalanceUnits, 16.5)
+    assert.equal(monthlySummary.balance, 16.5)
+  })
+}
 
 test("annual totals read only the separate annual table and map a safe source-revision acknowledgement", async () => {
   const app = harness([annual])
