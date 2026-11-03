@@ -93,6 +93,7 @@ export type ApiAttendanceDailyItem = {
   effectiveSignIn: string | null
   effectiveSignOut: string | null
   status: string
+  required?: boolean
   late: boolean
   early: boolean
   workMode?: AttendanceWorkMode

@@ -6,6 +6,7 @@ import { attendanceBackupSchemaFromInventory, attendanceBackupSchemaVersion } fr
 import { DINGTALK_ATTENDANCE_MAX_USERS } from "@/lib/dingTalkAttendance"
 import { DINGTALK_ATTENDANCE_IMPORT_CUTOFF } from "@/lib/attendanceSyncRecords"
 import { inferUnclassifiedAttendanceDirections } from "@/lib/attendanceUnclassifiedPunches"
+import { attendanceDayUnits } from "@/lib/attendanceDayUnits"
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import {
   listManagedAdminUsers,
@@ -817,7 +818,9 @@ export function buildAttendanceRecord(
       !holiday &&
       effectiveSignIn &&
       isAfterAttendanceAmCutoff(workDate, team, effectiveSignIn) &&
-      !absenceLeaves.some((entry) => entry.portion === "full" || entry.portion === "am"),
+      // A saved morning status already explains the morning, including HO/OS
+      // before an afternoon office punch. Do not invent a second AM absence.
+      !personLeaves.some((entry) => entry.portion === "full" || entry.portion === "am"),
   )
   const explicitHolidayAttendance = Boolean(
     holiday && workModeOverride?.mode === "office",
@@ -1163,19 +1166,6 @@ function personOverlapsPeriod(
   return person.isActive || person.employmentEndDate !== null
 }
 
-function countsAsAttended(record: ReturnType<typeof buildAttendanceRecord>) {
-  return Boolean(
-    record.date <= hktDateFromTimestamp(new Date()) &&
-      (record.holidayAttendance ||
-        (record.required &&
-          record.status !== "leave" &&
-          record.status !== "pending" &&
-          (record.effectiveSignIn ||
-            record.workMode === "home-office" ||
-            record.workMode === "business-trip"))),
-  )
-}
-
 export async function getMonthlyAttendance(
   yearInput: unknown,
   monthInput: unknown,
@@ -1460,9 +1450,9 @@ export async function getMonthlyAttendance(
     const records = yearRecords.filter(
       (record) => record.date >= targetRange.start,
     )
-    const attendedDays = records.filter(countsAsAttended).length
+    const attendedDays = records.reduce((total, record) => total + attendanceDayUnits(record, today), 0)
     const lateDays = records.filter((record) => record.required && record.late).length
-    const yearToDateAttendedDays = yearRecords.filter(countsAsAttended).length
+    const yearToDateAttendedDays = yearRecords.reduce((total, record) => total + attendanceDayUnits(record, today), 0)
     const yearToDateLateDays = yearRecords.filter(
       (record) => record.required && record.late,
     ).length
@@ -1743,7 +1733,8 @@ export async function getAllTimeAttendance(
   const entitlements = (entitlementResult.data || []).map(mapEntitlement)
   const monthlyAdjustments = (adjustmentResult.data || []).map(mapAdjustment)
   const yearEndConfirmations = (confirmationResult.data || []).map(mapAnnualConfirmation)
-  const currentHktYear = Number(hktDateFromTimestamp(new Date()).slice(0, 4))
+  const today = hktDateFromTimestamp(new Date())
+  const currentHktYear = Number(today.slice(0, 4))
   const allTimeSummaries = activePeople.map((person) => {
     const dates = [
       ...new Set([
@@ -1755,7 +1746,12 @@ export async function getAllTimeAttendance(
           .map((entry) => entry.workDate),
       ]),
     ].sort()
-    const records = dates.map((date) =>
+    const attendanceDates = [...new Set([
+      ...dates,
+      ...leaves.filter((entry) => entry.personId === person.id && (entry.code === "HO" || entry.code === "OS")).map((entry) => entry.leaveDate),
+      ...workModeOverrides.filter((entry) => entry.personId === person.id).map((entry) => entry.workDate),
+    ])].filter((date) => date >= yearStart && date <= yearEnd && date <= today).sort()
+    const records = attendanceDates.map((date) =>
       buildAttendanceRecord(
         person,
         date,
@@ -1772,11 +1768,10 @@ export async function getAllTimeAttendance(
       personId: person.id,
       firstAttendanceDate: dates[0] || null,
       lastAttendanceDate: dates.at(-1) || null,
-      attendedDays: records.filter(countsAsAttended).length,
+      attendedDays: records.reduce((total, record) => total + attendanceDayUnits(record, today), 0),
       lateDays: records.filter((record) => record.required && record.late).length,
     }
   })
-  const today = hktDateFromTimestamp(new Date())
   const annualThrough =
     year < Number(today.slice(0, 4))
       ? yearEnd

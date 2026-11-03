@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { afterEach, beforeEach, mock, test } from "node:test"
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { attendanceDayUnits } from "../lib/attendanceDayUnits"
 import {
   buildAttendanceRecord,
   saveAttendanceDayEdit,
@@ -42,6 +43,7 @@ for (const homePortion of ["am", "pm"] as const) {
     assert.deepEqual(record.leave, leaves)
     assert.equal(record.effectiveSignIn, null)
     assert.equal(record.effectiveSignOut, null)
+    assert.equal(attendanceDayUnits(record, "2026-11-03"), 0.5)
   })
 }
 
@@ -62,6 +64,7 @@ for (const leavePortion of ["am", "pm"] as const) {
     assert.equal(record.early, false)
     assert.equal(record.effectiveSignIn, null)
     assert.equal(record.effectiveSignOut, null)
+    assert.equal(attendanceDayUnits(record, "2026-11-03"), 0.5)
   })
 }
 
@@ -75,6 +78,31 @@ test("default HOME policy with PM annual leave counts only the morning without c
   assert.equal(record.workModeOverride, null)
   assert.equal(record.derivedHomeOfficeUnits, 0.5)
   assert.equal(record.leave[0].units, 0.5)
+  assert.equal(attendanceDayUnits(record, "2026-11-03"), 0.5)
+})
+
+test("approved morning HOME or business trip is not automatically turned into absence by an afternoon office punch", () => {
+  const punches = [{ personId: PERSON, workDate: WORK_DATE, punch: {
+    id: "synthetic-afternoon-in", checkType: "OnDuty" as const, punchTime: "2026-11-02T05:00:00Z",
+    sourceType: "test", deviceSn: null, timeResult: null, locationResult: null,
+    legacyAssumedOnTime: false, legacyHolidayAttendance: false,
+  } }]
+  for (const code of ["HO", "OS"] as const) {
+    const record = buildAttendanceRecord(person, WORK_DATE, punches, [], [leave(code, "am")], [], [], [], null)
+    assert.equal(record.automaticAmLeave, false)
+    assert.equal(attendanceDayUnits(record, "2026-11-03"), 1)
+    assert.equal(record.leave.length, 1)
+    assert.equal(record.leave[0].code, code, "no absence is fabricated or saved")
+  }
+  const ordinary = buildAttendanceRecord(person, WORK_DATE, punches, [], [], [], [], [], null)
+  assert.equal(ordinary.automaticAmLeave, true, "the established no-morning-evidence rule remains")
+  assert.equal(attendanceDayUnits(ordinary, "2026-11-03"), 0.5)
+})
+
+test("a half-day office absence without a punch does not fabricate attendance", () => {
+  const record = buildAttendanceRecord(person, WORK_DATE, [], [], [leave("ALU", "pm")], [], [], [], null)
+  assert.equal(record.status, "partial-leave")
+  assert.equal(attendanceDayUnits(record, "2026-11-03"), 0)
 })
 
 test("day-edit API sends a new opposite-half entry without reusing an existing row ID", async () => {

@@ -4,6 +4,7 @@ import { createRequire } from "node:module"
 import { afterEach, beforeEach, mock, test } from "node:test"
 import { transformSync } from "esbuild"
 import { annualColumns, annualMigration, annualTable } from "./fixtures/backup-annual.mjs"
+import type { AttendanceHoliday } from "../lib/attendanceCalendar"
 
 // Exercise the actual annual read orchestration with synthetic storage only.
 // No .env, remote database, auth session, email or sync operation is accessed.
@@ -18,7 +19,7 @@ afterEach(() => mock.timers.reset())
 function harness(annualRows: unknown[] = [], error: { message: string } | null = null,
   inventory: unknown = { tables: [annualTable], appliedMigrations: [annualMigration], annualConfirmationColumns: annualColumns },
   inventoryError: string | null = null, tableRows: Record<string, unknown[]> = {},
-  readView: "annual" | "monthly" = "annual") {
+  readView: "annual" | "monthly" = "annual", holidaysByDate = new Map<string, AttendanceHoliday>()) {
   const reads: Array<{ table: string; filters: Record<string, unknown> }> = []
   const client = {
     from(table: string) {
@@ -57,7 +58,7 @@ function harness(annualRows: unknown[] = [], error: { message: string } | null =
     } },
     "@/lib/adminUsers": { async listManagedAdminUsers() { return [] } },
     "@/lib/attendanceCalendar": {
-      async loadAttendanceCalendarContext() { return { staffOrder: ["AT", "UT"], holidaysByDate: new Map() } },
+      async loadAttendanceCalendarContext() { return { staffOrder: ["AT", "UT"], holidaysByDate } },
       sortAttendancePeople: <T>(rows: T[]) => rows,
     },
     "@/lib/emailNotice": { normalizeEmailList() { throw new Error("No email access") }, sendNoticeEmail() { throw new Error("No email access") } },
@@ -84,6 +85,79 @@ function harness(annualRows: unknown[] = [], error: { message: string } | null =
 
 const annual = { id: "synthetic-annual", person_id: PERSON, year: 2025, status: "confirmed", note: "Reviewed totals",
   confirmed_at: "2026-01-01T00:00:00Z", confirmed_by: "synthetic-user", confirmed_source_revision: "7" }
+
+test("monthly, year-to-date and all-time attended days share fractional units without changing absence balances", async () => {
+  const rows = {
+    attendance_entitlements: [{ person_id: PERSON, year: 2025, allowance_units: 15, opening_carry_forward_units: 2 }],
+    attendance_raw_punches: [
+      { id: "normal-in", person_id: PERSON, work_date: "2025-09-16", check_type: "OnDuty", punch_time: "2025-09-16T02:00:00Z" },
+      { id: "normal-out", person_id: PERSON, work_date: "2025-09-16", check_type: "OffDuty", punch_time: "2025-09-16T11:00:00Z" },
+      { id: "previous-month-in", person_id: PERSON, work_date: "2025-08-01", check_type: "OnDuty", punch_time: "2025-08-01T05:00:00Z" },
+    ],
+    attendance_leave_entries: [
+      { id: "home-half", person_id: PERSON, leave_date: "2025-09-15", portion: "am", code: "HO", units: 0.5 },
+      { id: "leave-half", person_id: PERSON, leave_date: "2025-09-15", portion: "pm", code: "ALU", units: 0.5 },
+      { id: "previous-absence", person_id: PERSON, leave_date: "2025-08-01", portion: "am", code: "ALS", units: 0.5 },
+    ],
+  }
+  const monthly = await harness([], null, undefined, null, rows, "monthly").readMonthly(2025, 9)
+  const summary = (monthly.summaries as Array<Record<string, unknown>>).find(row => (row.person as { id: string }).id === PERSON)!
+  assert.equal(summary.attendedDays, 1.5)
+  assert.equal(summary.yearToDateAttendedDays, 2)
+  assert.equal(summary.lateDays, 0)
+  assert.equal(summary.balance, 16, "the two recorded leave halves remain the only balance deductions")
+  const annualResponse = await harness([], null, undefined, null, rows).read()
+  const allTime = (annualResponse.allTimeSummaries as Array<Record<string, unknown>>).find(row => row.personId === PERSON)!
+  assert.equal(allTime.attendedDays, 2)
+  assert.equal(allTime.firstAttendanceDate, "2025-08-01", "existing punch-derived first/last dates retain their meaning")
+  assert.equal(allTime.lastAttendanceDate, "2025-09-16")
+  const annualSummary = (annualResponse.annualSummaries as Array<Record<string, unknown>>).find(row => row.personId === PERSON)!
+  assert.equal(annualSummary.closingBalanceUnits, 16)
+})
+
+test("all-time includes explicit work-mode evidence but excludes future and non-working override dates", async () => {
+  const rows = {
+    attendance_work_mode_overrides: [
+      { id: "legacy-home", person_id: PERSON, work_date: "2025-09-15", mode: "home-office" },
+      { id: "weekend-home", person_id: PERSON, work_date: "2025-09-14", mode: "home-office" },
+    ],
+    attendance_leave_entries: [{ id: "leave-half", person_id: PERSON, leave_date: "2025-09-15", portion: "pm", code: "ALU", units: 0.5 }],
+  }
+  const annualResponse = await harness([], null, undefined, null, rows).read()
+  const allTime = (annualResponse.allTimeSummaries as Array<Record<string, unknown>>).find(row => row.personId === PERSON)!
+  assert.equal(allTime.attendedDays, 0.5)
+  assert.equal(allTime.firstAttendanceDate, null)
+  assert.equal(allTime.lastAttendanceDate, null)
+  const future = await harness([], null, undefined, null, {
+    attendance_work_mode_overrides: [{ id: "future-home", person_id: PERSON, work_date: "2026-11-02", mode: "home-office" }],
+  }).read(2026)
+  assert.equal((future.allTimeSummaries as Array<Record<string, unknown>>).find(row => row.personId === PERSON)!.attendedDays, 0)
+})
+
+test("fractional days do not fractionalise late occurrences or change earned holiday credits", async () => {
+  const rows = {
+    attendance_entitlements: [{ person_id: PERSON, year: 2026, allowance_units: 15, opening_carry_forward_units: 2 }],
+    attendance_raw_punches: [{ id: "late-in", person_id: PERSON, work_date: "2026-09-16", check_type: "OnDuty", punch_time: "2026-09-16T02:05:00Z" }],
+    attendance_leave_entries: [
+      { id: "holiday-absence", person_id: PERSON, leave_date: "2026-09-15", portion: "pm", code: "ALU", units: 0.5 },
+      { id: "office-absence", person_id: PERSON, leave_date: "2026-09-16", portion: "pm", code: "ALS", units: 0.5 },
+    ],
+  }
+  const holidays = new Map<string, AttendanceHoliday>([["2026-09-15", {
+    eventId: "synthetic-holiday", title: "Synthetic holiday", name: null, attendeeStaffCodes: ["AT"], people: [],
+  }]])
+  const monthly = await harness([], null, undefined, null, rows, "monthly", holidays).readMonthly(2026, 9)
+  const summary = (monthly.summaries as Array<Record<string, unknown>>).find(row => (row.person as { id: string }).id === PERSON)!
+  assert.equal(summary.attendedDays, 1, "two genuinely attended halves are one day")
+  assert.equal(summary.lateDays, 1, "one late occurrence is still one occurrence")
+  assert.equal(summary.yearToDateLateDays, 1)
+  assert.equal((summary.codeTotals as Record<string, number>).HOL, 1, "existing earned holiday credit is unchanged")
+  assert.equal(summary.balance, 17, "one HOL credit minus two absence halves")
+  const annualResponse = await harness([], null, undefined, null, rows, "annual", holidays).read(2026)
+  const annualSummary = (annualResponse.annualSummaries as Array<Record<string, unknown>>).find(row => row.personId === PERSON)!
+  assert.equal((annualSummary.codeTotals as Record<string, number>).HOL, 1)
+  assert.equal(annualSummary.closingBalanceUnits, 17)
+})
 
 for (const homePortion of ["am", "pm"]) {
   test(`${homePortion.toUpperCase()} HOME plus opposite annual leave deducts only half a day from annual balance`, async () => {

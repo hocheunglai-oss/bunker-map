@@ -2,7 +2,8 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
-import { hktTimeFromTimestamp } from "@/lib/attendanceRules"
+import { hktDateFromTimestamp, hktTimeFromTimestamp } from "@/lib/attendanceRules"
+import { attendanceDayUnits } from "@/lib/attendanceDayUnits"
 import { normalizeEmailList } from "@/lib/emailAddress"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import styles from "./attendanceRecord.module.css"
@@ -745,7 +746,7 @@ function annualCodeTotal(summary: ApiAttendanceAnnualSummary | undefined, code: 
   return Number.isFinite(value) ? value : 0
 }
 
-function calculatedMonthlyStats(month: AttendanceMonthData, personId: string) {
+function calculatedMonthlyStats(month: AttendanceMonthData, personId: string, today: string) {
   const summary = month.summaries.find((item) => item.person.id === personId)
   if (
     Number.isFinite(summary?.attendedDays) &&
@@ -761,9 +762,7 @@ function calculatedMonthlyStats(month: AttendanceMonthData, personId: string) {
   for (const day of month.calendarDays) {
     const record = day.records.find((item) => item.person.id === personId)
     if (!record) continue
-    if (record.effectiveSignIn || record.effectiveSignOut || record.punches.length) {
-      attendedDays += 1
-    }
+    attendedDays += attendanceDayUnits({ ...record, date: day.date }, today)
     if (record.late) lateDays += 1
   }
   return { attendedDays, lateDays }
@@ -1087,8 +1086,8 @@ export default function AttendanceRecordClient() {
   }, [monthDays])
 
   const monthStats = useMemo(
-    () => new Map(monthPeople.map((person) => [person.id, calculatedMonthlyStats(monthData, person.id)])),
-    [monthData, monthPeople],
+    () => new Map(monthPeople.map((person) => [person.id, calculatedMonthlyStats(monthData, person.id, hktDateFromTimestamp(viewNow))])),
+    [monthData, monthPeople, viewNow],
   )
 
   const monthSections = useMemo<MonthSection[]>(() => {
@@ -1111,12 +1110,12 @@ export default function AttendanceRecordClient() {
         ).map((person) => ({
           person,
           summary: summaryByPerson.get(person.id) || null,
-          ...calculatedMonthlyStats(data, person.id),
+          ...calculatedMonthlyStats(data, person.id, hktDateFromTimestamp(viewNow)),
         })),
       })
     }
     return sections
-  }, [currentMonth, currentYear, selectedSummaryYear, staffOrder, yearData])
+  }, [currentMonth, currentYear, selectedSummaryYear, staffOrder, yearData, viewNow])
 
   const closedMonthSections = useMemo(
     () => monthSections.filter((section) => yearData[section.month]?.periodClosed),

@@ -131,6 +131,21 @@ async function main() {
             await open("OUT"); await page.getByLabel("Sign out time", { exact: true }).fill("13:05"); await save()
             assert.equal(await page.evaluate(() => window.__halfday.posts.at(-1).dayEdit.updateSignOut), true)
             assert.deepEqual(await entries(), [{ portion: "pm", code: "ALS", units: 0.5 }])
+            // Reproduce the reported two-day counter, both older-response fallback and API total.
+            for (const totals of ["fallback", "api"]) {
+              await page.goto(`${origin}/?permission=edit&countExample=1&totals=${totals}`)
+              const attended = page.getByRole("row").filter({ hasText: "ATTENDED DAYS" }).locator("td").first()
+              await attended.waitFor()
+              assert.equal(await attended.innerText(), "1.5", `${totals}: one office day plus half HOME is 1.5`)
+              assert.equal(await page.getByRole("row").filter({ hasText: "LATE DAYS" }).locator("td").first().innerText(), "1", "late occasions are not fractional")
+              await button(page, "REFRESH").click()
+              assert.equal(await attended.innerText(), "1.5", "refresh retains fractional total")
+              await capture(`fractional-total-${totals}`)
+              await button(page, "MONTHLY STATEMENT").click()
+              const summaryRow = page.getByRole("row").filter({ hasText: "Alice Test" })
+              await summaryRow.waitFor()
+              assert.ok((await summaryRow.innerText()).includes("1.5"), "monthly statement also displays fractional total")
+            }
             await page.goto(`${origin}/?permission=view`); await button(page, "REFRESH").waitFor()
             assert.equal(await page.getByRole("button", { name: /^Edit Alice/ }).count(), 0)
             await page.goto(`${origin}/?permission=signed-out`); await page.getByRole("heading", { name: "Access Denied" }).waitFor()

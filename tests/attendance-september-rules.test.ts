@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
+import { attendanceDayUnits } from "../lib/attendanceDayUnits"
 import {
   attendanceHolidayEvents,
   sortAttendancePeople,
@@ -257,10 +258,12 @@ test("API contract keeps August visible and prevents legacy HO or HOL double-cou
   assert.match(attendanceData, /staffOrder: rosterOrder/)
   assert.match(attendanceData, /availableYears/)
   assert.match(attendanceData, /annualSummaries/)
-  assert.match(attendanceData, /record\.status !== "pending"/)
+  assert.match(attendanceData, /attendanceDayUnits\(record, today\)/)
+  const pending = { date: "2026-11-03", required: true, status: "pending", leave: [], effectiveSignIn: null }
+  assert.equal(attendanceDayUnits(pending, "2026-11-03"), 0)
   assert.match(attendanceData, /explicitHolidayAttendance/)
   assert.match(attendanceData, /workModeOverride\?\.mode === "office"/)
-  assert.match(attendanceData, /record\.holidayAttendance \|\|/)
+  assert.equal(attendanceDayUnits({ ...pending, status: "holiday-attendance-missing", holidayAttendance: true }, "2026-11-03"), 1)
   assert.match(attendanceData, /isOfficialAttendanceSignOut/)
   assert.match(
     attendanceData,
