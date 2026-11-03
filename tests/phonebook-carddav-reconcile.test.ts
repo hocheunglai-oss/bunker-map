@@ -20,7 +20,7 @@ type Row = Record<string, any>
 type Call = { method: string; path: string; init: RequestInit }
 
 function fixture(options: {
-  count?: number; backupFails?: boolean; corruptBackup?: boolean; queueFails?: boolean
+  count?: number; backupFails?: boolean; corruptBackup?: boolean; queueFails?: boolean; deferFails?: boolean
   lockBusy?: boolean; onFetch?: (call: Call, f: ReturnType<typeof fixture>) => Response | void | Promise<Response | void>
 } = {}) {
   const contacts: Row[] = Array.from({ length: options.count ?? 2 }, (_, n) => ({
@@ -33,6 +33,7 @@ function fixture(options: {
   const log: unknown[] = []
   let owner: string | null = null
   let failNextLease = false
+  let timeOffset = 0
   const database = {
     async rpc(name: string, args: Row) {
       if (name === "claim_bunker_map_backup_lock") {
@@ -80,6 +81,7 @@ function fixture(options: {
           operation = "upsert"; values = data; return builder
         },
         then(resolve: (v: any) => any, reject: (e: unknown) => any) {
+          if (table === "phonebook_carddav_queue" && operation === "update" && options.deferFails) return Promise.resolve({ error: new Error("PRIVATE DEFER ERROR"), data: null }).then(resolve, reject)
           if ((table === "phonebook_carddav_quarantine" && options.backupFails) || (table === "phonebook_carddav_queue" && options.queueFails)) return Promise.resolve({ error: new Error("PRIVATE DATABASE ERROR"), data: null }).then(resolve, reject)
           if (operation === "upsert") {
             if (table === "phonebook_carddav_queue") {
@@ -101,6 +103,7 @@ function fixture(options: {
   const engine: Row = {}
   const context = {
     Error, URL, Buffer, AbortSignal, TextDecoder, setTimeout: (callback: () => void) => setTimeout(callback, 0),
+    Date: class extends Date { static now() { return Date.now() + timeOffset } },
     process: { env: { CARDDAV_ADDRESSBOOK_URL: "https://carddav-fixture.invalid/book/", CARDDAV_USERNAME: "test", CARDDAV_PASSWORD: "test" } },
     console: { info: (...items: unknown[]) => log.push(items), error: (...items: unknown[]) => log.push(items) },
     require: (name: string) => {
@@ -133,10 +136,69 @@ function fixture(options: {
   const f = { contacts, remote, queue, backups, calls, log, database, shared, engine,
     run: () => engine.runPhonebookCarddavReconcile(database),
     loseLease: () => { failNextLease = true },
+    advanceTime: (ms: number) => { timeOffset += ms },
+    ownsLease: () => owner !== null,
     enqueue: (contactId: string) => database.rpc("enqueue_phonebook_carddav", { p_contact_ids: [contactId] }),
   }
   return f
 }
+
+test("bulk repair processes more than ten contacts with bounded concurrent writes under one lease", async () => {
+  let active = 0, maximum = 0
+  const inFlight = new Set<string>()
+  const f = fixture({ count: 45, onFetch: async (call, f) => {
+    if (call.method !== "PUT") return
+    assert.equal(f.ownsLease(), true)
+    assert.equal(inFlight.has(call.path), false, "a contact must never have concurrent writers")
+    inFlight.add(call.path)
+    maximum = Math.max(maximum, ++active)
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    assert.equal(f.ownsLease(), true)
+    active -= 1
+    inFlight.delete(call.path)
+  } })
+  f.remote.clear()
+  const result = await f.run()
+  assert.equal(result.repaired, 45)
+  assert.equal(result.pending, 0)
+  assert.equal(result.verified, true)
+  assert.ok(maximum > 1 && maximum <= 4)
+  assert.equal(active, 0)
+  assert.equal(f.ownsLease(), false)
+})
+
+test("bulk repair stops admitting work at its deadline and retains unattempted queue items", async () => {
+  let advanced = false
+  const f = fixture({ count: 30, onFetch: (call, f) => {
+    if (call.method === "PROPFIND" && !advanced) {
+      advanced = true
+      f.advanceTime(145_000)
+    }
+  } })
+  f.remote.clear()
+  const result = await f.run()
+  assert.equal(result.repaired, 0)
+  assert.equal(result.pending, 30)
+  assert.equal(result.verified, false)
+  assert.equal(f.calls.filter((call) => call.method === "PUT").length, 0)
+  assert.equal(f.ownsLease(), false)
+})
+
+test("a queue persistence failure waits for in-flight workers before releasing their lease", async () => {
+  let completedSlowWrite = false
+  const f = fixture({ count: 8, deferFails: true, onFetch: async (call, f) => {
+    if (call.method !== "PUT") return
+    if (call.path === path(1)) return new Response(null, { status: 403 })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.equal(f.ownsLease(), true, "an active writer cannot outlive its lease owner")
+    completedSlowWrite = true
+  } })
+  f.remote.clear()
+  await assert.rejects(f.run())
+  assert.equal(completedSlowWrite, true)
+  assert.equal(f.ownsLease(), false)
+  assert.ok(f.queue.length > 0)
+})
 
 test("removes five extras only after recoverable backups and verifies the exact mirror", async () => {
   const f = fixture({ count: 10 })
@@ -181,15 +243,32 @@ test("an interrupted bulk source deletion drains its durable queue across bounde
   assert.equal(first.pending, 11)
   assert.equal(first.verified, false)
   const second = await f.run()
-  assert.equal(second.total, 79)
+  assert.equal(second.removed, 10)
+  assert.equal(second.total, 80)
   assert.equal(second.pending, 1)
   const third = await f.run()
   assert.equal(third.verified, true)
   assert.equal(second.saved, 79)
-  assert.equal(second.total, 79)
+  assert.equal(third.total, 79)
   assert.equal(f.queue.length, 0)
   assert.equal(f.backups.length, 21)
   assert.ok(f.backups.every((backup) => backup.deleted_at))
+})
+
+test("a deletion-heavy batch does not prevent later upserts or mutate skipped deletion versions", async () => {
+  const f = fixture({ count: 50 })
+  const deleted = f.contacts.splice(0, 11)
+  for (const contact of deleted) await f.enqueue(contact.id)
+  for (const contact of f.contacts) await f.enqueue(contact.id)
+  const untouched = structuredClone(f.queue[10])
+  const result = await f.run()
+  assert.equal(result.repaired, 39, "upserts after the deletion cap must still be processed")
+  assert.equal(result.removed, 10)
+  assert.equal(result.pending, 1)
+  assert.equal(f.calls.filter((call) => call.method === "DELETE").length, 10)
+  assert.deepEqual(f.queue, [untouched], "skipped deletion must not be ACKed, deferred or versioned")
+  assert.ok(f.remote.has(path(11)), "small incidental cleanup must not bypass skipped deletion guard")
+  assert.equal(f.backups.length, 10)
 })
 
 test("draining authorized deletions does not bypass the unrelated-extra safety limit", async () => {
