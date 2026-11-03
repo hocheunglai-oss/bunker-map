@@ -51,6 +51,9 @@ jobs:
       - name: Verify native assets in all three compiled backup function traces
         run: node --test tests/postgres-runtime-trace.production.test.cjs
 
+      - name: Verify audited development matcher is absent from production traces
+        run: FCUNO_REQUIRE_BUILD_TRACE=1 node --test tests/minimatch-tooling-boundary.test.mjs
+
       - name: Verify pinned font assets and routing boundaries
         run: npx --no-install tsx --test tests/roboto-self-hosting.test.ts
 
@@ -333,6 +336,10 @@ jobs:
         run: |
           set -o pipefail
           npm audit --omit=dev --audit-level=high --json | tee security-audit-production.json
+
+      - name: Verify exact development matcher advisory boundaries without suppressing audits
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: node --test tests/minimatch-tooling-boundary.test.mjs
 
       - name: Audit all dependencies
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}

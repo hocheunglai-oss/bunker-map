@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import {
+  attendanceMorningSignOutHelp,
   attendancePortionConflicts,
   attendanceWorkModeForStatus,
   editableAttendanceEntry,
@@ -13,6 +14,18 @@ const entry = (id: string, portion: ApiAttendanceLeaveEntry["portion"], code: Ap
   units: portion === "full" ? 1 : 0.5, note: null,
 })
 const record = (leave: ApiAttendanceDailyItem["leave"]) => ({ leave }) as ApiAttendanceDailyItem
+
+test("a saved opposite PM absence explains where to correct its morning sign-out", () => {
+  for (const code of ["ALS", "ALU", "SLM", "SLR", "SLX", "SPL", "MTL", "NPL"] as const) {
+    assert.equal(attendanceMorningSignOutHelp([entry("pm-leave", "pm", code)]),
+      "To correct a morning sign-out, edit the PM (OUT) leave entry.")
+    assert.equal(attendanceMorningSignOutHelp([entry("am-leave", "am", code)]), undefined)
+  }
+  assert.equal(attendanceMorningSignOutHelp([]), undefined)
+  assert.equal(attendanceMorningSignOutHelp([entry("pm-home", "pm", "HO")]), undefined)
+  assert.equal(attendanceMorningSignOutHelp([entry("pm-trip", "pm", "OS")]), undefined)
+  assert.equal(attendanceMorningSignOutHelp([entry("full-leave", "full", "ALS")]), undefined)
+})
 
 test("adding a half-day absence preserves the remaining manual work mode", () => {
   for (const code of ["ALS", "ALU", "SLM", "SLR", "SLX", "SPL", "MTL", "NPL"] as const) {

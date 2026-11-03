@@ -13,7 +13,10 @@ export function installHalfdayHarness() {
   const h = window.__attendanceConfirmationHarness
   const date = `${h.currentYear}-${String(h.currentMonth).padStart(2, "0")}-02`
   const state = { entries: [] as Entry[], posts: [] as Record<string, unknown>[], failNext: false, date }
-  let manualMode = new URLSearchParams(location.search).get("manualMode") === "home-office" ? "home-office" : null
+  const params = new URLSearchParams(location.search)
+  let manualMode = params.get("manualMode") === "home-office" ? "home-office" : null
+  let signOut = params.get("morningOut") === "13:00" ? `${date}T13:00:00+08:00` : null
+  if (params.get("pmLeave") === "1") state.entries.push({ id: "synthetic-existing-pm", groupId: "synthetic", personId: id, leaveDate: date, portion: "pm", code: "ALS", units: 0.5, note: null })
   window.__halfday = state
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } })
   window.fetch = async (input, init) => {
@@ -36,11 +39,12 @@ export function installHalfdayHarness() {
       }
       state.entries = remaining
       manualMode = edit.workMode === "default" ? null : edit.workMode
+      if (edit.updateSignOut) signOut = `${date}T${edit.signOutTime}:00+08:00`
       return json({ success: true })
     }
     if (url.searchParams.get("view") === "all-time" || url.searchParams.get("scope") === "year" || !h.signedIn || h.permission === "none") return original(input, init)
     const mode = manualMode || (state.entries.some(entry => entry.code === "HO") ? "home-office" : state.entries.some(entry => entry.code === "OS") ? "business-trip" : "office")
-    const record = { person, workDate: date, date, leave: state.entries, punches: [], overrides: [], effectiveSignIn: null, effectiveSignOut: null,
+    const record = { person, workDate: date, date, leave: state.entries, punches: [], overrides: [], effectiveSignIn: signOut ? `${date}T10:00:00+08:00` : null, effectiveSignOut: signOut,
       workMode: mode, defaultWorkMode: "office", workModeSource: manualMode ? "manual" : mode === "office" ? "default" : "leave",
       workModeOverride: manualMode ? { id: "synthetic-manual-mode", mode: manualMode } : null, status: mode, late: false, early: false,
       schedule: { team: "BT", workStart: "10:00", workEnd: "19:00", amCutoff: "13:00", pmCutoff: "14:00" } }

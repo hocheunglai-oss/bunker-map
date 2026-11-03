@@ -44,7 +44,7 @@ async function main() {
       const browser = await launcher.launch({ headless: true })
       try {
         for (const width of baseline ? [1440] : [320, 390, 1440]) for (const scheme of baseline ? ["light"] : ["light", "dark"]) {
-          const context = await browser.newContext({ viewport: { width, height: 1000 }, colorScheme: scheme, ...(width < 760 ? { isMobile: true, hasTouch: true } : {}) })
+          const context = await browser.newContext({ viewport: { width, height: width === 320 ? 740 : width === 390 ? 844 : 1000 }, colorScheme: scheme, ...(width < 760 ? { isMobile: true, hasTouch: true } : {}) })
           try {
             const page = await context.newPage(), errors = [], external = [], captures = []
             // Stable weekday/current-month fixture, independent of the CI run date.
@@ -120,6 +120,17 @@ async function main() {
             await open("OUT"); await status(page).selectOption("leave:ALS"); await button(page, "PM").click(); await save()
             assert.equal(await page.evaluate(() => window.__halfday.posts.at(-1).dayEdit.workMode), "home-office", "keep existing manual HOME for remaining work half")
             await cell("IN").filter({ hasText: "HO" }).waitFor(); await cell("OUT").filter({ hasText: "ALS" }).waitFor()
+            // Morning departure belongs to the PM absence: guide without weakening its server guard.
+            await page.goto(`${origin}/?permission=edit&pmLeave=1&morningOut=13:00`)
+            await open("IN")
+            await dialog(page).getByText("To correct a morning sign-out, edit the PM (OUT) leave entry.", { exact: true }).waitFor()
+            await page.getByLabel("Sign out time", { exact: true }).fill("13:05")
+            await button(dialog(page), "Save changes").click()
+            assert.equal(await page.evaluate(() => window.__halfday.posts.length), 0, "wrong-half correction is not sent")
+            await button(dialog(page), "Close attendance editor").click()
+            await open("OUT"); await page.getByLabel("Sign out time", { exact: true }).fill("13:05"); await save()
+            assert.equal(await page.evaluate(() => window.__halfday.posts.at(-1).dayEdit.updateSignOut), true)
+            assert.deepEqual(await entries(), [{ portion: "pm", code: "ALS", units: 0.5 }])
             await page.goto(`${origin}/?permission=view`); await button(page, "REFRESH").waitFor()
             assert.equal(await page.getByRole("button", { name: /^Edit Alice/ }).count(), 0)
             await page.goto(`${origin}/?permission=signed-out`); await page.getByRole("heading", { name: "Access Denied" }).waitFor()

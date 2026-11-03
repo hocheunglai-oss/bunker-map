@@ -7,6 +7,7 @@ import { normalizeEmailList } from "@/lib/emailAddress"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import styles from "./attendanceRecord.module.css"
 import {
+  attendanceMorningSignOutHelp,
   attendancePortionConflicts,
   attendanceWorkModeForStatus,
   editableAttendanceEntry,
@@ -1352,7 +1353,7 @@ export default function AttendanceRecordClient() {
         leaveDraft.signOutTime < "17:00" &&
         !permitsMorningSignOut
       ) {
-        throw new Error("Official sign-out time cannot be earlier than 17:00.")
+        throw new Error(attendanceMorningSignOutHelp(leaveDraft.otherEntries) || "Official sign-out time cannot be earlier than 17:00.")
       }
       await postAttendance("save-day-edit", {
         dayEdit: {
@@ -2203,6 +2204,7 @@ export default function AttendanceRecordClient() {
                 <input
                   type="time"
                   aria-label="Sign out time"
+                  aria-describedby={attendanceMorningSignOutHelp(leaveDraft.otherEntries) ? "morning-sign-out-help" : undefined}
                   min={
                     permitsAttendanceMorningSignOut(leaveDraft)
                       ? undefined
@@ -2213,6 +2215,11 @@ export default function AttendanceRecordClient() {
                     ? { ...draft, signOutTime: event.target.value }
                     : draft)}
                 />
+                {attendanceMorningSignOutHelp(leaveDraft.otherEntries) ? (
+                  <small id="morning-sign-out-help" className={styles.fieldHelp}>
+                    {attendanceMorningSignOutHelp(leaveDraft.otherEntries)}
+                  </small>
+                ) : null}
               </label>
             </div>
             <div className={styles.modalFooter}>

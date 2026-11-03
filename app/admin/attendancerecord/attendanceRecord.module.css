@@ -1152,6 +1152,14 @@
   text-transform: uppercase;
 }
 
+.fieldHelp {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
 .formGrid select,
 .formGrid input,
 .formGrid textarea {
