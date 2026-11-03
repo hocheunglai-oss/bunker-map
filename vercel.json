@@ -44,6 +44,10 @@
       "schedule": "30 0 * * *"
     },
     {
+      "path": "/api/cron/eco-backup-watchdog",
+      "schedule": "7,37 * * * *"
+    },
+    {
       "path": "/api/cron/attendance-sync",
       "schedule": "*/15 * * * *"
     },

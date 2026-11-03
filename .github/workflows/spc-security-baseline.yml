@@ -330,6 +330,13 @@ jobs:
           export FCUNO_PWSH_PATH="$(command -v pwsh)"
           npm run test:exchange-worker 2>&1 | tee exchange-worker-tests.txt
 
+      - name: Verify independent ECO backup watchdog and alert deduplication
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/eco-backup-watchdog.test.ts tests/system-health-alerts.test.ts 2>&1 | tee eco-backup-watchdog-tests.tap
+
       - name: Audit production dependencies
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: bash
@@ -402,6 +409,7 @@ jobs:
             backup-observation-conflicts.tap
             backup-protection-sql-tests.tap
             phonebook-sync-tests.tap
+            eco-backup-watchdog-tests.tap
             enquiry-parser-tests.tap
             session-trigger-tests.tap
             exchange-worker-tests.txt
