@@ -243,6 +243,26 @@ test("watchdog has fixed source boundaries, own lightweight schedule, and escape
   checks[0].message = "<script>not markup</script>"
   const html = buildEcoBackupAlertHtml(checks, checkedAt)
   assert.match(html, /&lt;script&gt;/)
-  assert.doesNotMatch(html, /<script>|@cosulich/)
+  assert.doesNotMatch(html, /<\/?script\b/iu)
+  assert.doesNotMatch(html, /@cosulich/iu)
   assert.match(html, /ECO BACKUP NEEDS ATTENTION/)
+})
+
+test("alert mail escapes mixed-case tags and HTML punctuation in every dynamic text field", () => {
+  const payloads = [
+    ["<script>not markup</script>", "&lt;script&gt;not markup&lt;/script&gt;"],
+    ['<SCRIPT SRC="payload.js">NOT MARKUP</SCRIPT>', '&lt;SCRIPT SRC=&quot;payload.js&quot;&gt;NOT MARKUP&lt;/SCRIPT&gt;'],
+    ["<ScRiPt data-label='A&B'>not markup</ScRiPt>", "&lt;ScRiPt data-label=&#39;A&amp;B&#39;&gt;not markup&lt;/ScRiPt&gt;"],
+  ]
+  for (const [payload, escaped] of payloads) {
+    const checks = evaluate([run({ conclusion: "failure", capture: "failed", capturedAt: null })])
+    checks[0].label = payload
+    checks[0].message = payload
+    checks[0].details = { ...checks[0].details, action: payload }
+    const html = buildEcoBackupAlertHtml(checks, checkedAt)
+    assert.ok(html.includes(`<strong>${escaped}</strong>`))
+    assert.ok(html.includes(`<br>${escaped}</p>`))
+    assert.ok(html.includes(`<p>${escaped}</p>`))
+    assert.doesNotMatch(html, /<\/?script\b/iu)
+  }
 })
