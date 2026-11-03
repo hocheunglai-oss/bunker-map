@@ -205,6 +205,15 @@ export async function runHetznerMigration(options: MigrationOptions) {
   const errors = new Set<string>()
   const verifiedEtags = new Map<string, string>()
   let checkpointWrites = Promise.resolve()
+  let pendingCheckpointRecords = 0
+  async function flushCheckpoint() {
+    if (!options.apply || !options.saveCheckpoint || !pendingCheckpointRecords) return
+    pendingCheckpointRecords = 0
+    const saved = structuredClone(checkpoint)
+    // Keep writes ordered, and keep a failed save rejected until the run stops.
+    checkpointWrites = checkpointWrites.then(() => options.saveCheckpoint!(saved))
+    await checkpointWrites
+  }
   async function check(card: MigrationCard, write: boolean) {
     const member = cardHref(card.id)
     // A missing inventory member can go straight to a conditional create. A
@@ -229,10 +238,11 @@ export async function runHetznerMigration(options: MigrationOptions) {
       verifiedEtags.set(card.id, strongEtag(readback))
     }
     checkpoint.verified[card.id] = card.contentHash
+    // Checkpoints never skip remote verification on restart, so batching them
+    // avoids rewriting a growing map for every contact without changing safety.
     if (options.apply && options.saveCheckpoint) {
-      const saved = structuredClone(checkpoint)
-      checkpointWrites = checkpointWrites.then(() => options.saveCheckpoint!(saved))
-      await checkpointWrites
+      pendingCheckpointRecords += 1
+      if (pendingCheckpointRecords >= 50) await flushCheckpoint()
     }
   }
   // Failures never trigger deletion or blind retries. Completed records are rechecked on restart.
@@ -246,6 +256,9 @@ export async function runHetznerMigration(options: MigrationOptions) {
       }
     }
   }))
+  // Preserve verified progress even when another contact failed before a batch
+  // filled. Workers have settled, so this includes all successful in-flight work.
+  await flushCheckpoint()
   await checkpointWrites
   const uploadAndVerificationMs = Math.round(performance.now() - contactPhaseStartedAt)
   const finalSource = await options.loadSource()

@@ -184,6 +184,64 @@ test("restart rechecks remote state after committed upload even without checkpoi
   assert.equal(Object.keys(checkpoint!.verified).length, 1)
 })
 
+test("checkpoint writes are batched, immutable, serialized, and flushed after the final partial batch", async () => {
+  const f = fixture(123)
+  const saved: MigrationCheckpoint[] = []
+  let active = 0, maximumActive = 0
+  const result = await runHetznerMigration({ ...f.options, apply: true, concurrency: 8, saveCheckpoint: async value => {
+    active++; maximumActive = Math.max(maximumActive, active)
+    saved.push(value)
+    await new Promise(resolve => setTimeout(resolve, 40))
+    active--
+  } })
+  assert.equal(result.candidateVerified, true)
+  assert.deepEqual(saved.map(value => Object.keys(value.verified).length), [50, 100, 123])
+  assert.equal(maximumActive, 1)
+  assert.equal(active, 0)
+})
+
+test("a partial upload failure flushes verified progress and resumes without rewriting those contacts", async () => {
+  const f = fixture(57)
+  const saved: MigrationCheckpoint[] = []
+  const transport: typeof fetch = (input, init) => init?.method === "PUT" && String(input).endsWith(cardHref(id(54)))
+    ? Promise.resolve(new Response(null, { status: 503 })) : f.options.transport!(input, init)
+  const result = await runHetznerMigration({ ...f.options, transport, apply: true, concurrency: 1,
+    saveCheckpoint: async value => { saved.push(value) } })
+  assert.equal(result.failed, 1)
+  assert.equal(result.candidateVerified, false)
+  assert.deepEqual(saved.map(value => Object.keys(value.verified).length), [50, 53])
+  const resumed = await runHetznerMigration({ ...f.options, apply: true, checkpoint: saved.at(-1) })
+  assert.equal(resumed.unchanged, 53)
+  assert.equal(resumed.uploaded, 4)
+  assert.equal(resumed.candidateVerified, true)
+})
+
+test("periodic and final checkpoint failures reject readiness without retrying a failed save", async () => {
+  for (const count of [1, 55]) {
+    const f = fixture(count)
+    let attempts = 0
+    await assert.rejects(runHetznerMigration({ ...f.options, apply: true, concurrency: 1, saveCheckpoint: async () => {
+      attempts++
+      throw new Error("Synthetic checkpoint write failure")
+    } }), /Synthetic checkpoint write failure/)
+    assert.equal(attempts, 1)
+    assert.equal(f.cards.size, Math.min(count, 50))
+    assert.equal(f.stats().snapshotReads, 2, "verification cannot report readiness after a failed checkpoint")
+  }
+})
+
+test("final checkpoint includes an in-flight success that completes after another worker fails", async () => {
+  const f = fixture(2)
+  let saved: MigrationCheckpoint | undefined
+  const transport: typeof fetch = (input, init) => init?.method === "PUT" && String(input).endsWith(cardHref(id(1)))
+    ? Promise.resolve(new Response(null, { status: 503 })) : f.options.transport!(input, init)
+  const result = await runHetznerMigration({ ...f.options, transport, apply: true,
+    saveCheckpoint: async value => { saved = value } })
+  assert.equal(result.failed, 1)
+  assert.equal(result.verifiedCount, 1)
+  assert.deepEqual(Object.keys(saved!.verified), [id(2)])
+})
+
 test("unchanged contacts preserve destination REV and do not cause PUTs", async () => {
   const f = fixture(1)
   const body = buildVCard(f.data[0]).replace(/REV:[^\r]+/, "REV:20000101T000000Z")
