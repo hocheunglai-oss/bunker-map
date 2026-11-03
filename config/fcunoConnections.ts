@@ -90,6 +90,19 @@ export const fcunoConnectionPolicy = Object.freeze({
   ecosystem: {
     productionOrigin: "https://eco.fcuno.com",
     knowledgeExtractionPath: "/api/ecosystem/knowledge-extract",
+    backupMonitor: {
+      repository: "hocheunglai-oss/ecosystem-public",
+      repositoryId: 1427776183,
+      ownerId: 265701760,
+      branch: "main",
+      workflowId: 391445288,
+      workflowPath: ".github/workflows/nightly-backup.yml",
+      jobName: "backup",
+      captureStepNames: [
+        "Capture, encrypt, verify Drive copy and retain five nights",
+        "Capture, encrypt and verify configured backup copies",
+      ] as const,
+    },
   },
   federation: {
     issuer: "https://fcuno.com",
@@ -149,6 +162,18 @@ export function validateFcunoConnectionPolicy(
     throw new Error("Storage media backup must retain the pinned source and Google job identity.")
   }
   requireNonEmpty(policy.ecosystem.productionOrigin, "ecosystem.productionOrigin")
+  const monitor = policy.ecosystem.backupMonitor
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(monitor.repository) ||
+      ![monitor.repositoryId, monitor.ownerId, monitor.workflowId].every((id) => Number.isSafeInteger(id) && id > 0) ||
+      !/^\.github\/workflows\/[A-Za-z0-9_.-]+\.ya?ml$/.test(monitor.workflowPath)) {
+    throw new Error("ECO backup monitoring requires an exact public workflow identity.")
+  }
+  requireNonEmpty(monitor.branch, "ecosystem.backupMonitor.branch")
+  requireNonEmpty(monitor.jobName, "ecosystem.backupMonitor.jobName")
+  if (!monitor.captureStepNames.length || new Set(monitor.captureStepNames).size !== monitor.captureStepNames.length) {
+    throw new Error("ECO backup monitoring requires unique reviewed capture step names.")
+  }
+  monitor.captureStepNames.forEach((name) => requireNonEmpty(name, "ecosystem.backupMonitor.captureStepNames"))
   requireNonEmpty(policy.federation.issuer, "federation.issuer")
   requireNonEmpty(policy.federation.protocolVersion, "federation.protocolVersion")
   requireNonEmpty(policy.federation.syncAudience, "federation.syncAudience")
