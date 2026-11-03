@@ -1173,6 +1173,11 @@
   resize: vertical;
 }
 
+/* WebKit's native select does not consistently paint its min-height. */
+.formGrid select {
+  height: 40px;
+}
+
 .formGrid select:focus,
 .formGrid input:focus,
 .formGrid textarea:focus {
@@ -1205,6 +1210,27 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 7px;
+}
+
+.dayEditContext {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+  color: var(--fc-admin-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.dayEditContext strong {
+  color: var(--fc-admin-panel-text);
+  font-weight: 600;
+}
+
+.portionButton:disabled,
+.portionButtonActive:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .portionButton,

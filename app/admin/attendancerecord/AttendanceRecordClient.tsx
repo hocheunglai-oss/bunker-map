@@ -6,6 +6,12 @@ import { hktTimeFromTimestamp } from "@/lib/attendanceRules"
 import { normalizeEmailList } from "@/lib/emailAddress"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import styles from "./attendanceRecord.module.css"
+import {
+  attendancePortionConflicts,
+  attendanceWorkModeForStatus,
+  editableAttendanceEntry,
+  permitsAttendanceMorningSignOut,
+} from "./attendanceDayEditor"
 import type {
   ApiAllTimeSummary,
   ApiAttendanceAnnualSummary,
@@ -14,6 +20,7 @@ import type {
   ApiAttendanceDailyItem,
   ApiAttendanceEntitlement,
   ApiAttendanceHoliday,
+  ApiAttendanceLeaveEntry,
   ApiAttendanceMonthlyAdjustment,
   ApiAttendanceMonthlySummary,
   ApiAttendancePerson,
@@ -54,9 +61,11 @@ type LeaveDraft = {
   code: AttendanceLeaveCode
   note: string
   workMode: "default" | "office" | "home-office" | "business-trip"
+  manualWorkMode?: AttendanceWorkMode
   defaultWorkMode: AttendanceWorkMode
   workModeOverrideId?: string
   entryId?: string
+  otherEntries: ApiAttendanceLeaveEntry[]
   holiday: boolean
   signInTime: string
   signOutTime: string
@@ -620,24 +629,6 @@ function leaveEntryForDirection(
   if (fullDayEntry) return fullDayEntry
   const matchingPortion = direction === "in" ? "am" : "pm"
   return entries.find((entry) => entry.portion === matchingPortion)
-}
-
-function editableAttendanceEntry(
-  item: ApiAttendanceDailyItem,
-  direction: "in" | "out",
-) {
-  const directionalEntry = leaveEntryForDirection(item, direction)
-  if (directionalEntry) return directionalEntry
-  const entries = leaveEntries(item)
-  // A half-day absence governs the working session shown in the opposite
-  // cell: PM leave carries the morning OUT time in the IN cell, while AM
-  // leave carries the afternoon IN time in the OUT cell. When there is only
-  // one stored status for the day, either cell must therefore edit it.
-  if (entries.length === 1) return entries[0]
-  // HOME and OS represent one attendance status for the day. Allow either
-  // side of the IN/OUT pair to edit the same stored half-day entry, so an AM
-  // or PM record can be promoted to Full day without creating a duplicate.
-  return entries.find((entry) => entry.code === "HO" || entry.code === "OS")
 }
 
 function absenceEntryForPortion(
@@ -1284,26 +1275,27 @@ export default function AttendanceRecordClient() {
     const manualWorkMode = record?.workModeOverride?.mode ||
       (record?.workModeSource === "manual" ? record.workMode : undefined)
     const defaultWorkMode = record?.defaultWorkMode ||
-      (!manualWorkMode && record?.workMode
+      (!manualWorkMode && record?.workModeSource !== "leave" && record?.workMode
         ? record.workMode
         : "office")
     const displayedWorkMode = manualWorkMode ||
       (record?.holidayAttendance
         ? "office"
-        : record?.workMode && record.workMode !== defaultWorkMode
+        : record?.workModeSource !== "leave" && record?.workMode && record.workMode !== defaultWorkMode
           ? record.workMode
           : undefined)
-    const attendanceModeCode = !matching && record?.workMode === "home-office"
+    const attendanceModeCode = !matching && record?.workModeSource !== "leave" && record?.workMode === "home-office"
       ? "HO"
-      : !matching && record?.workMode === "business-trip"
+      : !matching && record?.workModeSource !== "leave" && record?.workMode === "business-trip"
         ? "OS"
         : undefined
+    const otherEntries = record ? leaveEntries(record).filter((entry) => entry.id !== matching?.id) : []
     setLeaveDraft({
       personId: person.id,
       staffLabel: `${person.staffCode} · ${person.displayName}`,
       date,
       leaveEnabled: Boolean(matching || attendanceModeCode),
-      portion: matching?.portion || (attendanceModeCode ? "full" : direction === "in" ? "am" : "pm"),
+      portion: matching?.portion || (attendanceModeCode && otherEntries.length === 0 ? "full" : direction === "in" ? "am" : "pm"),
       code: matching?.code || attendanceModeCode || "ALS",
       note: matching?.note || "",
       workMode: attendanceModeCode
@@ -1314,8 +1306,10 @@ export default function AttendanceRecordClient() {
           ? displayedWorkMode
           : "default",
       defaultWorkMode,
+      manualWorkMode,
       workModeOverrideId: record?.workModeOverride?.id || undefined,
       entryId: matching?.id,
+      otherEntries,
       holiday: Boolean(holiday || record?.holiday),
       signInTime: record?.effectiveSignIn
         ? hktTimeFromTimestamp(record.effectiveSignIn) || ""
@@ -1348,13 +1342,13 @@ export default function AttendanceRecordClient() {
       ) {
         throw new Error("Sign-out time must be later than sign-in time.")
       }
-      const permitsMorningSignOut =
-        leaveDraft.leaveEnabled &&
-        leaveDraft.portion === "pm" &&
-        leaveDraft.code !== "HO" &&
-        leaveDraft.code !== "OS"
+      if (leaveDraft.leaveEnabled && attendancePortionConflicts(leaveDraft.portion, leaveDraft.otherEntries)) {
+        throw new Error("That portion already has an entry. Edit its AM or PM cell separately.")
+      }
+      const permitsMorningSignOut = permitsAttendanceMorningSignOut(leaveDraft)
       if (
         leaveDraft.signOutTime &&
+        leaveDraft.signOutTime !== leaveDraft.initialSignOutTime &&
         leaveDraft.signOutTime < "17:00" &&
         !permitsMorningSignOut
       ) {
@@ -2130,7 +2124,7 @@ export default function AttendanceRecordClient() {
                         ...draft,
                         leaveEnabled: true,
                         code: value as AttendanceLeaveCode,
-                        workMode: "default",
+                        workMode: attendanceWorkModeForStatus(value as AttendanceLeaveCode, draft.manualWorkMode),
                       }
                     }
                     if (value === "default") {
@@ -2141,8 +2135,7 @@ export default function AttendanceRecordClient() {
                         ...draft,
                         leaveEnabled: true,
                         code: value === "home-office" ? "HO" : "OS",
-                        portion: "full",
-                        workMode: "default",
+                        workMode: attendanceWorkModeForStatus(value === "home-office" ? "HO" : "OS", draft.manualWorkMode),
                       }
                     }
                     const selectedMode = value as AttendanceWorkMode
@@ -2177,6 +2170,7 @@ export default function AttendanceRecordClient() {
                         key={value}
                         className={leaveDraft.portion === value ? styles.portionButtonActive : styles.portionButton}
                         aria-pressed={leaveDraft.portion === value}
+                        disabled={attendancePortionConflicts(value, leaveDraft.otherEntries)}
                         onClick={() => setLeaveDraft((draft) => draft ? { ...draft, portion: value } : draft)}
                       >
                         {label}
@@ -2185,6 +2179,14 @@ export default function AttendanceRecordClient() {
                   </div>
                 </fieldset>
               ) : null}
+              <div className={styles.dayEditContext}>
+                <span>IN = AM · OUT = PM. Edit each half separately, or choose Full day.</span>
+                {leaveDraft.otherEntries.map((entry) => (
+                  <strong key={entry.id}>
+                    {entry.portion.toUpperCase()}: {entry.code === "HO" ? "Home office" : entry.code === "OS" ? "Business trip" : entry.code} — kept unchanged
+                  </strong>
+                ))}
+              </div>
               <label>
                 Sign in
                 <input
@@ -2202,10 +2204,7 @@ export default function AttendanceRecordClient() {
                   type="time"
                   aria-label="Sign out time"
                   min={
-                    leaveDraft.leaveEnabled &&
-                    leaveDraft.portion === "pm" &&
-                    leaveDraft.code !== "HO" &&
-                    leaveDraft.code !== "OS"
+                    permitsAttendanceMorningSignOut(leaveDraft)
                       ? undefined
                       : "17:00"
                   }
