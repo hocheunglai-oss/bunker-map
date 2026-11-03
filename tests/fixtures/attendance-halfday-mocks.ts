@@ -11,12 +11,14 @@ export function installHalfdayHarness() {
   installAttendanceConfirmationHarness()
   const original = window.fetch
   const h = window.__attendanceConfirmationHarness
-  const date = `${h.currentYear}-${String(h.currentMonth).padStart(2, "0")}-02`
-  const state = { entries: [] as Entry[], posts: [] as Record<string, unknown>[], failNext: false, date }
   const params = new URLSearchParams(location.search)
+  const countExample = params.get("countExample") === "1"
+  const date = `${h.currentYear}-${String(h.currentMonth).padStart(2, "0")}-${countExample ? "03" : "02"}`
+  const state = { entries: [] as Entry[], posts: [] as Record<string, unknown>[], failNext: false, date }
   let manualMode = params.get("manualMode") === "home-office" ? "home-office" : null
   let signOut = params.get("morningOut") === "13:00" ? `${date}T13:00:00+08:00` : null
   if (params.get("pmLeave") === "1") state.entries.push({ id: "synthetic-existing-pm", groupId: "synthetic", personId: id, leaveDate: date, portion: "pm", code: "ALS", units: 0.5, note: null })
+  if (countExample) for (const [portion, code] of [["am", "HO"], ["pm", "ALU"]]) state.entries.push({ id: `synthetic-${portion}`, groupId: "synthetic", personId: id, leaveDate: date, portion, code, units: 0.5, note: null })
   window.__halfday = state
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } })
   window.fetch = async (input, init) => {
@@ -42,12 +44,22 @@ export function installHalfdayHarness() {
       if (edit.updateSignOut) signOut = `${date}T${edit.signOutTime}:00+08:00`
       return json({ success: true })
     }
-    if (url.searchParams.get("view") === "all-time" || url.searchParams.get("scope") === "year" || !h.signedIn || h.permission === "none") return original(input, init)
+    if (url.searchParams.get("view") === "all-time" || (url.searchParams.get("scope") === "year" && !countExample) || !h.signedIn || h.permission === "none") return original(input, init)
     const mode = manualMode || (state.entries.some(entry => entry.code === "HO") ? "home-office" : state.entries.some(entry => entry.code === "OS") ? "business-trip" : "office")
     const record = { person, workDate: date, date, leave: state.entries, punches: [], overrides: [], effectiveSignIn: signOut ? `${date}T10:00:00+08:00` : null, effectiveSignOut: signOut,
       workMode: mode, defaultWorkMode: "office", workModeSource: manualMode ? "manual" : mode === "office" ? "default" : "leave",
-      workModeOverride: manualMode ? { id: "synthetic-manual-mode", mode: manualMode } : null, status: mode, late: false, early: false,
+      workModeOverride: manualMode ? { id: "synthetic-manual-mode", mode: manualMode } : null, required: true, status: mode === "office" ? "incomplete" : mode, late: false, early: false,
       schedule: { team: "BT", workStart: "10:00", workEnd: "19:00", amCutoff: "13:00", pmCutoff: "14:00" } }
-    return json({ year: h.currentYear, month: h.currentMonth, people, staffOrder: people.map(p => p.staffCode), summaries: [], calendarDays: [{ date, records: [record] }] })
+    const calendarDays = [{ date, records: [record] }]
+    const summary = { person, attendedDays: 1.5, lateDays: 1, codeTotals: { HO: 0.5, ALU: 0.5 }, confirmation: null }
+    if (countExample) {
+      const officeDate = date.slice(0, 8) + "02"
+      calendarDays.unshift({ date: officeDate, records: [{ ...record, date: officeDate, workDate: officeDate, leave: [],
+        workMode: "office", workModeSource: "default", status: "late", late: true,
+        effectiveSignIn: `${officeDate}T10:04:00+08:00`, effectiveSignOut: `${officeDate}T19:00:00+08:00` }] })
+    }
+    return json({ year: h.currentYear, month: h.currentMonth, people, staffOrder: people.map(p => p.staffCode),
+      summaries: countExample && params.get("totals") === "api" ? [summary] : [], calendarDays,
+      ...(countExample && url.searchParams.get("scope") === "year" ? { months: [{ month: h.currentMonth, periodClosed: false, summaries: [summary] }] } : {}) })
   }
 }
