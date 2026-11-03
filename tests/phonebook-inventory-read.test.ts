@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs"
 import test from "node:test"
 import vm from "node:vm"
 import ts from "typescript"
+import { fcunoConnectionPolicy } from "../config/fcunoConnections"
 
 const source = readFileSync(new URL("../lib/phonebookCarddav.ts", import.meta.url), "utf8")
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
@@ -33,7 +34,10 @@ function fixture(fetcher: (call: Call, attempt: number) => Response | Promise<Re
     },
     clearTimeout(id: number) { timers.delete(id) },
     console: { info: (...args: unknown[]) => events.push(args), error: (...args: unknown[]) => events.push(args) },
-    require(name: string) { assert.equal(name, "node:crypto"); return { createHash, randomUUID } },
+    require(name: string) {
+      if (name === "../config/fcunoConnections") return { fcunoConnectionPolicy }
+      assert.equal(name, "node:crypto"); return { createHash, randomUUID }
+    },
     process: { env: {
       CARDDAV_ADDRESSBOOK_URL: "https://provider-fixture.invalid/book/",
       CARDDAV_USERNAME: "synthetic-user", CARDDAV_PASSWORD: "synthetic-password",

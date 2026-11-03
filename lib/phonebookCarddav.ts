@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { createHash, randomUUID } from "node:crypto"
+import { fcunoConnectionPolicy } from "../config/fcunoConnections"
 
 export const MANAGED_PREFIX = "bunker-map-"
 export const SYNC_BATCH_SIZE = 2
@@ -32,13 +33,25 @@ export async function acknowledgeCardDavQueue(supabase: SupabaseClient, item: Ca
 }
 
 export async function acquireCardDavWriteLease(supabase: SupabaseClient, durationMs = 180_000): Promise<CardDavWriteLease> {
+  const generation = process.env.CARDDAV_WRITE_GENERATION
+  const target = fcunoConnectionPolicy.phonebookCardDav.hetzner
+  let lockName = "phonebook-carddav-writes"
+  if (generation !== undefined && generation !== "legacy") {
+    if (generation !== target.writeGeneration ||
+        process.env.CARDDAV_ADDRESSBOOK_URL?.replace(/\/?$/, "/") !== target.addressBookUrl ||
+        process.env.CARDDAV_USERNAME !== target.username) {
+      throw new SyncError("Phonebook writer generation does not match its approved connection. Please contact an administrator.", "configuration")
+    }
+    lockName = target.writeLockName
+  }
   const runId = randomUUID()
   const deadline = Date.now() + Math.min(durationMs, 180_000)
   const claim = async () => {
     if (Date.now() >= deadline) throw new SyncError("Phonebook sync will continue on the next run.", "verification")
     const { data, error } = await supabase.rpc("claim_bunker_map_backup_lock", {
-      p_lock_name: "phonebook-carddav-writes", p_run_id: runId, p_lease_seconds: 360,
+      p_lock_name: lockName, p_run_id: runId, p_lease_seconds: 360,
     })
+    if (error?.code === "55000") throw new SyncError("This phonebook writer has been retired. Reload the current FCUNO site; saved changes remain queued.", "configuration")
     if (error || data !== true) throw new SyncError("Phonebook sync is already running. Your saved changes remain queued.", "verification")
     if (Date.now() >= deadline) throw new SyncError("Phonebook sync will continue on the next run.", "verification")
   }
@@ -48,7 +61,7 @@ export async function acquireCardDavWriteLease(supabase: SupabaseClient, duratio
     beforeWrite: claim,
     release: async () => {
       const { error } = await supabase.rpc("release_bunker_map_backup_lock", {
-        p_lock_name: "phonebook-carddav-writes", p_run_id: runId,
+        p_lock_name: lockName, p_run_id: runId,
       })
       if (error) console.error("phonebook_carddav_lock_release_failed")
     },
@@ -391,6 +404,7 @@ export async function cardDavRequest(pathOrUrl: string, init: RequestInit = {}) 
     headers: {
       Authorization: `Basic ${auth}`,
       ...(init.headers || {}),
+      "Accept-Encoding": "identity",
     },
   })
   return response

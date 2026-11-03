@@ -5,6 +5,7 @@ import { performance } from "node:perf_hooks"
 import test from "node:test"
 import vm from "node:vm"
 import ts from "typescript"
+import { fcunoConnectionPolicy } from "../config/fcunoConnections"
 import { isAdminRole } from "../lib/adminPages"
 
 const routeSource = readFileSync(new URL("../app/api/phonebook/carddav-sync/route.ts", import.meta.url), "utf8")
@@ -52,6 +53,7 @@ function fixture(options: FixtureOptions = {}) {
   const dependencies: Record<string, unknown> = {
     "@/lib/adminPages": { isAdminRole },
     "node:crypto": { createHash, randomUUID },
+    "../config/fcunoConnections": { fcunoConnectionPolicy },
     "node:perf_hooks": { performance },
     "next/server": { NextResponse: Response },
     "@supabase/supabase-js": { createClient: (url: string, key: string) => {

@@ -28,7 +28,7 @@ function fixture(count = 3) {
   let sequence = 0
   let active = 0, maximumActive = 0
   let snapshotReads = 0
-  const injected = { dropFirstPutResponse: false, corruptReadback: false, conflict: false, extraAtFinalInventory: false, createBeforeFirstPut: false }
+  const injected = { dropFirstPutResponse: false, corruptReadback: false, conflict: false, extraAtFinalInventory: false, createBeforeFirstPut: false, forceWeakEtag: false }
   let inventoryReads = 0
   const transport: typeof fetch = async (input, init) => {
     const url = new URL(String(input))
@@ -53,7 +53,8 @@ function fixture(count = 3) {
     const existing = cards.get(member)
     if (method === "GET") {
       if (!existing) return new Response(null, { status: 404 })
-      return new Response(injected.corruptReadback ? existing.body.replace("+85244445555", "+85299999999") : existing.body, { headers: { ETag: existing.etag } })
+      const etag = injected.forceWeakEtag || headers.get("Accept-Encoding") !== "identity" ? `W/${existing.etag}` : existing.etag
+      return new Response(injected.corruptReadback ? existing.body.replace("+85244445555", "+85299999999") : existing.body, { headers: { ETag: etag } })
     }
     if (injected.createBeforeFirstPut) {
       injected.createBeforeFirstPut = false
@@ -166,6 +167,18 @@ test("uploads with bounded concurrency and verifies every field and exact invent
   assert.equal(f.requests.filter(request => request.method === "GET").length, 7, "empty-book import needs only one readback per created contact")
   assert.equal(f.requests.filter(request => request.method === "PUT").length, 7)
   assert.ok([...f.cards.values()].every(card => card.body.includes("+85244445555")))
+})
+
+test("requests identity representation but still rejects an ETag that remains weak", async () => {
+  const f = fixture(1)
+  const imported = await runHetznerMigration({ ...f.options, apply: true })
+  assert.equal(imported.candidateVerified, true)
+  assert.ok(f.requests.every(request => request.headers.get("Accept-Encoding") === "identity"))
+  f.injected.forceWeakEtag = true
+  const resumed = await runHetznerMigration({ ...f.options, apply: true })
+  assert.equal(resumed.failed, 1)
+  assert.equal(resumed.candidateVerified, false)
+  assert.equal(f.requests.filter(request => request.method === "PUT").length, 1, "a weak ETag must never be promoted for an update")
 })
 
 test("restart rechecks remote state after committed upload even without checkpoint acknowledgement", async () => {
