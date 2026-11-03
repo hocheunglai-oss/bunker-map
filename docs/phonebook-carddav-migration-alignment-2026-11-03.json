@@ -1,0 +1,26 @@
+{
+  "schema": "fcuno.phonebook-carddav-migration-alignment/v1",
+  "scope": "Local metadata alignment after the verified hosted migration; this change does not apply SQL or alter hosted migration history.",
+  "applicationReleaseCommit": "edec2aa013fef7079369e05fae51325fd319f6f3",
+  "reportedProductionDeploymentId": "dpl_FEfe2iKp5TvHv1sbiFtN8AvaHWZ2",
+  "hostedVerification": {
+    "source": "Release coordinator verified the Supabase migration result and stored SQL readback; this metadata change did not repeat the application.",
+    "version": "20261103092756",
+    "name": "retire_legacy_phonebook_carddav_writer",
+    "statementCount": 1,
+    "statementBytes": 2273,
+    "statementMd5": "f7657c1b75464f871e0aa3c102950c38"
+  },
+  "migrationMapping": {
+    "oldVersion": "20261103083813",
+    "hostedVersion": "20261103092756",
+    "oldFile": "supabase/migrations/20261103083813_retire_legacy_phonebook_carddav_writer.sql",
+    "hostedFile": "supabase/migrations/20261103092756_retire_legacy_phonebook_carddav_writer.sql",
+    "sha256": "047e1ed5850707486103196b9eead723a79f86d5492d878da120d3392132c344",
+    "bytesUnchanged": true,
+    "oldPathAbsent": true
+  },
+  "applicationFilesUnchanged": true,
+  "sqlReapplied": false,
+  "hostedHistoryRewritten": false
+}

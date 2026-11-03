@@ -4,7 +4,7 @@ import test from "node:test"
 import { setupNativeCcinfo, literal, waitForBlock } from "./fixtures/native-postgres-ccinfo.mjs"
 
 const source = path => readFileSync(new URL(`../${path}`, import.meta.url), "utf8")
-const migration = source("supabase/migrations/20261103083813_retire_legacy_phonebook_carddav_writer.sql")
+const migration = source("supabase/migrations/20261103092756_retire_legacy_phonebook_carddav_writer.sql")
 const initial = `create role anon; create role authenticated; create role service_role bypassrls;
   grant usage on schema public to service_role;
   create schema supabase_migrations; create table supabase_migrations.schema_migrations(version text);
