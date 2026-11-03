@@ -8,7 +8,9 @@ import {
 
 const QUEUE_TABLE = "phonebook_carddav_queue"
 const BACKUP_TABLE = "phonebook_carddav_quarantine"
-const MAX_WRITES = 10
+const MAX_WRITES = 500
+const WRITE_CONCURRENCY = 4
+const MAX_QUEUED_DELETIONS = 10
 const MAX_REMOVALS = 20
 const MAX_CARD_BYTES = 1_000_000
 type Resource = { path: string; etag: string; contactId: string | null }
@@ -188,35 +190,54 @@ export async function runPhonebookCarddavReconcile(supabase: SupabaseClient): Pr
       .lte("next_attempt_at", new Date().toISOString()).order("queued_at", { ascending: true }).order("contact_id", { ascending: true }).limit(MAX_WRITES)
     if (queue.error || !queue.data) throw safeError()
     const failedDeletions = new Set<string>()
-    for (const item of queue.data as QueueItem[]) {
-      if (Date.now() > lease.deadline - 40_000) { result.blocked = "time-budget"; break }
-      try {
-        const current = await fetchContacts(supabase, { contactIds: [item.contact_id] })
-        if (current.contacts.length) {
-          await putContact(supabase, current.contacts[0], lease)
-          await acknowledge(supabase, item)
-          result.repaired += 1
-        } else {
-          failedDeletions.add(item.contact_id)
-          const resource = managedResources.get(item.contact_id)
-          if (resource) {
-            // A durable source deletion is already scoped to one contact. Drain
-            // it in bounded batches even when an interrupted company deletion
-            // exceeds the unrelated-extra mass-cleanup safety limit.
-            await quarantineAndDelete(supabase, resource, snapshotHash, lease)
-            result.removed += 1
+    const items = queue.data as QueueItem[]
+    let nextIndex = 0
+    let deletionAttempts = 0
+    let stop = false
+    // The queue has one row per contact. Distinct contacts may progress together
+    // under this one lease owner; each contact still executes in order and only
+    // acknowledges its captured version. Join all workers before cleanup/release.
+    const workers = Array.from({ length: Math.min(WRITE_CONCURRENCY, items.length) }, async () => {
+      while (!stop && nextIndex < items.length) {
+        if (Date.now() > lease.deadline - 40_000) { result.blocked = "time-budget"; stop = true; break }
+        const item = items[nextIndex++]
+        try {
+          const current = await fetchContacts(supabase, { contactIds: [item.contact_id] })
+          if (current.contacts.length) {
+            await putContact(supabase, current.contacts[0], lease)
+            await acknowledge(supabase, item)
+            result.repaired += 1
           } else {
-            const remote = await cardDavRequest(cardHref(item.contact_id), { method: "GET", cache: "no-store" })
-            if (remote.status !== 404) throw remote.ok ? safeError() : httpSyncError("verification", remote.status)
+            failedDeletions.add(item.contact_id)
+            // Bulk throughput is for publishing contacts. Preserve the previous
+            // destructive-work ceiling, and leave skipped versions unchanged.
+            // The set also prevents incidental cleanup bypassing this ceiling.
+            if (deletionAttempts >= MAX_QUEUED_DELETIONS) continue
+            deletionAttempts += 1
+            const resource = managedResources.get(item.contact_id)
+            if (resource) {
+              // A durable source deletion is already scoped to one contact. Drain
+              // it in bounded batches even when an interrupted company deletion
+              // exceeds the unrelated-extra mass-cleanup safety limit.
+              await quarantineAndDelete(supabase, resource, snapshotHash, lease)
+              result.removed += 1
+            } else {
+              const remote = await cardDavRequest(cardHref(item.contact_id), { method: "GET", cache: "no-store" })
+              if (remote.status !== 404) throw remote.ok ? safeError() : httpSyncError("verification", remote.status)
+            }
+            await acknowledge(supabase, item)
+            failedDeletions.delete(item.contact_id)
           }
-          await acknowledge(supabase, item)
-          failedDeletions.delete(item.contact_id)
+        } catch {
+          result.failed += 1
+          try { await defer(supabase, item) }
+          catch (error) { stop = true; throw error }
         }
-      } catch {
-        result.failed += 1
-        await defer(supabase, item)
       }
-    }
+    })
+    const settled = await Promise.allSettled(workers)
+    const rejected = settled.find((worker) => worker.status === "rejected")
+    if (rejected?.status === "rejected") throw rejected.reason
     phase = "stable-inventory"
     await checkSourceUnchanged(supabase, snapshotHash)
     let resources = await readReconcileInventory()
