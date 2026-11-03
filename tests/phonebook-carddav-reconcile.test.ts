@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs"
 import vm from "node:vm"
 import test from "node:test"
 import ts from "typescript"
+import { fcunoConnectionPolicy } from "../config/fcunoConnections"
 
 const compile = (file: string) => ts.transpileModule(readFileSync(new URL(file, import.meta.url), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
@@ -108,6 +109,7 @@ function fixture(options: {
     console: { info: (...items: unknown[]) => log.push(items), error: (...items: unknown[]) => log.push(items) },
     require: (name: string) => {
       if (name === "node:crypto") return { createHash, randomUUID }
+      if (name === "../config/fcunoConnections") return { fcunoConnectionPolicy }
       if (name === "./phonebookCarddav") return shared
       throw new Error(`Unexpected dependency ${name}`)
     },
@@ -142,6 +144,18 @@ function fixture(options: {
   }
   return f
 }
+
+test("shared DAV requests preserve strong ETags by requesting identity encoding", async () => {
+  const f = fixture({ onFetch: call => {
+    if (call.method === "GET") return new Response(vcard(), { headers: {
+      ETag: new Headers(call.init.headers).get("Accept-Encoding") === "identity" ? '"original"' : 'W/"original"',
+    } })
+  } })
+  const response = await f.shared.cardDavRequest(path(1), { method: "GET", headers: { "Cache-Control": "no-cache" } })
+  assert.equal(response.headers.get("etag"), '"original"')
+  assert.equal(new Headers(f.calls[0].init.headers).get("Accept-Encoding"), "identity")
+  assert.equal(new Headers(f.calls[0].init.headers).get("Cache-Control"), "no-cache")
+})
 
 test("bulk repair processes more than ten contacts with bounded concurrent writes under one lease", async () => {
   let active = 0, maximum = 0

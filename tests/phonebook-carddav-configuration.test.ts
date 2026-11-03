@@ -6,6 +6,7 @@ import test from "node:test"
 import * as util from "node:util"
 import vm from "node:vm"
 import ts from "typescript"
+import { fcunoConnectionPolicy } from "../config/fcunoConnections"
 
 const source = (path: string) => ts.transpileModule(readFileSync(new URL(`../${path}`, import.meta.url), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
@@ -104,6 +105,7 @@ function fixture(options: Options = {}) {
     const require = (dependency: string): unknown => {
       if (dependency in modules) return load(dependency)
       if (dependency === "node:crypto") return crypto
+      if (dependency === "../config/fcunoConnections") return { fcunoConnectionPolicy }
       if (dependency === "node:util") return util
       if (dependency === "node:perf_hooks") return { performance }
       if (dependency === "next/server") return { NextResponse: Response }

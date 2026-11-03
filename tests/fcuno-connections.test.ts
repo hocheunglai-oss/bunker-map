@@ -12,6 +12,11 @@ test("FCUNO pins the approved external targets and fallback order", () => {
   assert.equal(policy.github.repository, "hocheunglai-oss/bunker-map")
   assert.equal(policy.vercel.projectId, "prj_8OifIFDF7Gcpd2i4VSRJOHjL3A9Q")
   assert.equal(policy.supabase.projectRef, "gglyugbrnyvyfktgwert")
+  assert.deepEqual(policy.phonebookCardDav.hetzner, {
+    writeGeneration: "hetzner-v1", writeLockName: "phonebook-carddav-writes-hetzner-v1",
+    addressBookUrl: "https://nx112455.your-storageshare.de/remote.php/dav/addressbooks/users/phonebook/fcuno-phonebook/",
+    username: "phonebook",
+  })
   assert.equal(policy.dailyBackupReceipt.googleAccount, "wider.custom@gmail.com")
   assert.equal(policy.dailyBackupReceipt.dailyFolderId, "1-JU5aMyzGpC6tBDbhe_fBN1EmXpOpf1F")
   assert.equal(policy.browser.fallbackProfile, "Otto")
@@ -21,6 +26,14 @@ test("FCUNO pins the approved external targets and fallback order", () => {
   assert.equal(policy.federation.syncAudience, "fcos-identity-sync")
   assert.equal(policy.federation.syncJwksUrl, "https://fcuno.com/api/fcos-identity-sync/jwks")
   assert.equal(policy.federation.fcos.syncEndpoint, "https://fcos.fcuno.com/api/fcuno/identity-sync")
+})
+
+test("phonebook writer target rejects a different owner or generation lock", () => {
+  for (const overrides of [{ username: "admin" }, { writeLockName: "phonebook-carddav-writes" }, { writeGeneration: "arbitrary" }]) {
+    assert.throws(() => validateFcunoConnectionPolicy({ ...fcunoConnectionPolicy,
+      phonebookCardDav: { hetzner: { ...fcunoConnectionPolicy.phonebookCardDav.hetzner, ...overrides } },
+    }), /approved writer generation/)
+  }
 })
 
 test("FCUNO and FCOS retain separate projects", () => {

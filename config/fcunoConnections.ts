@@ -20,6 +20,14 @@ export const fcunoConnectionPolicy = Object.freeze({
     organizationId: "yxyxcenpgqutvoctrdkj",
     presentationMediaBucket,
   },
+  phonebookCardDav: {
+    hetzner: {
+      writeGeneration: "hetzner-v1",
+      writeLockName: "phonebook-carddav-writes-hetzner-v1",
+      addressBookUrl: "https://nx112455.your-storageshare.de/remote.php/dav/addressbooks/users/phonebook/fcuno-phonebook/",
+      username: "phonebook",
+    },
+  },
   dailyBackupReceipt: {
     googleAccount: "wider.custom@gmail.com",
     dailyFolderId: "1-JU5aMyzGpC6tBDbhe_fBN1EmXpOpf1F",
@@ -122,6 +130,15 @@ export function validateFcunoConnectionPolicy(
   requireNonEmpty(policy.vercel.teamId, "vercel.teamId")
   requireNonEmpty(policy.vercel.projectId, "vercel.projectId")
   requireNonEmpty(policy.supabase.projectRef, "supabase.projectRef")
+  const phonebook = policy.phonebookCardDav.hetzner
+  const phonebookUrl = new URL(phonebook.addressBookUrl)
+  if (phonebook.writeGeneration !== "hetzner-v1" ||
+      phonebook.writeLockName !== `phonebook-carddav-writes-${phonebook.writeGeneration}` ||
+      !phonebook.username || phonebookUrl.protocol !== "https:" ||
+      phonebookUrl.username || phonebookUrl.password || phonebookUrl.port || phonebookUrl.search || phonebookUrl.hash ||
+      phonebookUrl.pathname !== `/remote.php/dav/addressbooks/users/${encodeURIComponent(phonebook.username)}/fcuno-phonebook/`) {
+    throw new Error("Phonebook CardDAV must retain its approved writer generation and dedicated collection.")
+  }
   requireNonEmpty(policy.dailyBackupReceipt.googleAccount, "dailyBackupReceipt.googleAccount")
   requireNonEmpty(policy.dailyBackupReceipt.dailyFolderId, "dailyBackupReceipt.dailyFolderId")
   requireNonEmpty(policy.storageMediaBackup.sourceBucket, "storageMediaBackup.sourceBucket")

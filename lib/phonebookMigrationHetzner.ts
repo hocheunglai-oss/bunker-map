@@ -167,7 +167,9 @@ export async function runHetznerMigration(options: MigrationOptions) {
     if (member && !/^bunker-map-[0-9a-f-]{36}\.vcf$/.test(member)) fail("Destination request escaped the locked collection.")
     const response = await transport(new URL(member, target.addressBookUrl), {
       ...init, method, redirect: "error", signal: AbortSignal.timeout(30_000), cache: "no-store",
-      headers: { ...init.headers, Authorization: `Basic ${Buffer.from(`${options.username}:${options.password}`).toString("base64")}` },
+      // Compression proxies can weaken GET ETags. Keep the representation
+      // consistent with DAV inventory; never promote a weak ETag ourselves.
+      headers: { ...init.headers, "Accept-Encoding": "identity", Authorization: `Basic ${Buffer.from(`${options.username}:${options.password}`).toString("base64")}` },
     })
     if (response.status >= 300 && response.status < 400) fail("Destination redirects are forbidden.")
     return response
