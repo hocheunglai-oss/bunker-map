@@ -7,7 +7,7 @@
     "restart:dev": "sh ./scripts/restart-dev.sh",
     "build": "node scripts/build-production.mjs",
     "lint": "eslint app components lib",
-    "test:parsers": "tsx --test tests/enquiry-parsers.test.ts tests/parser-reports-20261104.test.ts",
+    "test:parsers": "tsx --test tests/enquiry-parsers.test.ts tests/parser-reports-20261104.test.ts tests/parser-ai-imo-warnings.test.ts",
     "test:attendance": "NODE_OPTIONS=--conditions=react-server tsx --test tests/attendance*.test.ts tests/dingtalk-attendance.test.ts",
     "test:calendars": "NODE_OPTIONS=--conditions=react-server tsx --test tests/calendar-*.test.ts tests/public-holidays*.test.ts tests/event-calendar*.test.ts tests/task-calendar*.test.ts",
     "test:federation": "tsx --test tests/fcuno-connections.test.ts tests/fcuno-fcos-contract.test.ts tests/fcuno-identity-federation.test.ts tests/oidc-login-continuation.test.ts",
