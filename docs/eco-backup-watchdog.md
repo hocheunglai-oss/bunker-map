@@ -48,12 +48,13 @@ received. Verify one controlled message and subsequent scheduled execution.
   failure. Failed SMTP acceptance releases the lease for retry. Missing incident
   storage fails closed rather than sending uncontrolled repeated emails.
 
-At most twenty runs and the latest completed job plus three candidate successful
-runs are inspected. Each HTTP request has an eight-second timeout, a one-megabyte
+At most twenty runs are read. Job details are inspected for the latest completed
+run, up to three successful runs and up to three failed runs. Each HTTP request has an eight-second timeout, a one-megabyte
 body limit, no credentials, and redirects disabled. The route's runtime is
 bounded at 45 seconds. If the bounded history cannot establish a success, the
-monitor does not invent one. Both backup capture and whole-workflow success are
-required, so a failure after capture is conservatively reported.
+monitor does not invent one. Successful capture and workflow evidence are required;
+the sole exception is the pinned post-verification capacity warning described below.
+Other failures after capture remain conservatively reported.
 
 This proves workflow/capture completion, not archive restorability, destination
 availability or the exact timestamp of a reused daily archive. ECO's own backup
