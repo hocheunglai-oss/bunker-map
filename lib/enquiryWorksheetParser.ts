@@ -149,7 +149,7 @@ function cleanVesselName(value: string) {
   next = next.replace(/\(\s*(?:V|VOY|VOYAGE)\.?\s*[\w./-]+\s*\)/gi, "")
   next = next.replace(/\s+(?:in|at)\s+(?:the\s+)?dry\s*dock\b.*$/i, "")
   next = next.replace(/\s*\/+\s*$/, "")
-  next = next.replace(/\s*[-,(]\s*(?:general\s+cargo|bulk\s+carrier|oil\s+tanker|chemical\s+tanker|product\s+tanker|lpg\s+carrier|lng\s+carrier|gas\s+carrier)\s*\)?\.?\s*$/i, "")
+  next = next.replace(/\s*[-,(]\s*(?:general\s+cargo|bulk\s+carrier|oil\s+tanker|chemical\s+tanker|product\s+tanker|lpg\s+carrier|lng\s+carrier|gas\s+carrier)\s*\)?[.,]?\s*$/i, "")
   next = next.replace(/\s+(?:general\s+cargo|bulk\s+carrier|oil\s+tanker|chemical\s+tanker|product\s+tanker|lpg\s+carrier|lng\s+carrier|gas\s+carrier)\.?\s*$/i, "")
   next = next.replace(/\s*\/\/.*$/g, "")
   next = next.replace(/\s+(?:general\s+cargo|bulk\s+carrier|oil\s+tanker|chemical\s+tanker|product\s+tanker|lpg\s+carrier|lng\s+carrier|gas\s+carrier)\.?\s*$/i, "")
@@ -430,6 +430,13 @@ export function extractEnquiryPort(text: string, options: EnquiryWorksheetParseO
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]
+    const atValue = line.match(/^\s*at\s*[:：]\s*(.+)$/i)?.[1] || ""
+    const atLabelledPort = cleanPortName(atValue, {
+      ...options,
+      includeShortAliases: true,
+    })
+    if (atLabelledPort) return atLabelledPort
+
     const simplePlaceValue = line.match(/^\s*place(?:\s*[:：#\-\t]\s*|\s+)(.+)$/i)?.[1] || ""
     const simplePlacePort = findKnownPort(simplePlaceValue, {
       ...options,

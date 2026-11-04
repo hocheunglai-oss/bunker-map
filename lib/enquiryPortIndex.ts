@@ -26,6 +26,7 @@ const supplementalPorts = [
   "Laemchabang",
   "Linggi",
   "Nagasaki",
+  "Pasir Gudang",
   "Pyeongtaek",
   "Shimonoseki",
   "Singapore",
