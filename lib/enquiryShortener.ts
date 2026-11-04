@@ -275,7 +275,11 @@ function withoutImpossibleSuppliedYearDates(value: string) {
 }
 
 export function findEnquiryDates(value: string) {
-  const normalized = withoutImpossibleSuppliedYearDates(normalizeDateInput(value).replace(/\[[^\]]*\d{1,2}:\d{2}[^\]]*\]/g, " "))
+  const dateInput = normalizeDateInput(value)
+    .replace(/\[[^\]]*\d{1,2}:\d{2}[^\]]*\]/g, " ")
+    // Repair a split two-digit ordinal only when followed by an explicit month.
+    .replace(new RegExp(`\\b([0-3])[ \\t]+(\\d)(?=(?:st|nd|rd|th)[ \\t]+(?:of[ \\t]+)?(?:${MONTH_NAME_PATTERN})\\b)`, "gi"), "$1$2")
+  const normalized = withoutImpossibleSuppliedYearDates(dateInput)
   const dates: string[] = []
   const monthNamePattern = MONTH_NAME_PATTERN
 
@@ -334,7 +338,7 @@ export function findEnquiryDates(value: string) {
     if (range) dates.push(range)
   }
 
-  for (const match of normalized.matchAll(new RegExp(`\\b(${monthNamePattern})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:-|~|to)\\s*(\\d{1,2})(?:st|nd|rd|th)?\\b`, "gi"))) {
+  for (const match of normalized.matchAll(new RegExp(`\\b(${monthNamePattern})\\s*[./-]?\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:-|~|to)\\s*(\\d{1,2})(?:st|nd|rd|th)?\\b`, "gi"))) {
     const range = formatDateRange(match[2], match[1], match[3], match[1])
     if (range) dates.push(range)
   }
@@ -876,7 +880,10 @@ function productMatches(line: string) {
 function extractInlineProductSegments(line: string, autoDetectVlsfoRemarks: boolean) {
   const matches = productMatches(line)
   if (matches.length < 2) return []
-  if (/^\s*(?:prod(?:uct)?|grades?|spec(?:ification)?)\b\s*[:#-]?/i.test(line)) return []
+  if (/^\s*(?:prod(?:uct)?|spec(?:ification)?)\b\s*[:#-]?/i.test(line)) return []
+  if (/^\s*grades?\b\s*[:#-]?/i.test(line) && !matches.every((match, index) =>
+    extractQuantityFromInlineUnit(line.slice(match.index, matches[index + 1]?.index ?? line.length)),
+  )) return []
   const quantityBeforeStyle = Boolean(
     extractQuantityImmediatelyBeforeProduct(line.slice(0, matches[0].index)),
   )
@@ -1053,6 +1060,10 @@ function extractProducts(text: string, autoDetectVlsfoRemarks: boolean) {
 
     const product = classifyProduct(line)
     if (!product) continue
+    // A repeated sulphur-only specification belongs to the preceding request;
+    // it cannot take a new QTY line intended for the following fuel.
+    if (products.at(-1)?.product === product &&
+      /^\s*(?:vlsfo|lsfo|hsfo|hfo|lsmgo|mgo)\s+(?:max(?:imum)?\s*)?(?:\d*[.,])?\d+\s*%\s*(?:sulphur|sulfur|sulf)\s*$/i.test(line)) continue
 
     const { block, endIndex } = readProductBlock(lines, index)
 
