@@ -98,6 +98,7 @@ export const fcunoConnectionPolicy = Object.freeze({
       workflowId: 391445288,
       workflowPath: ".github/workflows/nightly-backup.yml",
       jobName: "backup",
+      capacityStepName: "Check verified backup capacity",
       captureStepNames: [
         "Capture, encrypt, verify Drive copy and retain five nights",
         "Capture, encrypt and verify configured backup copies",
@@ -170,6 +171,7 @@ export function validateFcunoConnectionPolicy(
   }
   requireNonEmpty(monitor.branch, "ecosystem.backupMonitor.branch")
   requireNonEmpty(monitor.jobName, "ecosystem.backupMonitor.jobName")
+  requireNonEmpty(monitor.capacityStepName, "ecosystem.backupMonitor.capacityStepName")
   if (!monitor.captureStepNames.length || new Set(monitor.captureStepNames).size !== monitor.captureStepNames.length) {
     throw new Error("ECO backup monitoring requires unique reviewed capture step names.")
   }

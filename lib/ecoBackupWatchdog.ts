@@ -19,6 +19,7 @@ export type BackupRun = {
   conclusion: string | null
   capture: "verified" | "skipped" | "failed" | "unverified"
   capturedAt: number | null
+  maintenance?: "healthy" | "attention"
 }
 export type BackupObservation = {
   checkedAt: string
@@ -123,7 +124,11 @@ async function inspectCapture(run: BackupRun, now: number, fetcher: typeof fetch
     if (run.conclusion !== "success" && job.conclusion === "failure") return run
     throw new Error("Capture evidence was not found")
   }
-  const captures = job.steps.map(object).filter((step) => target.captureStepNames.some((name) => name === step.name))
+  const steps = job.steps.map(object)
+  const capacities = steps.filter((step) => step.name === target.capacityStepName)
+  if (capacities.length > 1) throw new Error("Ambiguous capacity evidence")
+  const captures = steps.filter((step) => target.captureStepNames.some((name) => name === step.name))
+  if (captures.length > 1) throw new Error("Ambiguous capture evidence")
   if (captures.length !== 1) {
     // Setup/runner failure can happen before GitHub creates the capture step.
     // The failed workflow and exact failed backup job still establish failure.
@@ -135,11 +140,25 @@ async function inspectCapture(run: BackupRun, now: number, fetcher: typeof fetch
   if (capture.conclusion === "failure" || capture.conclusion === "cancelled" || capture.conclusion === "timed_out") {
     return { ...run, capture: "failed" }
   }
-  if (run.status === "completed" && run.conclusion === "success" && job.status === "completed" &&
-      job.conclusion === "success" && capture.status === "completed" && capture.conclusion === "success") {
+  const capacity = capacities[0]
+  const captureSucceeded = capture.status === "completed" && capture.conclusion === "success"
+  const capacityAttention = capacity?.status === "completed" && capacity.conclusion === "failure"
+  const solelyCapacityFailure = run.conclusion === "failure" && job.conclusion === "failure" && capacityAttention &&
+    steps.every((step) => step === capacity || step.status === "completed" && ["success", "skipped"].includes(String(step.conclusion)))
+  const runSucceeded = run.conclusion === "success" && job.conclusion === "success"
+  if (captureSucceeded && (runSucceeded || solelyCapacityFailure)) {
     const capturedAt = timestamp(capture.completed_at, now)
     if (capturedAt < run.createdAt || capturedAt > completedAt) throw new Error("Invalid capture chronology")
-    return { ...run, capture: "verified", capturedAt }
+    if (capacity) {
+      if (capacity.status !== "completed" || !["success", "failure"].includes(String(capacity.conclusion)) ||
+          (runSucceeded && capacity.conclusion !== "success")) throw new Error("Incomplete capacity evidence")
+      const capacityAt = timestamp(capacity.completed_at, now)
+      if (capacityAt < capturedAt || capacityAt > completedAt) throw new Error("Invalid capacity chronology")
+    }
+    // The explicitly pinned post-verification maintenance step can fail after
+    // both copies passed full readback. Keep that success distinct from cleanup.
+    return { ...run, capture: "verified", capturedAt,
+      ...(capacity ? { maintenance: capacityAttention ? "attention" as const : "healthy" as const } : {}) }
   }
   if (run.conclusion === "success") throw new Error("Successful workflow has no verified capture evidence")
   return run
@@ -182,7 +201,7 @@ export async function readEcoBackupObservation(now = Date.now(), fetcher: typeof
 }
 
 function check(id: string, status: HealthCheck["status"], message: string, checkedAt: string, details: NonNullable<HealthCheck["details"]> = {}): HealthCheck {
-  return { id, label: id === "eco-backup-monitor" ? "ECO BACKUP MONITOR" : "ECO NIGHTLY BACKUP", status, message, checkedAt, details }
+  return { id, label: id === "eco-backup-monitor" ? "ECO BACKUP MONITOR" : id === "eco-backup-capacity" ? "ECO BACKUP STORAGE" : "ECO NIGHTLY BACKUP", status, message, checkedAt, details }
 }
 
 export function unknownEcoBackupChecks(now = Date.now()): HealthCheck[] {
@@ -191,6 +210,7 @@ export function unknownEcoBackupChecks(now = Date.now()): HealthCheck[] {
     check("eco-nightly-backup", "ok", "Backup status has not been verified.", checkedAt, { incidentResolved: false, notificationEligible: false }),
     check("eco-backup-monitor", "warning", "ECO backup status cannot currently be checked. This does not establish that the backup failed.", checkedAt,
       { alertLevel: 1, action: "Check the public backup workflow and monitor availability. An earlier backup warning remains unresolved." }),
+    check("eco-backup-capacity", "ok", "Storage maintenance status has not been verified.", checkedAt, { incidentResolved: false, notificationEligible: false }),
   ]
 }
 
@@ -231,6 +251,15 @@ export function evaluateEcoBackup(observation: BackupObservation): HealthCheck[]
       action: "Review the ECO nightly backup workflow. A successful run is capture evidence; it is not a restoration test.",
     }),
     check("eco-backup-monitor", "ok", "Public backup workflow status was checked.", observation.checkedAt),
+    check("eco-backup-capacity", success?.maintenance === "attention" ? "warning" : "ok",
+      success?.maintenance === "attention"
+        ? "ECO's backup copies passed verification, but storage capacity or retention needs attention. This is not a failed backup capture."
+        : success?.maintenance === "healthy" ? "Backup storage and retention checks passed." : "Storage maintenance status has not been verified.",
+      observation.checkedAt, {
+        alertLevel: 1, notificationEligible: success?.maintenance === "attention",
+        incidentResolved: success?.maintenance === "healthy" && !warning && !pending,
+        action: "Review the private capacity and retention report. Resolve low space or incomplete cleanup before it prevents a future backup.",
+      }),
   ]
 }
 
