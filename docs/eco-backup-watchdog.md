@@ -26,10 +26,16 @@ sender configuration, and existing `private.system_health_alert_incidents`,
 `finish_system_health_alerts(uuid,boolean)`. These were verified present on
 3 November 2026; no migration is needed. Today's existing scheduled FCUNO
 notifier returned HTTP 200, but that alone does not prove an email was sent or
-received. Verify one controlled message and subsequent scheduled execution.
+received. Validate failure-email behavior with isolated fixtures, then verify
+scheduled execution without sending test, success or advisory messages. A real
+backup failure remains the trigger for email.
 
 ## Evidence and notices
 
+- The owner's 4 November 2026 preference is **failure-only email**. Only the
+  `eco-nightly-backup` check can send a notice. Successful checks and recovery,
+  storage/retention advice and unverified-monitor warnings remain silent.
+  Their truthful health status and incident observations are retained.
 - Confirmed unsuccessful runs, skipped captures, disabled workflows and runs
   that have not completed within 90 minutes are reported.
 - Missing verified-run success becomes overdue after 30 hours. This allows the observed
@@ -40,8 +46,8 @@ received. Verify one controlled message and subsequent scheduled execution.
   falsely report success. A later unsuccessful run takes precedence over an
   earlier success; an incomplete run does not clear an existing incident.
 - API failures, rate limits, incomplete evidence and identity mismatches produce
-  a separate unverified-monitor warning. They do not mark a backup failed or
-  recovered. No retries or writes are sent to GitHub.
+  a separate unverified-monitor warning without email. They do not mark a backup
+  failed or recovered. No retries or writes are sent to GitHub.
 - The existing service-only incident store deduplicates by stable check ID and
   recipient, independently of GitHub run IDs. Identical unresolved incidents
   are quiet; escalation is delivered once and verified recovery re-arms a later
@@ -93,10 +99,10 @@ Official references: [Vercel cron usage](https://vercel.com/docs/cron-jobs/usage
 
 The reviewed post-verification step is `Check verified backup capacity`, pinned
 in `config/fcunoConnections.ts`. If that step alone fails after the capture step
-succeeds, the monitor retains the verified-copy result and opens a separate
-`eco-backup-capacity` incident. Its email explicitly says that the copies passed
-verification but capacity or retention needs attention. Public metadata reveals
-no storage usage, file names, account identifiers or backup contents.
+succeeds, the monitor retains the verified-copy result and reports a passive
+`eco-backup-capacity` warning. It does not email that advisory or open a new
+notification incident. Public metadata reveals no storage usage, file names,
+account identifiers or backup contents.
 
 Another failed step, an unsuccessful capture, duplicate evidence or inconsistent
 timestamps cannot be reclassified as capacity-only attention. Missing evidence

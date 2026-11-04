@@ -213,7 +213,7 @@ export function unknownEcoBackupChecks(now = Date.now()): HealthCheck[] {
   return [
     check("eco-nightly-backup", "ok", "Backup status has not been verified.", checkedAt, { incidentResolved: false, notificationEligible: false }),
     check("eco-backup-monitor", "warning", "ECO backup status cannot currently be checked. This does not establish that the backup failed.", checkedAt,
-      { alertLevel: 1, action: "Check the public backup workflow and monitor availability. An earlier backup warning remains unresolved." }),
+      { alertLevel: 1, notificationEligible: false, action: "Check the public backup workflow and monitor availability. An earlier backup warning remains unresolved." }),
     check("eco-backup-capacity", "ok", "Storage maintenance status has not been verified.", checkedAt, { incidentResolved: false, notificationEligible: false }),
   ]
 }
@@ -260,7 +260,7 @@ export function evaluateEcoBackup(observation: BackupObservation): HealthCheck[]
         ? "ECO's backup copies passed verification, but storage capacity or retention needs attention. This is not a failed backup capture."
         : success?.maintenance === "healthy" ? "Backup storage and retention checks passed." : "Storage maintenance status has not been verified.",
       observation.checkedAt, {
-        alertLevel: 1, notificationEligible: success?.maintenance === "attention",
+        alertLevel: 1, notificationEligible: false,
         incidentResolved: success?.maintenance === "healthy" && !warning && !pending,
         action: "Review the private capacity and retention report. Resolve low space or incomplete cleanup before it prevents a future backup.",
       }),

@@ -41,7 +41,8 @@ test("pending and unknown observations preserve incidents; a newer failed run ou
   assert.equal(level(evaluate([pending, failed, run()])[0]), 1)
   const unknown = unknownEcoBackupChecks(now)
   assert.equal(level(unknown[0]), null)
-  assert.equal(level(unknown[1]), 1)
+  assert.equal(level(unknown[1]), null)
+  assert.equal(unknown[1].status, "warning", "unverified monitoring remains visible without emailing")
   assert.match(unknown[1].message, /does not establish/)
 })
 
@@ -190,7 +191,8 @@ test("capacity-only failure keeps the verified copies healthy and raises its own
   assert.equal(result.runs[0].maintenance, "attention")
   const checks = evaluateEcoBackup(result)
   assert.equal(level(checks[0]), 0, "do not call verified capture a backup failure")
-  assert.equal(level(checks[2]), 1)
+  assert.equal(level(checks[2]), null)
+  assert.equal(checks[2].status, "warning", "storage advice remains visible without emailing")
   assert.match(checks[2].message, /copies passed verification/)
   assert.match(buildEcoBackupAlertHtml([checks[2]], checkedAt), /not a failed backup capture/)
 })
@@ -224,7 +226,7 @@ test("a newer failed capture does not erase an earlier verified copy with a capa
   const checks = evaluateEcoBackup(observation)
   assert.equal(checks[0].details?.lastSuccessfulRunAt, new Date(earlier).toISOString())
   assert.equal(level(checks[0]), 1)
-  assert.equal(level(checks[2]), 1)
+  assert.equal(level(checks[2]), null)
 })
 
 test("capacity warning cannot conceal a second failed step or a failed capture", async () => {
@@ -262,7 +264,7 @@ test("maintenance warnings never suppress missed-backup escalation", () => {
   const old = run({ maintenance: "attention", capturedAt: now - 49 * 3_600_000 })
   const checks = evaluate([old])
   assert.equal(level(checks[0]), 2)
-  assert.equal(level(checks[2]), 1)
+  assert.equal(level(checks[2]), null)
 })
 
 const request = (authorization = "Bearer synthetic-cron") => new Request("https://example.invalid/api/cron/eco-backup-watchdog?to=attacker@example.invalid", { headers: { authorization } })
@@ -318,15 +320,81 @@ test("unaccepted mail releases claim; broken store never sends; duplicate incide
   assert.equal(duplicate.sent.length, 0)
 })
 
-test("GitHub unavailable produces separate monitor incident and never resolves backup warning", async () => {
+test("GitHub unavailable stays unverified without email or resolving the backup incident", async () => {
   const { deps, sent } = dependencies()
   deps.read = async () => { throw new Error("GitHub unavailable") }
   deps.store = () => ({ claim: async (observations) => {
     assert.equal(observations.find((item) => item.check_id === "eco-nightly-backup")?.alert_level, null)
-    return ["eco-backup-monitor"]
-  }, finish: async () => {} })
-  assert.equal((await handleEcoBackupWatchdog(request(), deps)).status, 502)
-  assert.match(sent[0].html, /does not establish that the backup failed/)
+    assert.equal(observations.find((item) => item.check_id === "eco-backup-monitor")?.alert_level, null)
+    return []
+  }, finish: async () => assert.fail("unclaimed delivery") })
+  const response = await handleEcoBackupWatchdog(request(), deps)
+  assert.equal(response.status, 502)
+  assert.equal((await response.json()).sent, false)
+  assert.equal(sent.length, 0)
+})
+
+test("verified copies with capacity attention remain visible but never send email", async () => {
+  const { deps, sent, events } = dependencies()
+  deps.read = () => readEcoBackupObservation(now, capacityFixture().fetcher)
+  deps.store = () => ({ claim: async (observations) => {
+    assert.equal(observations.find((item) => item.check_id === "eco-nightly-backup")?.alert_level, 0)
+    assert.equal(observations.find((item) => item.check_id === "eco-backup-capacity")?.alert_level, null)
+    return observations.filter((item) => item.alert_level !== null && item.alert_level > 0).map((item) => item.check_id)
+  }, finish: async () => assert.fail("unclaimed delivery") })
+  const response = await handleEcoBackupWatchdog(request(), deps)
+  assert.equal(response.status, 200)
+  const body = await response.json()
+  assert.equal(body.verified, true)
+  assert.equal(body.sent, false)
+  assert.deepEqual(body.checks.find((item: { id: string }) => item.id === "eco-backup-capacity"), { id: "eco-backup-capacity", status: "warning" })
+  assert.equal(sent.length, 0)
+  assert.deepEqual(events, [])
+})
+
+test("a real failure alongside storage advice emails only the failed-backup check", async () => {
+  const { deps, sent } = dependencies()
+  deps.read = async () => ({ checkedAt, workflowActive: true, runs: [
+    run({ id: 101, createdAt: now - 120_000, completedAt: now - 60_000, conclusion: "failure", capture: "failed", capturedAt: null }),
+    run({ maintenance: "attention" }),
+  ] })
+  deps.store = () => ({ claim: async (observations) => {
+    assert.equal(observations.find((item) => item.check_id === "eco-nightly-backup")?.alert_level, 1)
+    assert.equal(observations.find((item) => item.check_id === "eco-backup-capacity")?.alert_level, null)
+    return observations.filter((item) => item.alert_level !== null && item.alert_level > 0).map((item) => item.check_id)
+  }, finish: async (_, delivered) => { assert.equal(delivered, true) } })
+  assert.equal((await handleEcoBackupWatchdog(request(), deps)).status, 200)
+  assert.equal(sent.length, 1)
+  assert.match(sent[0].html, /ECO NIGHTLY BACKUP/)
+  assert.doesNotMatch(sent[0].html, /ECO BACKUP STORAGE|ECO BACKUP MONITOR|storage capacity or retention/)
+})
+
+test("missed backups remain email-eligible even when their health severity is warning", async () => {
+  for (const ageHours of [31, 49]) {
+    const { deps, sent } = dependencies()
+    const capturedAt = now - ageHours * 3_600_000
+    deps.read = async () => ({ checkedAt, workflowActive: true, runs: [run({ createdAt: capturedAt - 10_000, completedAt: capturedAt + 1_000, capturedAt })] })
+    deps.store = () => ({ claim: async (observations) => {
+      assert.equal(observations.find((item) => item.check_id === "eco-nightly-backup")?.alert_level, ageHours >= 48 ? 2 : 1)
+      return observations.filter((item) => item.alert_level !== null && item.alert_level > 0).map((item) => item.check_id)
+    }, finish: async (_, delivered) => { assert.equal(delivered, true) } })
+    assert.equal((await handleEcoBackupWatchdog(request(), deps)).status, 200)
+    assert.equal(sent.length, 1)
+    assert.match(sent[0].html, /past 30 hours/)
+  }
+})
+
+test("healthy recovery is recorded without email so a later failure can be re-armed", async () => {
+  const { deps, sent } = dependencies()
+  deps.read = async () => ({ checkedAt, workflowActive: true, runs: [run({ maintenance: "healthy" })] })
+  deps.store = () => ({ claim: async (observations) => {
+    assert.ok(observations.every((item) => item.alert_level === 0), "verified recovery reaches the existing incident store")
+    return []
+  }, finish: async () => assert.fail("recovery is not an email delivery") })
+  const response = await handleEcoBackupWatchdog(request(), deps)
+  assert.equal(response.status, 200)
+  assert.equal((await response.json()).sent, false)
+  assert.equal(sent.length, 0)
 })
 
 test("watchdog has fixed source boundaries, own lightweight schedule, and escaped concise mail", () => {
