@@ -42,7 +42,9 @@ export async function handleEcoBackupWatchdog(request: Request, dependencies: De
   }
   try {
     const notices = await deliverHealthAlerts({
-      checks, muted: () => false, token: randomUUID(), store: dependencies.store(recipient),
+      // The owner requests failure-only email. Keep advisory/unknown checks in
+      // the observations without sending them or falsely resolving incidents.
+      checks, muted: (check) => check.id !== "eco-nightly-backup", token: randomUUID(), store: dependencies.store(recipient),
       async send(claimed) {
         const result = await dependencies.send({ to: [recipient], subject: "ECO BACKUP NEEDS ATTENTION",
           html: buildEcoBackupAlertHtml(claimed, checks[0].checkedAt) })
