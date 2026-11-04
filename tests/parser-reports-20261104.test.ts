@@ -65,3 +65,28 @@ test("Jonathan Star SPC report: a sulphur-only repeat cannot take the next produ
   assert.equal(parseSpcEnquiryText(raw).standardText, "JONATHAN STAR (8223311) / SG / 22 SEP / 392 MT VLSFO (0.5%) / 8 MT LSMGO (0.1%)")
   assert.equal(worksheet(raw), "jonathan star / 8223311 / singapore 22 sep / vlsfo 392mts / lsmgo 8mts")
 })
+
+test("Toyo Shine report: a single-fuel SPEC row and Qtty row form a fuel request", () => {
+  const raw = "Vessel \uff1a TOYO SHINE\nPort\uff1a Hong Kong (Bunker Only Call)\nDate\uff1a 15th Nov\nSPEC \uff1a VLSFO : ISO 8217 - 2010 (SULFUR BELOW 0.5%) RMG380CST\nQtty \uff1a 150 MT"
+  assert.equal(worksheet(raw), "toyo shine / hk 15 nov / vlsfo 150mts")
+  assert.equal(worksheet(raw, [], "9543976"), "toyo shine / 9543976 / hk 15 nov / vlsfo 150mts")
+  assert.equal(parseEnquiryWorksheetGuess(raw).imo, "")
+  assert.equal(parseSpcEnquiryText(raw).standardText, "TOYO SHINE / HONG KONG / 15 NOV / 150 MT VLSFO (0.5%)")
+  for (const label of ["Qtty", "QTY", "Quantity", "Quantities"]) {
+    assert.equal(worksheet(raw.replace("Qtty", label)), "toyo shine / hk 15 nov / vlsfo 150mts", label)
+  }
+})
+
+test("specification notes cannot borrow an unrelated product's quantity", () => {
+  const header = "Vessel: TOYO SHINE\nPort: Hong Kong\nDate: 15 Nov\n"
+  for (const details of [
+    "SPEC: VLSFO ISO 8217 RMG380CST",
+    "SPEC: VLSFO ISO 8217 RMG380CST\nQtty: ISO 8217",
+    "Remarks: VLSFO ISO 8217 RMG380CST\nQtty: 150 MT",
+    "SPEC: VLSFO ISO 8217 RMG380CST\nPort: Busan\nQtty: 150 MT",
+    "SPEC: VLSFO / LSMGO\nQtty: 150 MT",
+  ]) {
+    assert.doesNotMatch(worksheet(header + details), /(?:vlsfo|lsmgo|HSFO) \d/, details)
+  }
+  assert.equal(worksheet(header + "SPEC: VLSFO ISO 8217 RMG380CST\nLSMGO 50MT"), "toyo shine / hk 15 nov / lsmgo 50mts")
+})

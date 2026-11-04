@@ -164,6 +164,12 @@ function uniqueWarnings(warnings: string[]) {
   return Array.from(new Set(warnings.map(cleanText).filter(Boolean))).slice(0, 8)
 }
 
+function isMissingImoWarning(warning: string) {
+  return /^(?:the\s+)?imo\b/i.test(warning) &&
+    /\b(?:not (?:provided|supplied|found|confirmed|available)|missing|could not be confirmed|unable to (?:confirm|find|verify))\b/i.test(warning) &&
+    !/\b(?:invalid|checksum|check digit|mismatch|conflict|multiple|ambiguous|rmk|cbm|kl|quantity|date|port)\b/i.test(warning)
+}
+
 function cleanVlsfoMaxRemarks(value: unknown): VlsfoMaxRemark[] {
   if (!Array.isArray(value)) return []
   return Array.from(
@@ -447,6 +453,7 @@ function buildInstructions(source: ParserAiSource) {
     "A numeric M.D-M.D or M/D-M/D expression without a year is month-first: ETA9.2-9.12 means 2 - 12 sep, and 8/31-9/1 means 31 aug - 1 sep.",
     "ATA is an arrival event equivalent to ETA. ATA/ETD: 7 sep/18 sep is one delivery window, 7 - 18 sep. When ETA, ETB, and ETD are all present, use the ETA start through the ETD end as one delivery window.",
     "Viscosity and specification numbers such as VLSFO 380, RMG 380, 380 CST, 380 Centistoke, and ISO 8217 are not quantities. Prefer the number explicitly paired with MT, MTS, CBM, KL, tons, or Chinese quantity units.",
+    "Qtty is a quantity label equivalent to QTY. A single-fuel SPEC row followed by Qtty: 150 MT is an order for that fuel, not just background specifications. For example SPEC: VLSFO : ISO 8217 - 2010 (SULFUR BELOW 0.5%) RMG380CST followed by Qtty: 150 MT means VLSFO 150mts; never use 8217, 2010, 0.5, or 380 as its quantity.",
     "Omit the eta label when ETA is the only event type. In a Grades and Quantities offer template, render explicit ETA and ETD as one delivery range, e.g. kaohsiung 3 - 7 aug. Otherwise preserve multiple event labels and normalize ETS to etd, e.g. inchon eta 27 jul, etd 29 jul.",
     "When multiple candidate ports are listed, include every port and its own window in one schedule segment joined by uppercase OR. Copy each port name from the raw enquiry exactly before normalizing its spelling; never substitute a different port.",
     "When the raw enquiry explicitly labels alternative Case 1, Case 2, and similar choices, join their port/date schedules with uppercase OR instead of and, and do not repeat identical fuel quantities.",
@@ -650,7 +657,7 @@ function correctedOutputWithImo(
       buildSpcStandardEnquiry({
         vesselName: nextDraft.vesselName,
         imo,
-        port: nextDraft.port,
+        port: nextDraft.port || parseSpcEnquiryText(nextDraft.correctedOutput).port,
         eta: nextDraft.eta,
         hsfo: nextDraft.hsfo,
         vlsfo: nextDraft.vlsfo,
@@ -891,7 +898,7 @@ export async function POST(request: Request) {
           imo: imoLookup.imo,
           correctedOutput: correctedOutputWithImo(source, rawText, cleanedText, draft, imoLookup.imo),
           warnings: uniqueWarnings([
-            ...draft.warnings,
+            ...draft.warnings.filter((warning) => !isMissingImoWarning(warning)),
             imoLookup.warning,
           ]),
         }

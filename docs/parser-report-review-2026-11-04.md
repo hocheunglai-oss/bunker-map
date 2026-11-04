@@ -35,3 +35,26 @@ verification. The new report regressions run in both `test:parsers` and CI.
 After production deployment is verified, only the five reports already in
 `pending-ai` are eligible for completion. Review writes must check each stored
 `updated_at` version so a concurrent user correction cannot be overwritten.
+
+## TOYO SHINE Follow-Up
+
+Report `e1af4379-ff33-4300-94b8-3f351e4d60e4` supplies a single-fuel
+`SPEC: VLSFO ...` row followed by `Qtty: 150 MT`. Recognize the quantity
+label and pair the immediately adjacent explicit quantity with that fuel.
+Do not consume unrelated specifications, cross another field/product boundary,
+or assign a single quantity to an ambiguous multiple-fuel specification.
+
+The approved result is `toyo shine / 9543976 / hk 15 nov / vlsfo 150mts`.
+The IMO is absent from the raw enquiry and was verified in
+[ClassNK](https://www.classnk.or.jp/register/regships/one_dsp.aspx?imo=9543976).
+No vessel-specific lookup mapping was added to the deterministic parser.
+
+The report's AI output contained both a missing/unconfirmed-IMO warning and a
+successful lookup warning. Remove the obsolete standalone missing-IMO warning
+only after a valid sourced lookup succeeds. Retain the lookup double-check
+warning, invalid-IMO warnings, other cautions and compound uncertainty warnings.
+Adding a lookup IMO to SPC output must retain an already known non-Singapore
+port instead of changing it to the SG default.
+
+The actual AI route is covered by isolated successful/unsuccessful lookup tests
+for FCUNO and SPC. These use synthetic provider responses and no live API key.

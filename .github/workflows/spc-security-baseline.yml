@@ -313,7 +313,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          npx --no-install tsx --test tests/enquiry-parsers.test.ts tests/enquiry-parser-correctness.test.ts tests/enquiry-product-metadata.test.ts tests/parser-reports-20261104.test.ts 2>&1 | tee enquiry-parser-tests.tap
+          npx --no-install tsx --test tests/enquiry-parsers.test.ts tests/enquiry-parser-correctness.test.ts tests/enquiry-product-metadata.test.ts tests/parser-reports-20261104.test.ts tests/parser-ai-imo-warnings.test.ts 2>&1 | tee enquiry-parser-tests.tap
 
       - name: Verify optional client storage and Exchange trigger acknowledgement
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}

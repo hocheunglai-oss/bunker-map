@@ -832,7 +832,7 @@ function extractPairedProductQuantityLines(lines: string[], autoDetectVlsfoRemar
     let quantityLineIndex = -1
     let quantities: string[] = []
     for (let offset = index + 1; offset < Math.min(lines.length, index + 4); offset += 1) {
-      const quantityMatch = lines[offset].match(/^\s*(?:qty|quantity|quantities)\s*[:#-]?\s*(.+)$/i)
+      const quantityMatch = lines[offset].match(/^\s*(?:qty|qtty|quantity|quantities)\s*[:#-]?\s*(.+)$/i)
       if (!quantityMatch) continue
       quantities = extractExplicitQuantityList(quantityMatch[1])
       quantityLineIndex = offset
@@ -928,7 +928,7 @@ function extractQuantityBeforeProduct(lines: string[], productIndex: number) {
     if (unitOnlyPattern.test(line)) {
       const hasTableHeader = nearby
         .slice(0, Math.max(0, index - 1))
-        .some((value) => /\b(?:qty|quantity|units?|grades?|iso\s*spec|sulphur|sulfur|max)\b/i.test(value))
+        .some((value) => /\b(?:qty|qtty|quantity|quantities|units?|grades?|iso\s*spec|sulphur|sulfur|max)\b/i.test(value))
       if (hasTableHeader) {
         const precedingQuantity = extractQuantityFromProductSegment(
           `${nearby[index - 1] || ""} ${line}`,
@@ -939,12 +939,12 @@ function extractQuantityBeforeProduct(lines: string[], productIndex: number) {
     }
     if (containsProduct(line)) break
     if (/^\s*0+(?:[,.]0+)?\s*$/.test(line)) break
-    const labelled = /^\s*(?:qty|quantity)\b/i.test(line)
+    const labelled = /^\s*(?:qty|qtty|quantity|quantities)\b/i.test(line)
     const standalone = /^\s*\d+(?:[,.]\d+)?(?:\s*(?:-|~|to)\s*\d+(?:[,.]\d+)?)?\s*(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?|c\s*\.?\s*b\s*\.?\s*m|k\s*\.?\s*l|[吨噸])?\s*$/i.test(line)
     if (!labelled && !standalone) continue
 
     const combined = nearby.slice(index).join(" ")
-    const quantity = extractQuantityFromProductSegment(combined.replace(/^\s*(?:qty|quantity)\b\s*[:#-]?\s*/i, ""))
+    const quantity = extractQuantityFromProductSegment(combined.replace(/^\s*(?:qty|qtty|quantity|quantities)\b\s*[:#-]?\s*/i, ""))
     if (quantity) return quantity
   }
   return ""
@@ -968,7 +968,7 @@ function isMetadataGradeValue(value: string) {
 
 function isProductBlockBoundary(value: string) {
   return containsProduct(value) ||
-    (isLabelLine(value) && !isSulphurSpecLine(value) && !/^(?:product|qty|quantity)\b/i.test(value))
+    (isLabelLine(value) && !isSulphurSpecLine(value) && !/^(?:product|qty|qtty|quantity|quantities)\b/i.test(value))
 }
 
 function readProductBlock(lines: string[], index: number) {
@@ -1051,7 +1051,13 @@ function extractProducts(text: string, autoDetectVlsfoRemarks: boolean) {
   for (let index = 0; index < lines.length; index += 1) {
     if (paired.consumedLineIndexes.has(index)) continue
     const line = lines[index]
-    if (isNonRequestProductReference(line)) continue
+    const nextLine = lines[index + 1] || ""
+    const specProducts = /^spec(?:ification)?\s*[:#-]/i.test(line) ? productMatches(line) : []
+    const specQuantity = specProducts.length > 0 && new Set(specProducts.map((match) => match.product)).size === 1 &&
+      /^(?:qty|qtty|quantity|quantities)\b\s*[:#-]?/i.test(nextLine)
+      ? extractQuantityFromInlineUnit(nextLine)
+      : ""
+    if (isNonRequestProductReference(line) && !specQuantity) continue
     const inlineSegments = extractInlineProductSegments(line, autoDetectVlsfoRemarks)
     if (inlineSegments.length > 0) {
       products.push(...inlineSegments)
@@ -1067,7 +1073,7 @@ function extractProducts(text: string, autoDetectVlsfoRemarks: boolean) {
 
     const { block, endIndex } = readProductBlock(lines, index)
 
-    const quantity = extractQuantityBeforeProduct(lines, index) || extractQuantityFromBlock(block)
+    const quantity = specQuantity || extractQuantityBeforeProduct(lines, index) || extractQuantityFromBlock(block)
     if (quantity) {
       products.push({
         product,
