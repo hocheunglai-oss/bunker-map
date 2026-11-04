@@ -11,7 +11,7 @@ output with this patch.
 | Chemical Marketer | Exclude the `(Chemical tanker, IMO: ...)` vessel-type annotation from the name. |
 | Southern Narwhal | Parse both quantities in `Grade: VLSFO(0.5% Max) 300mt // LSMGO(0.1% Max) 110mt`. |
 | Heng Yuan Fa Zhan | Parse `Oct-7-14th` using October rather than the current month. Retain the manually approved 180CST MAX setting. |
-| Melody Selmer | Accept `At: Pasir Gudang` as an explicit port field without requiring a dynamic port-index entry. |
+| Melody Selmer | Add Pasir Gudang to the shared port index and accept indexed ports after `At:`. Ordinary phrases such as `At: present` remain excluded. |
 | Jonathan Star (SPC) | A repeated sulphur-only VLSFO specification must not take the following LSMGO quantity. Preserve 392 MT VLSFO and 8 MT LSMGO. This case remains in owner review until submitted to AI review. |
 
 Southern Narwhal's approved IMO 9715995 was verified against the

@@ -433,7 +433,6 @@ export function extractEnquiryPort(text: string, options: EnquiryWorksheetParseO
     const atValue = line.match(/^\s*at\s*[:：]\s*(.+)$/i)?.[1] || ""
     const atLabelledPort = cleanPortName(atValue, {
       ...options,
-      allowUnknown: true,
       includeShortAliases: true,
     })
     if (atLabelledPort) return atLabelledPort

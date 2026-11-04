@@ -57,6 +57,7 @@ test("Melody Selmer report: recognize a port after At: without a dynamic index",
   assert.equal(worksheet(raw), "melody selmer / 9609720 / pasir gudang 16 - 26 oct / vlsfo 400-500mts")
   assert.equal(parseSpcEnquiryText(raw).port, "PASIR GUDANG")
   assert.equal(parseEnquiryWorksheetGuess(raw.replace("At: Pasir Gudang", "At: 16th October")).port, "")
+  assert.equal(parseEnquiryWorksheetGuess(raw.replace("At: Pasir Gudang", "At: present")).port, "")
 })
 
 test("Jonathan Star SPC report: a sulphur-only repeat cannot take the next product's quantity", () => {
