@@ -103,3 +103,8 @@ preserves any existing storage incident; only an explicit successful maintenance
 step on a verified run clears it. The original 30-hour backup deadline and
 48-hour escalation continue independently. Old workflow versions without the
 new step remain valid capture evidence but cannot prove maintenance recovery.
+
+Up to three earlier overall-failure runs are inspected alongside the successful
+run candidates: a capacity-only warning must remain valid capture history after
+a newer genuine backup failure. This avoids overstating the age of the last
+verified copy when calculating the missed-backup escalation.

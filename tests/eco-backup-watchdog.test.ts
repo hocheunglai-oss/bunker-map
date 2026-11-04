@@ -195,6 +195,38 @@ test("capacity-only failure keeps the verified copies healthy and raises its own
   assert.match(buildEcoBackupAlertHtml([checks[2]], checkedAt), /not a failed backup capture/)
 })
 
+test("a newer failed capture does not erase an earlier verified copy with a capacity warning", async () => {
+  const fixture = capacityFixture()
+  const earlier = current - 3_600_000
+  const fetcher = (async (url: string | URL | Request, init?: RequestInit) => {
+    const priorJob = String(url).includes("/runs/99/")
+    const response = await fixture.fetcher(String(url).replace("/runs/99/", "/runs/100/"), init)
+    const data = await response.json()
+    if (String(url).includes("/runs?")) {
+      data.workflow_runs.push({ ...data.workflow_runs[0], id: 99,
+        created_at: new Date(earlier - 10_000).toISOString(), run_started_at: new Date(earlier - 10_000).toISOString(),
+        updated_at: new Date(earlier + 1_000).toISOString() })
+      data.total_count = 2
+    }
+    if (String(url).includes("jobs?")) {
+      const job = data.jobs[0]
+      if (priorJob) {
+        job.run_id = 99
+        job.completed_at = new Date(earlier + 1_000).toISOString()
+        job.steps[0].completed_at = new Date(earlier).toISOString()
+        job.steps[1].completed_at = new Date(earlier + 500).toISOString()
+      } else { job.steps[0].conclusion = "failure"; job.steps[1].conclusion = "skipped" }
+    }
+    return Response.json(data)
+  }) as typeof fetch
+  const observation = await readEcoBackupObservation(now, fetcher)
+  assert.equal(observation.runs.find(run => run.id === 99)?.capture, "verified")
+  const checks = evaluateEcoBackup(observation)
+  assert.equal(checks[0].details?.lastSuccessfulRunAt, new Date(earlier).toISOString())
+  assert.equal(level(checks[0]), 1)
+  assert.equal(level(checks[2]), 1)
+})
+
 test("capacity warning cannot conceal a second failed step or a failed capture", async () => {
   const extra = await readEcoBackupObservation(now, capacityFixture({ extraFailure: true }).fetcher)
   assert.equal(extra.runs[0].capture, "unverified")

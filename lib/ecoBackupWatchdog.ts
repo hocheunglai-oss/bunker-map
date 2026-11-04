@@ -9,6 +9,7 @@ const MAX_RUN_AGE = 90 * 60_000 // 50-minute job limit plus queue/runner grace.
 const API_ROOT = `https://api.github.com/repos/${target.repository}`
 const MAX_BODY_BYTES = 1_000_000
 const MAX_SUCCESS_CANDIDATES = 3
+const MAX_FAILURE_CANDIDATES = 3
 type Json = Record<string, unknown>
 export type BackupRun = {
   id: number
@@ -182,6 +183,9 @@ export async function readEcoBackupObservation(now = Date.now(), fetcher: typeof
   const candidates = new Set([
     ...completed.slice(0, 1).map((run) => run.id),
     ...completed.filter((run) => run.conclusion === "success").slice(0, MAX_SUCCESS_CANDIDATES).map((run) => run.id),
+    // A verified capture with maintenance attention has an overall failure.
+    // Keep its evidence available when a later genuine capture failure occurs.
+    ...completed.filter((run) => run.conclusion === "failure").slice(0, MAX_FAILURE_CANDIDATES).map((run) => run.id),
   ])
   const invalid = new Set<number>()
   const inspected = await Promise.all(runs.map(async (run) => {
