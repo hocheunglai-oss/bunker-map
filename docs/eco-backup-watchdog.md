@@ -48,12 +48,13 @@ received. Verify one controlled message and subsequent scheduled execution.
   failure. Failed SMTP acceptance releases the lease for retry. Missing incident
   storage fails closed rather than sending uncontrolled repeated emails.
 
-At most twenty runs and the latest completed job plus three candidate successful
-runs are inspected. Each HTTP request has an eight-second timeout, a one-megabyte
+At most twenty runs are read. Job details are inspected for the latest completed
+run, up to three successful runs and up to three failed runs. Each HTTP request has an eight-second timeout, a one-megabyte
 body limit, no credentials, and redirects disabled. The route's runtime is
 bounded at 45 seconds. If the bounded history cannot establish a success, the
-monitor does not invent one. Both backup capture and whole-workflow success are
-required, so a failure after capture is conservatively reported.
+monitor does not invent one. Successful capture and workflow evidence are required;
+the sole exception is the pinned post-verification capacity warning described below.
+Other failures after capture remain conservatively reported.
 
 This proves workflow/capture completion, not archive restorability, destination
 availability or the exact timestamp of a reused daily archive. ECO's own backup
@@ -87,3 +88,24 @@ backup is healthy.
 Official references: [Vercel cron usage](https://vercel.com/docs/cron-jobs/usage-and-pricing),
 [GitHub workflow runs](https://docs.github.com/en/rest/actions/workflow-runs),
 [Microsoft SMTP timeline](https://techcommunity.microsoft.com/blog/exchange/updated-exchange-online-smtp-auth-basic-authentication-deprecation-timeline/4489835).
+
+## Storage capacity and retention warnings
+
+The reviewed post-verification step is `Check verified backup capacity`, pinned
+in `config/fcunoConnections.ts`. If that step alone fails after the capture step
+succeeds, the monitor retains the verified-copy result and opens a separate
+`eco-backup-capacity` incident. Its email explicitly says that the copies passed
+verification but capacity or retention needs attention. Public metadata reveals
+no storage usage, file names, account identifiers or backup contents.
+
+Another failed step, an unsuccessful capture, duplicate evidence or inconsistent
+timestamps cannot be reclassified as capacity-only attention. Missing evidence
+preserves any existing storage incident; only an explicit successful maintenance
+step on a verified run clears it. The original 30-hour backup deadline and
+48-hour escalation continue independently. Old workflow versions without the
+new step remain valid capture evidence but cannot prove maintenance recovery.
+
+Up to three earlier overall-failure runs are inspected alongside the successful
+run candidates: a capacity-only warning must remain valid capture history after
+a newer genuine backup failure. This avoids overstating the age of the last
+verified copy when calculating the missed-backup escalation.

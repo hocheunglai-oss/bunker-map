@@ -168,6 +168,103 @@ test("both reviewed capture versions work; ambiguous duplicate captures fail clo
   await assert.rejects(readEcoBackupObservation(now, duplicate.fetcher), /could not be verified/)
 })
 
+function capacityFixture(options: { capacity?: string; run?: string; extraFailure?: boolean; duplicate?: boolean; beforeCapture?: boolean } = {}) {
+  const capacity = options.capacity ?? "failure"
+  const conclusion = options.run ?? (capacity === "failure" ? "failure" : "success")
+  return apiFixture((path, data) => {
+    if (path.includes("/runs?")) return { ...data, workflow_runs: (data.workflow_runs as Record<string, unknown>[]).map((run) => ({ ...run, conclusion })) }
+    if (!path.includes("jobs?")) return data
+    const step = { name: target.capacityStepName, status: "completed", conclusion: capacity,
+      completed_at: new Date(current + (options.beforeCapture ? -1 : 500)).toISOString() }
+    return { ...data, jobs: (data.jobs as Record<string, unknown>[]).map((job) => ({ ...job, conclusion,
+      steps: [...job.steps as Record<string, unknown>[], step, ...(options.duplicate ? [step] : []),
+        ...(options.extraFailure ? [{ name: "Unrelated cleanup", status: "completed", conclusion: "failure" }] : [])],
+    })) }
+  })
+}
+
+test("capacity-only failure keeps the verified copies healthy and raises its own truthful storage warning", async () => {
+  const result = await readEcoBackupObservation(now, capacityFixture().fetcher)
+  assert.equal(result.runs[0].capture, "verified")
+  assert.equal(result.runs[0].capturedAt, current)
+  assert.equal(result.runs[0].maintenance, "attention")
+  const checks = evaluateEcoBackup(result)
+  assert.equal(level(checks[0]), 0, "do not call verified capture a backup failure")
+  assert.equal(level(checks[2]), 1)
+  assert.match(checks[2].message, /copies passed verification/)
+  assert.match(buildEcoBackupAlertHtml([checks[2]], checkedAt), /not a failed backup capture/)
+})
+
+test("a newer failed capture does not erase an earlier verified copy with a capacity warning", async () => {
+  const fixture = capacityFixture()
+  const earlier = current - 3_600_000
+  const fetcher = (async (url: string | URL | Request, init?: RequestInit) => {
+    const priorJob = String(url).includes("/runs/99/")
+    const response = await fixture.fetcher(String(url).replace("/runs/99/", "/runs/100/"), init)
+    const data = await response.json()
+    if (String(url).includes("/runs?")) {
+      data.workflow_runs.push({ ...data.workflow_runs[0], id: 99,
+        created_at: new Date(earlier - 10_000).toISOString(), run_started_at: new Date(earlier - 10_000).toISOString(),
+        updated_at: new Date(earlier + 1_000).toISOString() })
+      data.total_count = 2
+    }
+    if (String(url).includes("jobs?")) {
+      const job = data.jobs[0]
+      if (priorJob) {
+        job.run_id = 99
+        job.completed_at = new Date(earlier + 1_000).toISOString()
+        job.steps[0].completed_at = new Date(earlier).toISOString()
+        job.steps[1].completed_at = new Date(earlier + 500).toISOString()
+      } else { job.steps[0].conclusion = "failure"; job.steps[1].conclusion = "skipped" }
+    }
+    return Response.json(data)
+  }) as typeof fetch
+  const observation = await readEcoBackupObservation(now, fetcher)
+  assert.equal(observation.runs.find(run => run.id === 99)?.capture, "verified")
+  const checks = evaluateEcoBackup(observation)
+  assert.equal(checks[0].details?.lastSuccessfulRunAt, new Date(earlier).toISOString())
+  assert.equal(level(checks[0]), 1)
+  assert.equal(level(checks[2]), 1)
+})
+
+test("capacity warning cannot conceal a second failed step or a failed capture", async () => {
+  const extra = await readEcoBackupObservation(now, capacityFixture({ extraFailure: true }).fetcher)
+  assert.equal(extra.runs[0].capture, "unverified")
+  assert.equal(level(evaluateEcoBackup(extra)[0]), 1)
+  const failed = capacityFixture()
+  const fetcher = (async (url: string | URL | Request, init?: RequestInit) => {
+    const response = await failed.fetcher(url, init)
+    const data = await response.json()
+    if (String(url).includes("jobs?")) data.jobs[0].steps[0].conclusion = "failure"
+    return Response.json(data)
+  }) as typeof fetch
+  const result = await readEcoBackupObservation(now, fetcher)
+  assert.equal(result.runs[0].capture, "failed")
+  assert.equal(level(evaluateEcoBackup(result)[0]), 1)
+})
+
+test("duplicate, skipped, contradictory or out-of-order maintenance evidence cannot establish recovery", async () => {
+  for (const options of [ { duplicate: true }, { beforeCapture: true }, { capacity: "skipped" }, { run: "success", capacity: "failure" } ]) {
+    await assert.rejects(readEcoBackupObservation(now, capacityFixture(options).fetcher), /could not be verified/)
+  }
+})
+
+test("only an explicit healthy maintenance result clears storage incidents; legacy and unknown evidence preserve them", async () => {
+  const healthy = evaluateEcoBackup(await readEcoBackupObservation(now, capacityFixture({ capacity: "success" }).fetcher))
+  assert.equal(level(healthy[2]), 0)
+  assert.equal(level(evaluate([run()])[2]), null, "legacy run lacks capacity proof")
+  assert.equal(level(unknownEcoBackupChecks(now)[2]), null)
+  const pending = run({ id: 101, createdAt: now - 60_000, completedAt: null, status: "in_progress", conclusion: null, capture: "unverified", capturedAt: null })
+  assert.equal(level(evaluate([pending, run({ maintenance: "healthy" })])[2]), null)
+})
+
+test("maintenance warnings never suppress missed-backup escalation", () => {
+  const old = run({ maintenance: "attention", capturedAt: now - 49 * 3_600_000 })
+  const checks = evaluate([old])
+  assert.equal(level(checks[0]), 2)
+  assert.equal(level(checks[2]), 1)
+})
+
 const request = (authorization = "Bearer synthetic-cron") => new Request("https://example.invalid/api/cron/eco-backup-watchdog?to=attacker@example.invalid", { headers: { authorization } })
 function dependencies() {
   const events: string[] = []
