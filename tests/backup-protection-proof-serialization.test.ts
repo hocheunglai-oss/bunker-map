@@ -11,22 +11,30 @@ import * as compression from "../lib/compressedBackupStage"
 import * as snapshotExport from "../lib/backupTruthSnapshotExport"
 import * as pricing from "../lib/backupPricingSchema.mjs"
 import * as attendance from "../lib/backupAttendanceSchema.mjs"
+import * as auditLogExport from "../lib/backupAuditLogExport"
 import { makeBackupFixture } from "./fixtures/backup-validation.mjs"
 
 const ledgerRpc = "verify_outlook_exchange_truth_ledger"
 const checkpointRpc = "get_outlook_exchange_truth_checkpoint"
 const recipientRpc = "verify_outlook_template_recipient_truth"
-const truthRpcs = new Set([ledgerRpc, checkpointRpc, recipientRpc])
+const truthRpcs = new Set([checkpointRpc, recipientRpc])
 type ProofPhase = "before" | "after"
 type Fault = { phase: ProofPhase; rpc: string; kind: "transport" | "malformed" | "invalid" }
+type CombinedProofFault = { phase: ProofPhase; mutate: (proof: Record<string, unknown>) => void }
+const embeddedProof = (proof: Record<string, unknown>) => proof.exchangeTruth as Record<string, unknown>
+const embeddedQueue = (proof: Record<string, unknown>) => embeddedProof(proof).queue as Record<string, unknown>
 
 // Load the entire actual route and retain its orchestration, proof validation,
 // real Supabase SDK, paged reads, section serializer and Brotli stage. Only the
 // external SDK transports are synthetic; no production database/session or
 // Google endpoint can be reached from this fixture.
-function fixture(options: { fault?: Fault; changed?: "epoch" | "inventory" | "head" | "templates"; beforeEpochBusy?: boolean } = {}) {
+function fixture(options: { fault?: Fault; combinedProofFault?: CombinedProofFault; changed?: "epoch" | "inventory" | "head" | "templates"; beforeEpochBusy?: boolean } = {}) {
   const artifact = makeBackupFixture("20261014082839")
   const truth = artifact.integrity.truth
+  // Production's privileged template RPC returns the full proof that it just
+  // computed. Old archive fixtures remain valid without changing their format.
+  truth.templateRecipientVerificationBeforeExport.exchangeTruth = structuredClone(truth.verificationBeforeExport)
+  truth.templateRecipientVerificationAfterExport.exchangeTruth = structuredClone(truth.verificationAfterExport)
   const checkpoint = { ...truth.checkpointBeforeExport, queue: { pending: 0, processing: 0, failed: 0, terminalFailed: 0 } }
   const inventory = { schema: "bunker-map.backup-inventory/v1", migrationHead: artifact.migrationHead,
     tables: artifact.databaseInventory.liveTables, unfencedTables: [], catalogSha256: "ab".repeat(32),
@@ -63,13 +71,14 @@ function fixture(options: { fault?: Fault; changed?: "epoch" | "inventory" | "he
           const fault = options.fault?.rpc === rpc && options.fault.phase === phase ? options.fault : undefined
           if (fault?.kind === "transport") return response({ code: "P0001", message: "Synthetic proof denied" }, 400)
           if (fault?.kind === "malformed") return response(null)
-          const value = structuredClone(rpc === ledgerRpc ? truth.verificationBeforeExport : rpc === checkpointRpc ? checkpoint : truth.templateRecipientVerificationBeforeExport)
+          const value = structuredClone(rpc === checkpointRpc ? checkpoint : truth.templateRecipientVerificationBeforeExport)
           if (fault?.kind === "invalid") {
             if (rpc === checkpointRpc) value.checkpointValid = false
             else value.valid = false
           }
-          if (phase === "after" && options.changed === "head" && rpc === ledgerRpc) value.headSha256 = "ef".repeat(32)
+          if (phase === "after" && options.changed === "head" && rpc === recipientRpc) value.exchangeTruth.headSha256 = "ef".repeat(32)
           if (phase === "after" && options.changed === "templates" && rpc === recipientRpc) value.templates = { ...value.templates, total: 1, sendable: 1 }
+          if (rpc === recipientRpc && options.combinedProofFault?.phase === phase) options.combinedProofFault.mutate(value)
           return response(value)
         } finally {
           if (expensive) activeProofs--
@@ -105,6 +114,7 @@ function fixture(options: { fault?: Fault; changed?: "epoch" | "inventory" | "he
     "@/lib/backupPricingSchema.mjs": pricing,
     "@/lib/backupAttendanceSchema.mjs": attendance,
     "@/lib/backupTruthSnapshotExport": snapshotExport,
+    "@/lib/backupAuditLogExport": auditLogExport,
   }
   const source = readFileSync(new URL("../app/api/backups/bunker-map-drive/route.ts", import.meta.url), "utf8")
   const code = transformSync(`${source}\nmodule.exports.proofFixture = { buildBackupFile, getBackupInventory };`, { loader: "ts", format: "cjs", target: "node24" }).code
@@ -130,16 +140,17 @@ function fixture(options: { fault?: Fault; changed?: "epoch" | "inventory" | "he
   }
 }
 
-test("actual backup builder runs all six unchanged pre/post RPCs without overlapping full proofs", { timeout: 10_000 }, async () => {
+test("actual backup builder obtains two fresh combined proofs without redundant ledger RPCs", { timeout: 10_000 }, async () => {
   const f = fixture(), prepared = await f.run()
   assert.equal(f.peakProofs, 1)
   assert.deepEqual(f.events.filter((event) => !event.startsWith("table:")), [
-    `before:${ledgerRpc}:start`, `before:${ledgerRpc}:end`, `before:${checkpointRpc}:start`, `before:${checkpointRpc}:end`, `before:${recipientRpc}:start`, `before:${recipientRpc}:end`,
-    `after:${checkpointRpc}:start`, `after:${checkpointRpc}:end`, `after:${ledgerRpc}:start`, `after:${ledgerRpc}:end`, `after:${recipientRpc}:start`, `after:${recipientRpc}:end`,
+    `before:${checkpointRpc}:start`, `before:${checkpointRpc}:end`, `before:${recipientRpc}:start`, `before:${recipientRpc}:end`,
+    `after:${checkpointRpc}:start`, `after:${checkpointRpc}:end`, `after:${recipientRpc}:start`, `after:${recipientRpc}:end`,
   ])
   assert.ok(f.events.indexOf(`before:${recipientRpc}:end`) < f.events.findIndex((event) => event.startsWith("table:")))
   assert.ok(f.events.findLastIndex((event) => event.startsWith("table:")) < f.events.indexOf(`after:${checkpointRpc}:start`))
   for (const name of truthRpcs) assert.equal(f.calls.get(name), 2)
+  assert.equal(f.calls.get(ledgerRpc), undefined, "the template RPC's full proof replaces only its redundant direct scan")
   assert.equal(f.calls.get("get_bunker_map_backup_export_fence"), 2)
   assert.equal(f.calls.get("get_bunker_map_backup_inventory"), 2)
   assert.equal(f.googleReads, 2)
@@ -158,12 +169,50 @@ test("every pre/post RPC transport, malformed result and invalid proof still fai
   for (const phase of ["before", "after"] as const) for (const rpc of truthRpcs) for (const kind of ["transport", "malformed", "invalid"] as const) {
     const f = fixture({ fault: { phase, rpc, kind } })
     await assert.rejects(f.run(), /proof denied|did not return an object|failed|not an operationally consistent|not aligned/, `${phase}:${rpc}:${kind}`)
-    assert.equal(f.peakProofs, 1)
+    assert.ok(f.peakProofs <= 1)
+    assert.equal(f.calls.get(ledgerRpc), undefined)
     if (phase === "before") { assert.equal(f.tableReads, 0); assert.equal(f.googleReads, 0) }
     if (kind !== "invalid") {
       const starts = f.events.filter((event) => event.startsWith(`${phase}:`) && event.endsWith(":start"))
       assert.equal(starts.at(-1), `${phase}:${rpc}:start`, "a failed await does not launch later proof RPCs")
     }
+  }
+})
+
+test("both combined proof phases reject missing, malformed, invalid and mismatched embedded evidence", { timeout: 20_000 }, async () => {
+  const cases: Array<[string, CombinedProofFault["mutate"]]> = [
+    ["missing", proof => { delete proof.exchangeTruth }],
+    ...[null, [], "not-a-proof", false, {}].map((value, i): [string, CombinedProofFault["mutate"]] => [
+      `malformed-${i}`, proof => { proof.exchangeTruth = value },
+    ]),
+    ...["valid", "integrityValid", "ledgerValid", "snapshotsValid", "referencesValid", "latestCertificationHasProjectionEvidence", "operationallyConsistent"].map((flag): [string, CombinedProofFault["mutate"]] => [
+      flag, proof => { embeddedProof(proof)[flag] = false },
+    ]),
+    ["invalid-projection-hash", proof => { embeddedProof(proof).latestProjectionSnapshotSha256 = "not-a-sha" }],
+    ["different-projection", proof => { embeddedProof(proof).latestProjectionSnapshotSha256 = "ef".repeat(32) }],
+    ["different-certification", proof => { embeddedProof(proof).latestCertificationRunId = "33333333-3333-4333-8333-333333333333" }],
+    ["different-certified-time", proof => { embeddedProof(proof).latestCertificationAt = "2026-11-01T00:00:00.000Z" }],
+    ["different-source", proof => { embeddedProof(proof).latestSourceFingerprint = embeddedProof(proof).latestProjectionSnapshotSha256 = "ef".repeat(32) }],
+    ["different-queue", proof => { embeddedQueue(proof).pending = 1 }],
+    ["malformed-queue", proof => { embeddedProof(proof).queue = [] }],
+    ["missing-queue-count", proof => { delete embeddedQueue(proof).failed }],
+    ...[null, false, "0"].map((value, i): [string, CombinedProofFault["mutate"]] => [
+      `coerced-queue-${i}`, proof => { embeddedQueue(proof).failed = value },
+    ]),
+    ["negative-queue", proof => { embeddedQueue(proof).failed = -1 }],
+    ["invalid-head-sequence", proof => { embeddedProof(proof).headSequence = 1.5 }],
+    ["invalid-head-hash", proof => { embeddedProof(proof).headSha256 = "not-a-sha" }],
+    ["invalid-entry-count", proof => { embeddedProof(proof).ledgerEntries = 0 }],
+    ["invalid-snapshot-count", proof => { embeddedProof(proof).snapshots = 0 }],
+    ["unsupported-template-contract", proof => { proof.schema = "unknown" }],
+    ["invalid-source-truth", proof => { proof.sourceTruthValid = false }],
+  ]
+  for (const phase of ["before", "after"] as const) for (const [name, mutate] of cases) {
+    const f = fixture({ combinedProofFault: { phase, mutate } })
+    await assert.rejects(f.run(), /did not return an object|failed|not aligned|inconsistent|unsupported|not a safe|not a valid|greater than zero/, `${phase}:${name}`)
+    assert.equal(f.calls.get(ledgerRpc), undefined, "invalid combined evidence never falls back to another source")
+    assert.equal(f.peakProofs, 1)
+    if (phase === "before") { assert.equal(f.tableReads, 0); assert.equal(f.googleReads, 0) }
   }
 })
 
@@ -173,6 +222,7 @@ test("actual serialization preserves independent epoch, inventory, head and reci
     await assert.rejects(f.run(), error)
     assert.equal(f.peakProofs, 1)
     for (const name of truthRpcs) assert.equal(f.calls.get(name), 2)
+    assert.equal(f.calls.get(ledgerRpc), undefined)
   }
   const busy = fixture({ beforeEpochBusy: true })
   await assert.rejects(busy.run(), /tracked database write transaction is active/)
