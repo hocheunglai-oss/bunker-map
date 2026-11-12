@@ -4,11 +4,10 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import Image from "next/image"
 import { useIsMobile } from "@/lib/useIsMobile"
-import { type TaiwanReportRow } from "@/lib/taiwanReport"
 import DisclaimerLink from "@/components/DisclaimerLink"
-import { buildFallbackKey, type FallbackMap } from "@/lib/reportFallbackKeys"
-import type { PublicReportPayloadByKey } from "@/lib/publicMarketData"
-import { parsePublicReportPayload, PUBLIC_REPORT_UNAVAILABLE_MESSAGE } from "@/lib/publicReportValidation"
+import { buildFallbackKey } from "@/lib/reportFallbackKeys"
+import type { PublicReportPageData, PublicReportPayloadByKey } from "@/lib/publicMarketData"
+import { parsePublicReportPayload, PUBLIC_REPORT_PREVIOUS_MESSAGE, PUBLIC_REPORT_UNAVAILABLE_MESSAGE } from "@/lib/publicReportValidation"
 import {
   buildTaiwanOperationalNoticeMessage,
   isTaiwanOperationalNoticeReady,
@@ -179,18 +178,18 @@ async function loadTaiwanReport(signal: AbortSignal): Promise<TaiwanReportPayloa
   }
 }
 
-export default function TaiwanReport({ initialData }: { initialData: TaiwanReportPayload }) {
+export default function TaiwanReport({ initialData }: { initialData: PublicReportPageData<"taiwan"> }) {
   const isMobile = useIsMobile()
-  const [rows, setRows] = useState<TaiwanReportRow[]>(initialData.snapshot?.rows ?? [])
-  const [remark, setRemark] = useState(initialData.snapshot?.remark ?? "")
-  const [specialNotice, setSpecialNotice] = useState(initialData.specialNotice)
-  const [operationalNotice, setOperationalNotice] = useState(initialData.operationalNotice)
-  const [reportDate, setReportDate] = useState(initialData.snapshot?.reportDate ?? "")
-  const [fallbacks, setFallbacks] = useState<FallbackMap>(initialData.fallbacks)
+  const [report, setReport] = useState(initialData)
+  const { snapshot, fallbacks, previousReport, unavailable } = report
+  const reportDate = snapshot?.reportDate ?? ""
+  const rows = snapshot?.rows ?? []
+  const remark = snapshot?.remark ?? ""
+  const { specialNotice, operationalNotice } = report
   const showOperationalNotice = isTaiwanOperationalNoticeReady(operationalNotice)
   const operationalNoticeMessage = buildTaiwanOperationalNoticeMessage(operationalNotice)
   const specialNoticeLines = getTaiwanSpecialNoticeLines(specialNotice)
-  const displayReportDate = showOperationalNotice ? formatHongKongToday() : reportDate
+  const displayReportDate = showOperationalNotice && !previousReport ? formatHongKongToday() : reportDate
 
   useEffect(() => {
     let cancelled = false
@@ -201,14 +200,9 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
       const request = new AbortController()
       activeRequest = request
       const payload = await loadTaiwanReport(request.signal)
-      if (cancelled || request.signal.aborted || !payload?.snapshot) return
+      if (cancelled || request.signal.aborted || !payload) return
 
-      setReportDate(payload.snapshot.reportDate)
-      setRows(payload.snapshot.rows)
-      setRemark(payload.snapshot.remark)
-      setSpecialNotice(payload.specialNotice)
-      setOperationalNotice(payload.operationalNotice)
-      setFallbacks(payload.fallbacks)
+      setReport(payload)
     }
 
     function refreshVisibleReport() {
@@ -339,9 +333,13 @@ export default function TaiwanReport({ initialData }: { initialData: TaiwanRepor
           </div>
         </div>
 
-        {rows.length === 0 && (
+        {(rows.length === 0 || previousReport) && (
           <div role="status" style={{ ...cardStyle, padding: "18px", marginBottom: "24px", textAlign: "center", color: "#d7e9ff" }}>
-            {initialData.unavailable ? PUBLIC_REPORT_UNAVAILABLE_MESSAGE : "No report data available."}
+            {previousReport
+              ? PUBLIC_REPORT_PREVIOUS_MESSAGE
+              : unavailable
+                ? PUBLIC_REPORT_UNAVAILABLE_MESSAGE
+                : "No report data available."}
           </div>
         )}
 

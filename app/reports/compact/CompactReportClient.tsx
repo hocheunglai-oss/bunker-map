@@ -7,9 +7,9 @@ import { defaultExpandablePreviewRows } from "@/data/reportSections"
 import { type ChinaReportSection } from "@/lib/chinaReport"
 import { useIsMobile } from "@/lib/useIsMobile"
 import DisclaimerLink from "@/components/DisclaimerLink"
-import { buildFallbackKey, type FallbackMap } from "@/lib/reportFallbackKeys"
-import type { PublicReportPayloadByKey } from "@/lib/publicMarketData"
-import { parsePublicReportPayload, PUBLIC_REPORT_UNAVAILABLE_MESSAGE } from "@/lib/publicReportValidation"
+import { buildFallbackKey } from "@/lib/reportFallbackKeys"
+import type { PublicReportPageData, PublicReportPayloadByKey } from "@/lib/publicMarketData"
+import { parsePublicReportPayload, PUBLIC_REPORT_PREVIOUS_MESSAGE, PUBLIC_REPORT_UNAVAILABLE_MESSAGE } from "@/lib/publicReportValidation"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -135,11 +135,14 @@ async function loadCompactReport(signal: AbortSignal): Promise<CompactReportPayl
   }
 }
 
-export default function CompactReport({ initialData }: { initialData: CompactReportPayload }) {
+const EMPTY_SECTIONS: ChinaReportSection[] = []
+
+export default function CompactReport({ initialData }: { initialData: PublicReportPageData<"compact"> }) {
   const isMobile = useIsMobile()
-  const [sections, setSections] = useState<ChinaReportSection[]>(initialData.snapshot?.sections ?? [])
-  const [reportDate, setReportDate] = useState(initialData.snapshot?.reportDate ?? "")
-  const [fallbacks, setFallbacks] = useState<FallbackMap>(initialData.fallbacks)
+  const [report, setReport] = useState(initialData)
+  const { snapshot, fallbacks, previousReport, unavailable } = report
+  const reportDate = snapshot?.reportDate ?? ""
+  const sections = snapshot?.sections ?? EMPTY_SECTIONS
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
@@ -151,11 +154,9 @@ export default function CompactReport({ initialData }: { initialData: CompactRep
       const request = new AbortController()
       activeRequest = request
       const payload = await loadCompactReport(request.signal)
-      if (cancelled || request.signal.aborted || !payload?.snapshot) return
+      if (cancelled || request.signal.aborted || !payload) return
 
-      setReportDate(payload.snapshot.reportDate)
-      setSections(payload.snapshot.sections)
-      setFallbacks(payload.fallbacks)
+      setReport(payload)
     }
 
     function refreshVisibleReport() {
@@ -318,11 +319,17 @@ export default function CompactReport({ initialData }: { initialData: CompactRep
           </div>
         </div>
 
-        {totalRows === 0 ? (
+        {(totalRows === 0 || previousReport) && (
           <div role="status" style={{ ...cardStyle, padding: "18px", marginBottom: "24px", textAlign: "center", color: "#d7e9ff" }}>
-            {initialData.unavailable ? PUBLIC_REPORT_UNAVAILABLE_MESSAGE : "No report data available."}
+            {previousReport
+              ? PUBLIC_REPORT_PREVIOUS_MESSAGE
+              : unavailable
+                ? PUBLIC_REPORT_UNAVAILABLE_MESSAGE
+                : "No report data available."}
           </div>
-        ) : (
+        )}
+
+        {totalRows > 0 && (
           <div
             style={{
               display: "grid",

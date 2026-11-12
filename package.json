@@ -34,6 +34,7 @@
     "@google-cloud/storage": "^7.21.0",
     "@supabase/supabase-js": "^2.110.2",
     "@vercel/analytics": "^2.0.1",
+    "@vercel/functions": "3.11.1",
     "@vercel/speed-insights": "2.0.0",
     "googleapis": "^171.4.0",
     "leaflet": "^1.9.4",

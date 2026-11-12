@@ -1,22 +1,10 @@
 import HongKongReport from "./HongKongReportClient"
-import {
-  getEmptyPublicReportData,
-  getPublicReportData,
-} from "@/lib/publicMarketData"
+import { getPublicReportPageData } from "@/lib/publicReportAvailability"
 
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
 export default async function HongKongReportPage() {
-  const initialData = await getInitialReportData()
+  const initialData = await getPublicReportPageData("hongkong")
   return <HongKongReport initialData={initialData} />
-}
-
-async function getInitialReportData() {
-  try {
-    return await getPublicReportData("hongkong")
-  } catch (error) {
-    console.error("Initial Hong Kong report data unavailable", error)
-    return getEmptyPublicReportData("hongkong")
-  }
 }

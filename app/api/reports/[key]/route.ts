@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server"
-import {
-  getPublicReportData,
-  isReportSnapshotKey,
-} from "@/lib/publicMarketData"
+import { isReportSnapshotKey } from "@/lib/publicMarketData"
+import { readAndRememberPublicReport } from "@/lib/publicReportAvailability"
 
 export const dynamic = "force-dynamic"
 const REPORT_HEADERS = {
@@ -21,7 +19,7 @@ export async function GET(
   }
 
   try {
-    return NextResponse.json(await getPublicReportData(key), {
+    return NextResponse.json(await readAndRememberPublicReport(key), {
       headers: REPORT_HEADERS,
     })
   } catch (error) {

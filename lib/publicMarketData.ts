@@ -98,6 +98,17 @@ export type PublicReportPayloadByKey = {
   compact: Extract<PublicReportPayload, { key: "compact" }>
 }
 
+export type PublicReportPageData<Key extends ReportSnapshotKey> = PublicReportPayloadByKey[Key] & {
+  previousReport?: true
+}
+
+export class PublicReportConnectionError extends Error {
+  constructor(cause: unknown) {
+    super("The public report source is temporarily unreachable", { cause })
+    this.name = "PublicReportConnectionError"
+  }
+}
+
 export type HomepageMarketData = {
   ports: PublicPort[]
   fallbacks: FallbackMap
@@ -191,12 +202,19 @@ async function loadReportData(key: ReportSnapshotKey): Promise<PublicReportPaylo
     ? [REPORT_SNAPSHOT_IDS[key], FALLBACK_REMARK_ID, 2, TAIWAN_OPERATIONAL_NOTICE_REMARK_ID]
     : [REPORT_SNAPSHOT_IDS[key], FALLBACK_REMARK_ID]
 
-  const { data, error } = await supabase
+  const { data, error, status } = await supabase
     .from("remarks")
     .select("id,content")
     .in("id", ids)
 
-  if (error) throw error
+  if (error) {
+    const gatewayFailure = (status >= 502 && status <= 504) || (status >= 520 && status <= 524)
+    const connectionFailure = /^(?:PGRST00[0-3]|08[A-Z0-9]{3})$/.test(error.code)
+    if (status === 0 || gatewayFailure || connectionFailure) {
+      throw new PublicReportConnectionError(error)
+    }
+    throw error
+  }
 
   if (!Array.isArray(data)) throw Error("Public report read was incomplete")
   const contentById = new Map<number, string | null>()
