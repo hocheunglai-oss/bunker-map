@@ -1,10 +1,9 @@
-// Reproducible reader-only regression: nine runtime overlays and an additive
+// Reproducible reader-only regression: the report reader and an additive
 // timestamp-validation helper over an immutable production Git baseline.
 // No unpublished writer module, publication API or SQL fixture is imported;
 // no mutation function or live service is used. The actual report route/reader and four actual clients run against
-// a synthetic read-only remarks adapter. Next Link/Image/cache/Response are
-// explicit test boundaries; this is not Next SSR, hosted authentication or CDN
-// verification. Browsers use owned headless contexts and block external URLs.
+// a synthetic read-only remarks adapter. Next rendering and Vercel Runtime
+// Cache are explicit test boundaries; this is not hosted verification. Browsers use owned headless contexts and block external URLs.
 //
 // From the repository root:
 // PUBLIC_READER_BASE_COMMIT=d262f1aea70a2cb8ad972869c1dd0bdb375732dd \
@@ -26,7 +25,7 @@ const base = process.env.PUBLIC_READER_BASE_COMMIT || "d262f1aea70a2cb8ad972869c
 const strictCandidate = process.argv.includes("--require-clean-candidate");
 const baselineCache = new Map();
 assert.match(base, /^[a-f0-9]{40}$/i, "Pin an immutable full production Git commit.");
-const selected = ["app/api/reports/[key]/route.ts", "app/reports/china/page.tsx", "app/reports/compact/page.tsx", "app/reports/china/ChinaReportClient.tsx", "app/reports/compact/CompactReportClient.tsx", "app/reports/hongkong/HongKongReportClient.tsx", "app/reports/taiwan/TaiwanReportClient.tsx", "lib/publicMarketData.ts", "lib/publicReportValidation.ts"];
+const selected = ["app/api/reports/[key]/route.ts", "app/reports/china/page.tsx", "app/reports/compact/page.tsx", "app/reports/hongkong/page.tsx", "app/reports/taiwan/page.tsx", "app/reports/china/ChinaReportClient.tsx", "app/reports/compact/CompactReportClient.tsx", "app/reports/hongkong/HongKongReportClient.tsx", "app/reports/taiwan/TaiwanReportClient.tsx", "lib/publicMarketData.ts", "lib/publicReportAvailability.ts", "lib/publicReportValidation.ts"];
 const baseline = file => {
   if (!baselineCache.has(file)) baselineCache.set(file, cp.execFileSync("git", ["show", base + ":" + file], {
     encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
@@ -37,7 +36,9 @@ const sha = text => crypto.createHash("sha256").update(text).digest("hex");
 const oldHistory = baseline("lib/priceHistoryRecords.ts"), dirtyHistory = fs.readFileSync("lib/priceHistoryRecords.ts", "utf8");
 const helper = dirtyHistory.slice(dirtyHistory.indexOf("const marketTimestampFormatter"), dirtyHistory.indexOf("function getErrorMessage"));
 assert.ok(helper.includes("export function normaliseHistoryTimestamp"));
-const minimalHistory = oldHistory.replace("function getErrorMessage", helper + "function getErrorMessage");
+const minimalHistory = oldHistory.includes("export function normaliseHistoryTimestamp")
+  ? oldHistory
+  : oldHistory.replace("function getErrorMessage", helper + "function getErrorMessage");
 if (strictCandidate) assert.equal(dirtyHistory === minimalHistory, true, "The candidate history module must contain only the additive timestamp helper; no unpublished writer edits.");
 assert.equal(minimalHistory.slice(minimalHistory.indexOf("export async function savePriceHistoryForMarketDate")), oldHistory.slice(oldHistory.indexOf("export async function savePriceHistoryForMarketDate")));
 const selectedText = new Map(selected.map(file => [file, fs.readFileSync(file, "utf8")]));
@@ -51,10 +52,15 @@ const source = file => {
 const filesUsed = new Set(), known = new Map();
 function resolveFile(rel) { for (const suffix of ["", ".ts", ".tsx", ".js", ".mjs"]) { try { source(rel + suffix); return rel + suffix; } catch {} } throw Error("Unknown candidate dependency: " + rel); }
 const store = new Map(), ids = { china: 103, compact: 104, taiwan: 101, hongkong: 102 };
-let rowsOverride, readFailure = false;
-const reads = [], cacheCalls = [];
+let rowsOverride, readFailure = false, cacheFailure = false;
+const reads = [], cacheCalls = [], copies = new Map();
 const extras = {
-  "next/server": { NextResponse: { json: Response.json.bind(Response) } },
+  "server-only": {},
+  "next/server": { NextResponse: { json: Response.json.bind(Response) }, after(callback) { void callback(); } },
+  "@vercel/functions": { getCache() { return {
+    async get(key) { if (cacheFailure) throw Error("Synthetic copy read failed"); return structuredClone(copies.get(key)); },
+    async set(key, copy) { if (cacheFailure) throw Error("Synthetic copy write failed"); copies.set(key, structuredClone(copy)); },
+  }; } },
   "next/cache": { unstable_cache(fn, keys) { cacheCalls.push(keys); return fn; } },
   "@supabase/supabase-js": { createClient(url, key) {
     assert.equal(url, "https://synthetic.invalid"); assert.equal(key, "synthetic-only");
@@ -64,7 +70,7 @@ const extras = {
         assert.equal(columns, "id,content");
         return { async in(column, wanted) {
           assert.equal(column, "id"); reads.push([...wanted]);
-          if (readFailure) return { data: null, error: Error("Synthetic backend unavailable") };
+          if (readFailure) return { data: null, status: readFailure === "denied" ? 403 : 0, error: { message: "Synthetic backend unavailable", code: "" } };
           return { data: rowsOverride === undefined ? wanted.filter(id => store.has(id)).map(id => ({ id, content: store.get(id) })) : rowsOverride, error: null };
         } };
       } };
@@ -79,7 +85,7 @@ function load(file) {
     if (extras[name]) return extras[name];
     if (name.startsWith("@/")) return load(resolveFile(name.slice(2)));
     throw Error("Unexpected server import: " + name);
-  }, loaded, loaded.exports, { env: { NEXT_PUBLIC_SUPABASE_URL: "https://synthetic.invalid", SUPABASE_SERVICE_ROLE_KEY: "synthetic-only" } }, { error() {} });
+  }, loaded, loaded.exports, { env: { NEXT_PUBLIC_SUPABASE_URL: "https://synthetic.invalid", SUPABASE_SERVICE_ROLE_KEY: "synthetic-only" } }, { error() {}, warn() {} });
   known.set(file, loaded.exports); return loaded.exports;
 }
 for (const file of ["app/reports/china/page.tsx", "app/reports/compact/page.tsx"]) {
@@ -87,6 +93,7 @@ for (const file of ["app/reports/china/page.tsx", "app/reports/compact/page.tsx"
   assert.match(source(file), /export const revalidate = 0/);
 }
 const market = load("lib/publicMarketData.ts"), route = load("app/api/reports/[key]/route.ts");
+const { getPublicReportPageData } = load("lib/publicReportAvailability.ts");
 assert.deepEqual(cacheCalls, [["public-homepage-market-data-v1"]]);
 function snapshot(key, date = "08 Oct 2026") {
   const v = { today: 0, last: 10, change: -10 }, h = { today: 0, last1: 10, last2: null };
@@ -102,6 +109,9 @@ const read = key => route.GET(new Request("http://localhost/api/reports/" + key)
 (async () => {
   let browser, server; const errors = [], external = []; let groups = 0;
   try {
+    readFailure = true;
+    assert.equal((await getPublicReportPageData("taiwan")).unavailable, true, "A cold outage cannot display invented data");
+    readFailure = false;
     for (const key of Object.keys(ids)) {
       const r = await read(key); assert.equal(r.status, 200);
       for (const header of ["cache-control", "cdn-cache-control", "vercel-cdn-cache-control"]) assert.match(r.headers.get(header), /no-store/);
@@ -111,6 +121,33 @@ const read = key => route.GET(new Request("http://localhost/api/reports/" + key)
     for (const value of ["{broken", "[]", '{"dalian::vlsfo":{}}']) { store.set(105, value); assert.equal((await read("china")).status, 502); } store.set(105, validFallbacks);
     for (const value of ['{"active":"false"}', '{"active":true,"typhoonName":{}}']) { store.set(3, value); assert.equal((await read("taiwan")).status, 502); } store.set(3, validNotice);
     for (const value of ["{broken", JSON.stringify({ reportDate: "08 Oct 2026", sections: {} })]) { store.set(103, value); assert.equal((await read("china")).status, 502); } store.set(103, JSON.stringify(snapshot("china")));
+    readFailure = true;
+    for (const key of Object.keys(ids)) {
+      const page = await getPublicReportPageData(key);
+      assert.equal(page.previousReport, true);
+      assert.deepEqual(page.snapshot, snapshot(key));
+      assert.equal((await read(key)).status, 502, "The API reports the live-read failure");
+    }
+    assert.equal((await getPublicReportPageData("taiwan")).specialNotice, "Notice line one\nNotice line two");
+    const savedCopy = structuredClone(copies.get("taiwan"));
+    copies.get("taiwan").verifiedAt -= 24 * 60 * 60 * 1000;
+    assert.equal((await getPublicReportPageData("taiwan")).unavailable, true, "An expired copy cannot be shown");
+    copies.set("taiwan", savedCopy);
+    cacheFailure = true;
+    assert.equal((await getPublicReportPageData("taiwan")).unavailable, true, "A copy read failure remains unavailable");
+    readFailure = false;
+    assert.deepEqual((await (await read("taiwan")).json()).snapshot, snapshot("taiwan"), "A copy write failure cannot break a fresh read");
+    cacheFailure = false;
+    readFailure = "denied";
+    assert.equal((await getPublicReportPageData("taiwan")).unavailable, true, "A permission failure cannot use a copy");
+    readFailure = false;
+    const savedTaiwan = store.get(ids.taiwan);
+    store.delete(ids.taiwan);
+    assert.equal((await getPublicReportPageData("taiwan")).snapshot, null, "A confirmed empty result takes precedence");
+    readFailure = true;
+    assert.equal((await getPublicReportPageData("taiwan")).unavailable, true, "A previously withdrawn report cannot reappear");
+    readFailure = false;
+    store.set(ids.taiwan, savedTaiwan);
     const beforeReads = reads.length; assert.equal((await read("__proto__")).status, 404); assert.equal(reads.length, beforeReads);
     groups++; console.log("PASS actual candidate reader/route: four formats, strict stored data/fallback/notice guards, generic failures and no-store headers");
     const titles = { china: "China", compact: "Compact", hongkong: "HongKong", taiwan: "Taiwan" };
@@ -136,7 +173,7 @@ const read = key => route.GET(new Request("http://localhost/api/reports/" + key)
         if (url.pathname === "/bundle.js") { res.setHeader("Content-Type", "text/javascript"); res.end(script); return; }
         if (url.pathname.startsWith("/api/reports/")) { const r = await read(url.pathname.split("/").pop()); res.writeHead(r.status, Object.fromEntries(r.headers)); res.end(await r.text()); return; }
         const key = url.pathname.slice(1); if (!Object.hasOwn(ids, key)) { res.writeHead(404); res.end(); return; }
-        const r = await read(key), initial = r.status === 200 ? await r.json() : market.getEmptyPublicReportData(key);
+        const initial = await getPublicReportPageData(key);
         res.setHeader("Content-Type", "text/html"); res.end('<!doctype html><html><body><div id="root"></div><script>window.fixtureKey=' + JSON.stringify(key) + ";window.fixtureInitial=" + JSON.stringify(initial).replaceAll("<", "\\u003c") + ';</script><script src="/bundle.js"></script></body></html>');
       } catch (e) { errors.push(e.message); res.writeHead(500); res.end(); }
     });
@@ -171,6 +208,16 @@ const read = key => route.GET(new Request("http://localhost/api/reports/" + key)
       finally { clearTimeout(captureTimer); }
       store.set(ids[key], JSON.stringify(snapshot(key, "11 Oct 2026"))); await focus(); await date("11 Oct 2026").waitFor(); releaseOld();
       await page.waitForTimeout(80); assert.equal(await date("11 Oct 2026").count(), 1); await page.unroute("**/api/reports/" + key); groups++;
+      readFailure = true;
+      await page.reload();
+      await date("11 Oct 2026").waitFor();
+      const previous = page.getByRole("status").filter({ hasText: "Showing a previously verified report." });
+      await previous.waitFor();
+      assert.match(await page.locator("body").innerText(), /\b0\b/);
+      readFailure = false;
+      await focus();
+      await previous.waitFor({ state: "hidden" });
+      await date("11 Oct 2026").waitFor();
       const saved = store.get(ids[key]);
       for (const value of ["{broken", JSON.stringify({ reportDate: "11 Oct 2026", rows: {}, sections: {} })]) {
         store.set(ids[key], value); assert.equal((await read(key)).status, 502);

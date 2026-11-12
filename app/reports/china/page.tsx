@@ -1,22 +1,10 @@
 import ChinaReport from "./ChinaReportClient"
-import {
-  getEmptyPublicReportData,
-  getPublicReportData,
-} from "@/lib/publicMarketData"
+import { getPublicReportPageData } from "@/lib/publicReportAvailability"
 
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
 export default async function ChinaReportPage() {
-  const initialData = await getInitialReportData()
+  const initialData = await getPublicReportPageData("china")
   return <ChinaReport initialData={initialData} />
-}
-
-async function getInitialReportData() {
-  try {
-    return await getPublicReportData("china")
-  } catch (error) {
-    console.error("Initial China report data unavailable", error)
-    return getEmptyPublicReportData("china")
-  }
 }

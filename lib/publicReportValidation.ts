@@ -4,6 +4,7 @@ import { normaliseHistoryTimestamp } from "@/lib/priceHistoryRecords"
 import { emptyTaiwanOperationalNotice, normaliseTaiwanOperationalNotice, type TaiwanOperationalNotice } from "@/lib/taiwanOperationalNotice"
 
 export const PUBLIC_REPORT_UNAVAILABLE_MESSAGE = "This report is temporarily unavailable. Please try again later."
+export const PUBLIC_REPORT_PREVIOUS_MESSAGE = "Live updates are temporarily unavailable. Showing a previously verified report."
 const FUELS = ["hsfo", "vlsfo", "mgo"] as const
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
 function invalid(): never { throw Error("Public report data is incomplete or invalid") }

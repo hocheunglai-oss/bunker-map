@@ -3,13 +3,12 @@
 import { Fragment, useEffect, useState } from "react"
 import Link from "next/link"
 import Image from "next/image"
-import { type HongKongReportRow } from "@/lib/hongKongReport"
 import { formatMarketDateNumeric } from "@/lib/priceHistoryRecords"
 import { useIsMobile } from "@/lib/useIsMobile"
 import DisclaimerLink from "@/components/DisclaimerLink"
-import { buildFallbackKey, type FallbackMap } from "@/lib/reportFallbackKeys"
-import type { PublicReportPayloadByKey } from "@/lib/publicMarketData"
-import { parsePublicReportPayload, PUBLIC_REPORT_UNAVAILABLE_MESSAGE } from "@/lib/publicReportValidation"
+import { buildFallbackKey } from "@/lib/reportFallbackKeys"
+import type { PublicReportPageData, PublicReportPayloadByKey } from "@/lib/publicMarketData"
+import { parsePublicReportPayload, PUBLIC_REPORT_PREVIOUS_MESSAGE, PUBLIC_REPORT_UNAVAILABLE_MESSAGE } from "@/lib/publicReportValidation"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -92,11 +91,12 @@ async function loadHongKongReport(signal: AbortSignal): Promise<HongKongReportPa
   }
 }
 
-export default function HongKongReport({ initialData }: { initialData: HongKongReportPayload }) {
+export default function HongKongReport({ initialData }: { initialData: PublicReportPageData<"hongkong"> }) {
   const isMobile = useIsMobile()
-  const [rows, setRows] = useState<HongKongReportRow[]>(initialData.snapshot?.rows ?? [])
-  const [reportDate, setReportDate] = useState(initialData.snapshot?.reportDate ?? "")
-  const [fallbacks, setFallbacks] = useState<FallbackMap>(initialData.fallbacks)
+  const [report, setReport] = useState(initialData)
+  const { snapshot, fallbacks, previousReport, unavailable } = report
+  const reportDate = snapshot?.reportDate ?? ""
+  const rows = snapshot?.rows ?? []
 
   useEffect(() => {
     let cancelled = false
@@ -107,11 +107,9 @@ export default function HongKongReport({ initialData }: { initialData: HongKongR
       const request = new AbortController()
       activeRequest = request
       const payload = await loadHongKongReport(request.signal)
-      if (cancelled || request.signal.aborted || !payload?.snapshot) return
+      if (cancelled || request.signal.aborted || !payload) return
 
-      setReportDate(payload.snapshot.reportDate)
-      setRows(payload.snapshot.rows)
-      setFallbacks(payload.fallbacks)
+      setReport(payload)
     }
 
     function refreshVisibleReport() {
@@ -242,9 +240,13 @@ export default function HongKongReport({ initialData }: { initialData: HongKongR
           </div>
         </div>
 
-        {rows.length === 0 && (
+        {(rows.length === 0 || previousReport) && (
           <div role="status" style={{ ...cardStyle, padding: "18px", marginBottom: "24px", textAlign: "center", color: "#d7e9ff" }}>
-            {initialData.unavailable ? PUBLIC_REPORT_UNAVAILABLE_MESSAGE : "No report data available."}
+            {previousReport
+              ? PUBLIC_REPORT_PREVIOUS_MESSAGE
+              : unavailable
+                ? PUBLIC_REPORT_UNAVAILABLE_MESSAGE
+                : "No report data available."}
           </div>
         )}
 
