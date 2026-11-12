@@ -18,6 +18,7 @@ import { buildGoogleDriveFolderLookupQuery } from "@/lib/queryEscaping"
 import { pricingBackupSchemaFromInventory, pricingBackupSchemaVersion, type PricingBackupSchemaVersion } from "@/lib/backupPricingSchema.mjs"
 import { attendanceBackupSchemaFromInventory, attendanceBackupSchemaVersion, parseAttendanceBackupSchemaVersion, type AttendanceBackupSchemaVersion } from "@/lib/backupAttendanceSchema.mjs"
 import { streamReferencedTruthSnapshots } from "@/lib/backupTruthSnapshotExport"
+import { streamAuditLogRows } from "@/lib/backupAuditLogExport"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -579,6 +580,25 @@ async function streamTableRows(
   config: TableConfig,
   appendRows: (rows: unknown[]) => Promise<void>
 ) {
+  if (config.table === "audit_logs") {
+    if (config.order?.length !== 1 || config.order[0].column !== "id" ||
+        config.order[0].ascending !== true) {
+      throw new Error("Audit-log backup requires its unique UUID key order.")
+    }
+    await streamAuditLogRows({
+      readPage: (after, limit) => {
+        let query = supabase.from("audit_logs").select("*")
+          .order("id", { ascending: true }).limit(limit)
+        if (after !== null) query = query.gt("id", after)
+        return query
+      },
+      retryRead: retrySupabaseRead,
+      appendRows: async (rows) => appendRows(rows.map((row) => sanitizeBackupTableRow(config, row))),
+      pageSize: BACKUP_EXPORT_PAGE_SIZE,
+    })
+    return
+  }
+
   for (let from = 0; ; from += BACKUP_EXPORT_PAGE_SIZE) {
     const data = await retrySupabaseRead(() => {
       let query = supabase
@@ -801,7 +821,6 @@ async function retrySupabaseRead<T>(
 async function callTruthRpc(
   supabase: ReturnType<typeof getSupabaseClient>,
   functionName:
-    | "verify_outlook_exchange_truth_ledger"
     | "get_outlook_exchange_truth_checkpoint"
     | "verify_outlook_template_recipient_truth"
 ) {
@@ -947,6 +966,48 @@ function validateTruthCheckpoint(
   }
 }
 
+function readTemplateExchangeTruth(
+  templateVerification: Record<string, unknown>,
+  label: string
+): Record<string, unknown> {
+  // This is the complete proof freshly computed inside the privileged template
+  // RPC, not cached evidence or a caller-supplied attestation. The caller still
+  // runs validateTruthVerification and the independent export fences below.
+  const exchangeTruth = asRecord(templateVerification.exchangeTruth, label)
+  if (
+    templateVerification.schema !== "fcuno.outlook-template-recipient-truth/v2" ||
+    templateVerification.sourceTruthValid !== true
+  ) {
+    throw new Error(`${label} has an unsupported or invalid template proof.`)
+  }
+  for (const [outer, inner] of [
+    ["certificationRunId", "latestCertificationRunId"],
+    ["certifiedAt", "latestCertificationAt"],
+    ["sourceFingerprint", "latestSourceFingerprint"],
+  ] as const) {
+    if (
+      typeof templateVerification[outer] !== "string" ||
+      !templateVerification[outer] ||
+      templateVerification[outer] !== exchangeTruth[inner]
+    ) {
+      throw new Error(`${label} is not aligned with its template proof.`)
+    }
+  }
+  const outerQueue = asRecord(templateVerification.queue, `${label}.templateQueue`)
+  const innerQueue = asRecord(exchangeTruth.queue, `${label}.exchangeQueue`)
+  for (const key of ["pending", "processing", "failed", "terminalFailed"] as const) {
+    if (
+      typeof outerQueue[key] !== "number" ||
+      typeof innerQueue[key] !== "number" ||
+      requiredNonNegativeInteger(outerQueue[key], `${label}.templateQueue.${key}`) !==
+      requiredNonNegativeInteger(innerQueue[key], `${label}.exchangeQueue.${key}`)
+    ) {
+      throw new Error(`${label} has inconsistent queue evidence.`)
+    }
+  }
+  return exchangeTruth
+}
+
 function validateTemplateRecipientTruth(
   verification: Record<string, unknown>,
   checkpoint: ReturnType<typeof validateTruthCheckpoint>,
@@ -1083,16 +1144,17 @@ async function buildBackupFile(
   let databaseEpochBefore: number
   try {
     databaseEpochBefore = await getBackupExportEpoch(supabase)
-    // Template truth also performs a complete ledger proof. Keep every existing
-    // check, but do not run the two history-sized proofs at the same time.
-    verificationBeforeExport = await callTruthRpc(
-      supabase, "verify_outlook_exchange_truth_ledger"
-    )
     checkpointBeforeExport = await callTruthRpc(
       supabase, "get_outlook_exchange_truth_checkpoint"
     )
     templateRecipientVerificationBeforeExport = await callTruthRpc(
       supabase, "verify_outlook_template_recipient_truth"
+    )
+    // The template RPC already computes and returns a full, current ledger
+    // proof. Validate that exact proof instead of scanning history a second time.
+    verificationBeforeExport = readTemplateExchangeTruth(
+      templateRecipientVerificationBeforeExport,
+      "Exchange truth verification before export"
     )
   } catch (error) {
     throw new Error(
@@ -1455,15 +1517,16 @@ async function buildBackupFile(
     let verificationAfterExport: Record<string, unknown>
     let templateRecipientVerificationAfterExport: Record<string, unknown>
     try {
-      // Preserve the independent after-export proof and all fences below.
+      // Invoke the verifier again after export; never reuse the earlier proof.
       checkpointAfterExport = await callTruthRpc(
         supabase, "get_outlook_exchange_truth_checkpoint"
       )
-      verificationAfterExport = await callTruthRpc(
-        supabase, "verify_outlook_exchange_truth_ledger"
-      )
       templateRecipientVerificationAfterExport = await callTruthRpc(
         supabase, "verify_outlook_template_recipient_truth"
+      )
+      verificationAfterExport = readTemplateExchangeTruth(
+        templateRecipientVerificationAfterExport,
+        "Exchange truth verification after export"
       )
     } catch (error) {
       throw new Error(

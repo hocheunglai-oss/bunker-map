@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs"
 import { createClient } from "@supabase/supabase-js"
 import { transformSync } from "esbuild"
 import * as snapshotExport from "../../lib/backupTruthSnapshotExport"
+import * as auditLogExport from "../../lib/backupAuditLogExport"
 import * as compression from "../../lib/compressedBackupStage"
 import * as pricing from "../../lib/backupPricingSchema.mjs"
 import * as attendanceSchema from "../../lib/backupAttendanceSchema.mjs"
@@ -74,6 +75,7 @@ export function actualSnapshotSection() {
     "@/lib/backupPricingSchema.mjs": pricing,
     "@/lib/backupAttendanceSchema.mjs": attendanceSchema,
     "@/lib/backupTruthSnapshotExport": snapshotExport,
+    "@/lib/backupAuditLogExport": auditLogExport,
   }
   const code = transformSync(`${source}\nmodule.exports.sectionFixture = async function(supabase, referencedSnapshotHashes, writer, sections, counts, expectedCount) {\nlet isFirstSection = true;\nconst checkpointBefore = { snapshots: expectedCount };\n${section}\nreturn { snapshotCount, seenSnapshotHashes };\n};`, { loader: "ts", format: "cjs", target: "node24" }).code
   const loaded = { exports: {} as { sectionFixture: (supabase: ReturnType<typeof snapshotClient>["supabase"], hashes: Set<string>, writer: Writer, sections: Record<string, unknown>, counts: Record<string, number>, expectedCount: number) => Promise<{ snapshotCount: number; seenSnapshotHashes: Set<string> }> } }
