@@ -869,6 +869,40 @@ function HighlightedInlineText({ value, query }: { value: string; query: string 
   return <span dangerouslySetInnerHTML={{ __html: highlightTextHtml(value, query) }} />
 }
 
+function CountryPortInformation({ port, query }: { port: CountryPortListItem; query: string }) {
+  const { mainBlocks, mainSections } = parseSummaryMeta(port.summary)
+  const notes = mainBlocks.length ? blocksToText(mainBlocks) : port.notes || ""
+  const sections = mainSections.flatMap((section) => {
+    const info = section.blocks?.length ? blocksToText(section.blocks) : section.info
+    const rows = (section.table || []).flatMap((row, index) => (
+      Array.isArray(row) && row.some((cell) => typeof cell === "string" && cell.trim())
+        ? [{ value: row.join(" | "), updatedAt: section.table_row_updates?.[index] || port.updated_at }]
+        : []
+    ))
+    return info.trim() || rows.length ? [{ title: section.title, info, rows }] : []
+  })
+
+  return (
+    <div style={{ minWidth: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+      {notes.trim() ? <ReadOnlyDatedText value={notes} updatedAt={port.updated_at} query={query} /> : null}
+      {sections.map((section, index) => (
+        <div key={index} style={{ padding: "5px 0" }}>
+          {section.title.trim() ? (
+            <strong style={{ color: "var(--fc-admin-link)", paddingInline: "5px" }}>
+              <HighlightedInlineText value={section.title} query={query} />
+            </strong>
+          ) : null}
+          {section.info.trim() ? <ReadOnlyDatedText value={section.info} updatedAt={port.updated_at} query={query} /> : null}
+          {section.rows.map((row, rowIndex) => (
+            <ReadOnlyDatedText key={rowIndex} value={row.value} updatedAt={row.updatedAt} query={query} />
+          ))}
+        </div>
+      ))}
+      {!notes.trim() && !sections.length ? <ReadOnlyDatedText value="No information yet" updatedAt={port.updated_at} query={query} /> : null}
+    </div>
+  )
+}
+
 function ReadOnlyDatedText({
   value,
   updatedAt,
@@ -4472,7 +4506,7 @@ function CountryCompanyInfoContent({ readOnly }: { readOnly: boolean }) {
                                 <a href={`/admin/ccinfo?kind=port&id=${port.id}`} onClick={(event) => { event.preventDefault(); void openPortInline(port.id) }} style={{ color: "var(--fc-admin-link)", fontWeight: 800, fontSize: "12px", textDecoration: "none" }}>
                                   <HighlightedInlineText value={port.name} query={searchInPage} />
                                 </a>
-                                <ReadOnlyDatedText value={port.notes || "No information yet"} updatedAt={port.updated_at} query={searchInPage} />
+                                <CountryPortInformation port={port} query={searchInPage} />
                               </div>
                             ))}
                           </div>
@@ -4494,7 +4528,7 @@ function CountryCompanyInfoContent({ readOnly }: { readOnly: boolean }) {
                                       </a>
                                     </td>
                                     <td style={{ verticalAlign: "top", padding: "7px 9px", borderBottom: "1px solid var(--fc-admin-border-soft)", color: "var(--fc-admin-panel-text)", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
-                                      <ReadOnlyDatedText value={port.notes || "No information yet"} updatedAt={port.updated_at} query={searchInPage} />
+                                      <CountryPortInformation port={port} query={searchInPage} />
                                     </td>
                                   </tr>
                                 ))}
