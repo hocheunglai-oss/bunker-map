@@ -12,6 +12,7 @@ import {
   attendancePortionConflicts,
   attendanceWorkModeForStatus,
   editableAttendanceEntry,
+  hasAttendancePmHomeOffice,
   permitsAttendanceMorningSignOut,
 } from "./attendanceDayEditor"
 import type {
@@ -816,6 +817,7 @@ export default function AttendanceRecordClient() {
   const [yearError, setYearError] = useState("")
   const [settingsError, setSettingsError] = useState("")
   const [notice, setNotice] = useState("")
+  const [dayEditError, setDayEditError] = useState("")
   const [pendingAction, setPendingAction] = useState("")
   const [reminderOpen, setReminderOpen] = useState(false)
   const [reminderMonth, setReminderMonth] = useState(Math.max(1, currentMonth - 1))
@@ -1272,6 +1274,7 @@ export default function AttendanceRecordClient() {
     holiday: ApiAttendanceHoliday | null | undefined,
   ) {
     if (!canEdit) return
+    setDayEditError("")
     const matching = record ? editableAttendanceEntry(record, direction) : undefined
     const manualWorkMode = record?.workModeOverride?.mode ||
       (record?.workModeSource === "manual" ? record.workMode : undefined)
@@ -1335,6 +1338,7 @@ export default function AttendanceRecordClient() {
     }
     setPendingAction("save-day-edit")
     setNotice("")
+    setDayEditError("")
     try {
       if (
         leaveDraft.signInTime &&
@@ -1348,7 +1352,7 @@ export default function AttendanceRecordClient() {
       }
       const permitsMorningSignOut = permitsAttendanceMorningSignOut(leaveDraft)
       if (
-        leaveDraft.leaveEnabled && leaveDraft.portion === "pm" && leaveDraft.code === "HO" &&
+        hasAttendancePmHomeOffice(leaveDraft) &&
         leaveDraft.signOutTime !== leaveDraft.initialSignOutTime && leaveDraft.signOutTime >= "17:00"
       ) {
         throw new Error("PM home office requires a sign-out before 17:00.")
@@ -1359,7 +1363,7 @@ export default function AttendanceRecordClient() {
         leaveDraft.signOutTime < "17:00" &&
         !permitsMorningSignOut
       ) {
-        throw new Error(attendanceMorningSignOutHelp(leaveDraft.otherEntries) || "Official sign-out time cannot be earlier than 17:00.")
+        throw new Error(attendanceMorningSignOutHelp(leaveDraft.otherEntries, leaveDraft.leaveEnabled) || "Official sign-out time cannot be earlier than 17:00.")
       }
       await postAttendance("save-day-edit", {
         dayEdit: {
@@ -1387,7 +1391,7 @@ export default function AttendanceRecordClient() {
       setLeaveDraft(null)
       await loadSelectedMonth()
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "The attendance day could not be updated.")
+      setDayEditError(error instanceof Error ? error.message : "The attendance day could not be updated.")
     } finally {
       setPendingAction("")
     }
@@ -2210,25 +2214,26 @@ export default function AttendanceRecordClient() {
                 <input
                   type="time"
                   aria-label="Sign out time"
-                  aria-describedby={attendanceMorningSignOutHelp(leaveDraft.otherEntries) ? "morning-sign-out-help" : undefined}
+                  aria-describedby={attendanceMorningSignOutHelp(leaveDraft.otherEntries, leaveDraft.leaveEnabled) ? "morning-sign-out-help" : undefined}
                   min={
                     permitsAttendanceMorningSignOut(leaveDraft)
                       ? undefined
                       : "17:00"
                   }
-                  max={leaveDraft.leaveEnabled && leaveDraft.portion === "pm" && leaveDraft.code === "HO" ? "16:59" : undefined}
+                  max={hasAttendancePmHomeOffice(leaveDraft) ? "16:59" : undefined}
                   value={leaveDraft.signOutTime}
                   onChange={(event) => setLeaveDraft((draft) => draft
                     ? { ...draft, signOutTime: event.target.value }
                     : draft)}
                 />
-                {attendanceMorningSignOutHelp(leaveDraft.otherEntries) ? (
+                {attendanceMorningSignOutHelp(leaveDraft.otherEntries, leaveDraft.leaveEnabled) ? (
                   <small id="morning-sign-out-help" className={styles.fieldHelp}>
-                    {attendanceMorningSignOutHelp(leaveDraft.otherEntries)}
+                    {attendanceMorningSignOutHelp(leaveDraft.otherEntries, leaveDraft.leaveEnabled)}
                   </small>
                 ) : null}
               </label>
             </div>
+            {dayEditError ? <p className={styles.dayEditError} role="alert">{dayEditError}</p> : null}
             <div className={styles.modalFooter}>
               <span>
                 {leaveDraft.entryId ? (

@@ -8,6 +8,7 @@ const foundation = source("20260807091428_create_attendance_record_foundation.sq
 const modes = source("20260810082031_attendance_work_modes_and_calendar.sql")
 const dayEdit = source("20260818023111_support_half_day_attendance_punches.sql")
 const pmHomeEdit = source("20261113021624_support_pm_home_office_morning_punches.sql")
+const preservePmHomeEdit = source("20261113025426_preserve_pm_home_office_when_saving_am_punches.sql")
 const person = "11111111-1111-4111-8111-111111111111"
 const otherPerson = "22222222-2222-4222-8222-222222222222"
 const workDate = "2026-11-02"
@@ -50,6 +51,7 @@ async function use(run) {
       for each row execute function private.enforce_attendance_leave_no_overlap();
     ${dayEdit}
     ${pmHomeEdit}
+    ${preservePmHomeEdit}
     grant usage on schema public to service_role;
     insert into public.attendance_people(id,staff_code,display_name,team,employment_start_date)
       values ('${person}','TEST','Synthetic Test','BT','2026-01-01'),
@@ -167,4 +169,21 @@ test("PM home office saves an audited morning departure without changing the oth
   assert.deepEqual(await f.punches(), before)
   assert.equal(await f.owner.one("select to_jsonb(count(*)) from public.attendance_raw_punches;"), 0)
   assert.equal(await f.owner.one(`select to_jsonb(has_function_privilege('authenticated', 'public.save_attendance_day_edit(uuid,date,text,text,boolean,uuid,text,text,text,boolean,timestamptz,boolean,timestamptz,text)', 'EXECUTE'));`), false)
+}))
+
+test("office-side save checks stored PM HO and leaves the exact status row intact", () => use(async f => {
+  await f.save({ portion: "pm", code: "HO" })
+  const original = await f.rows()
+  const earlyOut = { enabled: false, updateOut: true, out: "2026-11-02T05:00:00Z" }
+  await assert.rejects(f.save({ ...earlyOut, personId: otherPerson }), /requires PM leave or PM home office/)
+  await assert.rejects(f.save({ ...earlyOut, entryId: original[0].id }), /requires PM leave or PM home office/)
+  await assert.rejects(f.save({ ...earlyOut, out: "2026-11-02T11:00:00Z" }), /requires a sign-out before 17:00/)
+  assert.deepEqual(await f.punches(), [])
+  assert.deepEqual(await f.rows(), original)
+  await f.save(earlyOut)
+  assert.deepEqual(await f.rows(), original)
+  const overrides = await f.punches()
+  assert.equal(overrides.length, 1)
+  assert.equal(overrides[0].check_type, "OffDuty")
+  assert.equal(new Date(overrides[0].punch_time).toISOString(), "2026-11-02T05:00:00.000Z")
 }))

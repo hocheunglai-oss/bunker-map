@@ -1152,6 +1152,16 @@
   text-transform: uppercase;
 }
 
+.dayEditError {
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: #fff1f0;
+  color: #8a231b;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
 .fieldHelp {
   font-size: 12px;
   font-weight: 500;
