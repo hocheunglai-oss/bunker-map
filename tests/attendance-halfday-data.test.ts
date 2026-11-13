@@ -105,6 +105,39 @@ test("a half-day office absence without a punch does not fabricate attendance", 
   assert.equal(attendanceDayUnits(record, "2026-11-03"), 0)
 })
 
+test("PM home office keeps the actual morning office pair and ignores an evening correction", () => {
+  const raw = (id: string, checkType: "OnDuty" | "OffDuty" | "Unclassified", punchTime: string) => ({
+    personId: PERSON, workDate: WORK_DATE, punch: {
+      id, checkType, punchTime, sourceType: "test", deviceSn: null,
+      timeResult: null, locationResult: null, legacyAssumedOnTime: false, legacyHolidayAttendance: false,
+    },
+  })
+  const arrival = raw("in", "OnDuty", `${WORK_DATE}T01:42:48Z`)
+  const morningOut = `${WORK_DATE}T04:42:00Z`
+  const eveningOut = `${WORK_DATE}T11:00:00Z`
+  const eveningCorrection: Parameters<typeof buildAttendanceRecord>[3] = [{
+    id: "correction", personId: PERSON, workDate: WORK_DATE, action: "replace",
+    checkType: "OffDuty", punchTime: eveningOut, rawPunchId: null,
+    reason: "Synthetic", createdBy: "test", updatedBy: "test",
+    createdAt: eveningOut, updatedAt: eveningOut,
+  }]
+  for (const direction of ["OffDuty", "Unclassified"] as const) {
+    const record = buildAttendanceRecord(person, WORK_DATE, [arrival, raw("out", direction, morningOut), raw("evening", "OffDuty", eveningOut)],
+      eveningCorrection, [leave("HO", "pm")], [], [], [], null)
+    assert.equal(record.workMode, "office")
+    assert.equal(record.effectiveSignIn, arrival.punch.punchTime)
+    assert.equal(record.effectiveSignOut, morningOut)
+    assert.equal(record.derivedHomeOfficeUnits, 0)
+    assert.equal(record.leave[0].units, 0.5)
+    assert.equal(attendanceDayUnits(record, "2026-11-03"), 1)
+  }
+  const missing = buildAttendanceRecord(person, WORK_DATE, [arrival], eveningCorrection, [leave("HO", "pm")], [], [], [], null)
+  assert.equal(missing.effectiveSignIn, arrival.punch.punchTime)
+  assert.equal(missing.effectiveSignOut, null)
+  assert.equal(missing.status, "incomplete")
+  assert.equal(missing.overrides[0].punchTime, eveningOut, "existing correction remains stored, not relabelled")
+})
+
 test("day-edit API sends a new opposite-half entry without reusing an existing row ID", async () => {
   const calls: Array<Record<string, unknown>> = []
   const client = { async rpc(name: string, args: Record<string, unknown>) {
@@ -139,7 +172,9 @@ test("day-edit API still validates changed early punches and permits them while 
     /Official sign-out time cannot be earlier than 17:00/)
   assert.equal(calls, 0)
   await saveAttendanceDayEdit(client, { ...common, leavePortion: "pm", leaveCode: "ALS" }, "test")
-  assert.equal(calls, 1)
+  await saveAttendanceDayEdit(client, { ...common, leavePortion: "pm", leaveCode: "HO" }, "test")
+  await assert.rejects(saveAttendanceDayEdit(client, { ...common, leavePortion: "pm", leaveCode: "HO", signOutTime: "19:00" }, "test"), /PM home office requires a sign-out before 17:00/)
+  assert.equal(calls, 2)
 })
 
 test("day-edit API preserves a manual HOME arrangement when adding PM annual leave", async () => {

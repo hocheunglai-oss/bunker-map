@@ -530,7 +530,7 @@ function AttendanceLegend() {
       <strong>LEGEND &amp; RULES</strong>
       <p><b>ALS</b> annual leave with advance notice · <b>ALU</b> annual leave informed on the day · <b>SLM</b> sick leave with medical certificate · <b>SLR</b> sick leave without medical certificate · <b>SLX</b> sick leave outside policy.</p>
       <p><b>SPL</b> special leave · <b>MTL</b> maternity leave · <b>NPL</b> no-pay leave · <b>HOME</b> home-office attendance · <b>OS</b> overseas/business-trip attendance · <b>HOL</b> holiday attendance.</p>
-      <p>BT/BS: before 10:01 is on time, 19:00 finish, AM cutoff 11:30, PM return cutoff 16:30. AC: before 09:01 is on time, 17:30 finish, AM cutoff 11:00, PM return cutoff 15:45. Sign-out before 17:00 is not official. AC does not receive holiday-attendance credit.</p>
+      <p>BT/BS: before 10:01 is on time, 19:00 finish, AM cutoff 11:30, PM return cutoff 16:30. AC: before 09:01 is on time, 17:30 finish, AM cutoff 11:00, PM return cutoff 15:45. Sign-out before 17:00 applies only with PM leave or PM home office. AC does not receive holiday-attendance credit.</p>
     </aside>
   )
 }
@@ -647,13 +647,17 @@ function halfDayPunchValue(
   item: ApiAttendanceDailyItem,
   direction: "in" | "out",
 ) {
-  const showMorningPair =
-    direction === "in" && Boolean(absenceEntryForPortion(item, "pm"))
+  const afternoonHomeOffice = leaveEntries(item).some((entry) => entry.portion === "pm" && entry.code === "HO")
+  const showMorningPair = direction === "in" &&
+    (afternoonHomeOffice || Boolean(absenceEntryForPortion(item, "pm")))
   const showAfternoonPair =
     direction === "out" &&
     (Boolean(absenceEntryForPortion(item, "am")) || item.automaticAmLeave)
   if (!showMorningPair && !showAfternoonPair) return ""
-  return [item.effectiveSignIn, item.effectiveSignOut]
+  const signOut = showMorningPair && afternoonHomeOffice &&
+    item.effectiveSignOut && (hktTimeFromTimestamp(item.effectiveSignOut) || "17:00") >= "17:00"
+    ? null : item.effectiveSignOut
+  return [item.effectiveSignIn, signOut]
     .filter((value): value is string => Boolean(value))
     .map(displayTime)
     .join("\n")
@@ -668,13 +672,13 @@ function recordCellValue(
   if (!item) return holiday ? "PH" : ""
   const entry = leaveEntryForDirection(item, direction)
   if (entry) return entry.code
+  if (direction === "in" && item.automaticAmLeave) return "AM LEAVE"
+  const halfDayPunches = halfDayPunchValue(item, direction)
+  if (halfDayPunches) return halfDayPunches
   if (
     item.workModeSource === "leave" &&
     (item.workMode === "home-office" || item.workMode === "business-trip")
   ) return ""
-  if (direction === "in" && item.automaticAmLeave) return "AM LEAVE"
-  const halfDayPunches = halfDayPunchValue(item, direction)
-  if (halfDayPunches) return halfDayPunches
   const punch = direction === "in" ? item.effectiveSignIn : item.effectiveSignOut
   if (punch) return displayTime(punch)
   const status = String(item.status || "").toUpperCase()
@@ -702,22 +706,19 @@ function recordCellTone(
       ? styles.homeOfficeCell
       : styles.leaveCell
   }
+  if (direction === "in" && item.automaticAmLeave) return styles.leaveCell
+  if (halfDayPunchValue(item, direction)) {
+    if (direction === "in") {
+      const afternoonHomeOffice = leaveEntries(item).some((entry) => entry.portion === "pm" && entry.code === "HO")
+      if (afternoonHomeOffice && item.late) return styles.lateCell
+      return item.early ? styles.lateCell : styles.onTimeCell
+    }
+    return item.late ? styles.lateCell : styles.onTimeCell
+  }
   if (
     item.workModeSource === "leave" &&
     (item.workMode === "home-office" || item.workMode === "business-trip")
   ) return ""
-  const morningPair =
-    direction === "in" && Boolean(absenceEntryForPortion(item, "pm"))
-  if (morningPair && (item.effectiveSignIn || item.effectiveSignOut)) {
-    return item.early ? styles.lateCell : styles.onTimeCell
-  }
-  const afternoonPair =
-    direction === "out" &&
-    (Boolean(absenceEntryForPortion(item, "am")) || item.automaticAmLeave)
-  if (afternoonPair && (item.effectiveSignIn || item.effectiveSignOut)) {
-    return item.late ? styles.lateCell : styles.onTimeCell
-  }
-  if (direction === "in" && item.automaticAmLeave) return styles.leaveCell
   if (direction === "in" && item.late) return styles.lateCell
   if (direction === "in" && item.effectiveSignIn) return styles.onTimeCell
   // Every official sign-out (17:00 or later) is acceptable for display,
@@ -1346,6 +1347,12 @@ export default function AttendanceRecordClient() {
         throw new Error("That portion already has an entry. Edit its AM or PM cell separately.")
       }
       const permitsMorningSignOut = permitsAttendanceMorningSignOut(leaveDraft)
+      if (
+        leaveDraft.leaveEnabled && leaveDraft.portion === "pm" && leaveDraft.code === "HO" &&
+        leaveDraft.signOutTime !== leaveDraft.initialSignOutTime && leaveDraft.signOutTime >= "17:00"
+      ) {
+        throw new Error("PM home office requires a sign-out before 17:00.")
+      }
       if (
         leaveDraft.signOutTime &&
         leaveDraft.signOutTime !== leaveDraft.initialSignOutTime &&
@@ -2209,6 +2216,7 @@ export default function AttendanceRecordClient() {
                       ? undefined
                       : "17:00"
                   }
+                  max={leaveDraft.leaveEnabled && leaveDraft.portion === "pm" && leaveDraft.code === "HO" ? "16:59" : undefined}
                   value={leaveDraft.signOutTime}
                   onChange={(event) => setLeaveDraft((draft) => draft
                     ? { ...draft, signOutTime: event.target.value }

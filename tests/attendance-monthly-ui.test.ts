@@ -79,7 +79,7 @@ test("half-day leave stacks the working-session punches in chronological order",
   )
   assert.match(
     client,
-    /\[item\.effectiveSignIn, item\.effectiveSignOut\][\s\S]*?\.join\("\\n"\)/,
+    /\[item\.effectiveSignIn, signOut\][\s\S]*?\.join\("\\n"\)/,
   )
   assert.match(client, /return item\.early \? styles\.lateCell : styles\.onTimeCell/)
   assert.match(client, /return item\.late \? styles\.lateCell : styles\.onTimeCell/)

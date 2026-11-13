@@ -42,10 +42,13 @@ export function permitsAttendanceMorningSignOut(input: {
   code: AttendanceLeaveCode
 }) {
   return input.leaveEnabled && input.portion === "pm" &&
-    input.code !== "HO" && input.code !== "OS"
+    input.code !== "OS"
 }
 
 export function attendanceMorningSignOutHelp(otherEntries: ApiAttendanceLeaveEntry[]) {
+  if (otherEntries.some((entry) => entry.portion === "pm" && entry.code === "HO")) {
+    return "To correct a morning sign-out, edit the PM (OUT) home-office entry."
+  }
   return otherEntries.some((entry) => entry.portion === "pm" && entry.code !== "HO" && entry.code !== "OS")
     ? "To correct a morning sign-out, edit the PM (OUT) leave entry."
     : undefined
