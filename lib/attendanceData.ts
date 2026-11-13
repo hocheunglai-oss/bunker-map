@@ -2229,11 +2229,15 @@ export async function saveAttendanceDayEdit(
   const signOutTime = updateSignOut
     ? parseCorrectionTime(row.signOutTime, "Sign-out time")
     : null
-  const permitsMorningSignOut =
+  const editingPmHomeOffice = leavePortion === "pm" && leaveCode === "HO"
+  // An office-side edit can keep a separate saved PM HO row. Do not trust
+  // client-side context: the RPC checks and locks that row before any write.
+  const mayPreservePmHomeOffice = !row.leaveEnabled && (workMode === "default" || workMode === "office")
+  const permitsMorningSignOut = mayPreservePmHomeOffice || (
     row.leaveEnabled === true &&
     leavePortion === "pm" &&
-    leaveCode !== "OS"
-  if (signOutTime && leavePortion === "pm" && leaveCode === "HO" &&
+    leaveCode !== "OS")
+  if (signOutTime && editingPmHomeOffice &&
       isOfficialAttendanceSignOut(workDate, signOutTime)) {
     throw new AttendanceValidationError("PM home office requires a sign-out before 17:00.")
   }

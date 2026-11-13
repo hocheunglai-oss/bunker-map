@@ -835,7 +835,7 @@ jobs:
           const annualCases=[...readFileSync("tests/attendance-annual-confirmation-native.test.mjs","utf8").matchAll(/^test\(/gm)].length
           assert.ok(annualCases>=24,"The complete annual source/December/concurrency/restore suite must be present")
           // Six individual cases plus the two AM-HOME/PM-leave save orders.
-          const attendanceHalfDayCases=9
+          const attendanceHalfDayCases=10
           assert.match(readFileSync("tests/attendance-halfday-native.test.mjs","utf8"),/\["home-first", "leave-first"\]/)
           // Each alert SQL/actual-worker transport suite shares one owned cluster across its subcases.
           // Snapshot index proof/activation/corruption subcases share one additional cluster.
@@ -882,7 +882,7 @@ jobs:
           // Permission-group native suite includes concurrency, audit-context and rejected-preflight guards.
           const annualCases=[...readFileSync("tests/attendance-annual-confirmation-native.test.mjs","utf8").matchAll(/^test\(/gm)].length
           assert.ok(annualCases>=24,"The complete annual source/December/concurrency/restore suite must be present")
-          const attendanceHalfDayCases=9
+          const attendanceHalfDayCases=10
           assert.match(readFileSync("tests/attendance-halfday-native.test.mjs","utf8"),/\["home-first", "leave-first"\]/)
           // Twenty real-SQL and sixteen actual-worker transport alert subcases, each with its parent.
           const certificationAuditCases=15

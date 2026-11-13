@@ -192,3 +192,20 @@ test("day-edit API preserves a manual HOME arrangement when adding PM annual lea
     leaveEnabled: true, leavePortion: "pm", leaveCode: "ALS",
   }, "synthetic-editor")
 })
+
+test("office-side sign-out uses the atomic RPC without requesting a PM leave rewrite", async () => {
+  let calls = 0
+  const client = { async rpc(name: string, args: Record<string, unknown>) {
+    calls++
+    assert.equal(name, "save_attendance_day_edit")
+    assert.equal(args.p_leave_enabled, false)
+    assert.equal(args.p_existing_leave_entry_id, null)
+    assert.equal(args.p_leave_code, null)
+    assert.equal(args.p_update_sign_out, true)
+    assert.equal(args.p_sign_out_time, `${WORK_DATE}T05:00:00.000Z`)
+    return { data: {}, error: null }
+  } } as unknown as SupabaseClient
+  await saveAttendanceDayEdit(client, { personId: PERSON, workDate: WORK_DATE, workMode: "default",
+    leaveEnabled: false, updateSignOut: true, signOutTime: "13:00" }, "synthetic-editor")
+  assert.equal(calls, 1)
+})

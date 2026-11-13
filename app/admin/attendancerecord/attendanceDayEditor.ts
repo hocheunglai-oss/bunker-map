@@ -40,14 +40,29 @@ export function permitsAttendanceMorningSignOut(input: {
   leaveEnabled: boolean
   portion: AttendancePortion
   code: AttendanceLeaveCode
+  otherEntries?: ApiAttendanceLeaveEntry[]
+  workMode?: AttendanceWorkMode | "default"
 }) {
-  return input.leaveEnabled && input.portion === "pm" &&
-    input.code !== "OS"
+  return hasAttendancePmHomeOffice(input) ||
+    (input.leaveEnabled && input.portion === "pm" && input.code !== "OS")
 }
 
-export function attendanceMorningSignOutHelp(otherEntries: ApiAttendanceLeaveEntry[]) {
-  if (otherEntries.some((entry) => entry.portion === "pm" && entry.code === "HO")) {
-    return "To correct a morning sign-out, edit the PM (OUT) home-office entry."
+export function hasAttendancePmHomeOffice(input: {
+  leaveEnabled: boolean
+  portion: AttendancePortion
+  code: AttendanceLeaveCode
+  otherEntries?: ApiAttendanceLeaveEntry[]
+  workMode?: AttendanceWorkMode | "default"
+}) {
+  return input.leaveEnabled
+    ? input.portion === "pm" && input.code === "HO"
+    : (input.workMode === undefined || input.workMode === "default" || input.workMode === "office") &&
+      Boolean(input.otherEntries?.some((entry) => entry.portion === "pm" && entry.code === "HO"))
+}
+
+export function attendanceMorningSignOutHelp(otherEntries: ApiAttendanceLeaveEntry[], leaveEnabled = false) {
+  if (!leaveEnabled && otherEntries.some((entry) => entry.portion === "pm" && entry.code === "HO")) {
+    return "You can save the morning sign-out here. PM home office stays unchanged."
   }
   return otherEntries.some((entry) => entry.portion === "pm" && entry.code !== "HO" && entry.code !== "OS")
     ? "To correct a morning sign-out, edit the PM (OUT) leave entry."
