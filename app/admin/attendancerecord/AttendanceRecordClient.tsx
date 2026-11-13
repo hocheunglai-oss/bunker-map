@@ -530,7 +530,7 @@ function AttendanceLegend() {
       <strong>LEGEND &amp; RULES</strong>
       <p><b>ALS</b> annual leave with advance notice · <b>ALU</b> annual leave informed on the day · <b>SLM</b> sick leave with medical certificate · <b>SLR</b> sick leave without medical certificate · <b>SLX</b> sick leave outside policy.</p>
       <p><b>SPL</b> special leave · <b>MTL</b> maternity leave · <b>NPL</b> no-pay leave · <b>HOME</b> home-office attendance · <b>OS</b> overseas/business-trip attendance · <b>HOL</b> holiday attendance.</p>
-      <p>BT/BS: before 10:01 is on time, 19:00 finish, AM cutoff 11:30, PM return cutoff 16:30. AC: before 09:01 is on time, 17:30 finish, AM cutoff 11:00, PM return cutoff 15:45. Sign-out before 17:00 is not official. AC does not receive holiday-attendance credit.</p>
+      <p>BT/BS: before 10:01 is on time, 19:00 finish, AM cutoff 11:30, PM return cutoff 16:30. AC: before 09:01 is on time, 17:30 finish, AM cutoff 11:00, PM return cutoff 15:45. Sign-out before 17:00 applies only with PM leave or PM home office. AC does not receive holiday-attendance credit.</p>
     </aside>
   )
 }
