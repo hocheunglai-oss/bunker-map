@@ -22,7 +22,8 @@ test("a saved opposite PM absence explains where to correct its morning sign-out
     assert.equal(attendanceMorningSignOutHelp([entry("am-leave", "am", code)]), undefined)
   }
   assert.equal(attendanceMorningSignOutHelp([]), undefined)
-  assert.equal(attendanceMorningSignOutHelp([entry("pm-home", "pm", "HO")]), undefined)
+  assert.equal(attendanceMorningSignOutHelp([entry("pm-home", "pm", "HO")]),
+    "To correct a morning sign-out, edit the PM (OUT) home-office entry.")
   assert.equal(attendanceMorningSignOutHelp([entry("pm-trip", "pm", "OS")]), undefined)
   assert.equal(attendanceMorningSignOutHelp([entry("full-leave", "full", "ALS")]), undefined)
 })
@@ -84,10 +85,12 @@ test("portion choices cannot silently replace an existing other-half entry", () 
   assert.equal(attendancePortionConflicts("pm", [entry("full", "full", "HO")]), true)
 })
 
-test("editing a PM absence permits a morning sign-out; work modes do not", () => {
+test("editing PM leave or home office permits a morning sign-out, but other portions do not", () => {
   assert.equal(permitsAttendanceMorningSignOut({ leaveEnabled: true, portion: "pm", code: "ALS" }), true)
   assert.equal(permitsAttendanceMorningSignOut({ leaveEnabled: true, portion: "am", code: "ALS" }), false)
-  assert.equal(permitsAttendanceMorningSignOut({ leaveEnabled: true, portion: "pm", code: "HO" }), false)
+  assert.equal(permitsAttendanceMorningSignOut({ leaveEnabled: true, portion: "pm", code: "HO" }), true)
+  assert.equal(permitsAttendanceMorningSignOut({ leaveEnabled: true, portion: "am", code: "HO" }), false)
+  assert.equal(permitsAttendanceMorningSignOut({ leaveEnabled: true, portion: "full", code: "HO" }), false)
   assert.equal(permitsAttendanceMorningSignOut({ leaveEnabled: true, portion: "pm", code: "OS" }), false)
   assert.equal(permitsAttendanceMorningSignOut({ leaveEnabled: false, portion: "pm", code: "ALS" }), false)
 })

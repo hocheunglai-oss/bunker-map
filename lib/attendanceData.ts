@@ -717,6 +717,12 @@ export function buildAttendanceRecord(
   const recordedWorkMode = personLeaves.find(
     (entry) => entry.code === "HO" || entry.code === "OS",
   )
+  const hasPmHomeOffice = personLeaves.some((entry) => entry.portion === "pm" && entry.code === "HO")
+  const morningOffice = hasPmHomeOffice &&
+    !personLeaves.some((entry) => entry.portion !== "pm") &&
+    !workModeOverrides.some((entry) =>
+      entry.personId === person.id && entry.workDate === workDate && entry.mode !== "office",
+    )
   const {
     override: workModeOverride,
     defaultWorkMode,
@@ -728,7 +734,7 @@ export function buildAttendanceRecord(
     policies: workModePolicies,
     overrides: workModeOverrides,
     recordedCode:
-      recordedWorkMode?.code === "HO" || recordedWorkMode?.code === "OS"
+      !morningOffice && (recordedWorkMode?.code === "HO" || recordedWorkMode?.code === "OS")
         ? recordedWorkMode.code
         : null,
   })
@@ -750,22 +756,32 @@ export function buildAttendanceRecord(
   const inferredDirections = inferUnclassifiedAttendanceDirections({
     workDate,
     team,
-    hasAfternoonLeave,
-    punches,
+    hasAfternoonLeave: hasAfternoonLeave || morningOffice,
+    punches: morningOffice
+      ? punches.filter((punch) => !isOfficialAttendanceSignOut(workDate, punch.punchTime))
+      : punches,
     manualSignIn: personOverrides.find(
       (entry) => entry.action === "replace" && entry.checkType === "OnDuty",
     )?.punchTime,
   })
 
-  const effectiveTime = (checkType: AttendanceCheckType) => {
+  const effectiveTime = (checkType: AttendanceCheckType, signIn: string | null = null) => {
+    const eligible = (time: string) => {
+      if (morningOffice) {
+        const timestamp = Date.parse(time)
+        return Number.isFinite(timestamp) && hktDateFromTimestamp(timestamp) === workDate &&
+          !isOfficialAttendanceSignOut(workDate, time) &&
+          (checkType !== "OffDuty" || !signIn || timestamp > Date.parse(signIn))
+      }
+      return checkType !== "OffDuty" ||
+        hasAfternoonLeave || isOfficialAttendanceSignOut(workDate, time)
+    }
     const replacement = personOverrides.find(
       (entry) => entry.action === "replace" && entry.checkType === checkType,
     )
     if (
       replacement?.punchTime &&
-      (checkType !== "OffDuty" ||
-        hasAfternoonLeave ||
-        isOfficialAttendanceSignOut(workDate, replacement.punchTime))
+      eligible(replacement.punchTime)
     ) {
       return replacement.punchTime
     }
@@ -774,9 +790,7 @@ export function buildAttendanceRecord(
         (punch) =>
           (punch.checkType === checkType ||
             inferredDirections.get(punch.id) === checkType) &&
-          (checkType !== "OffDuty" ||
-            hasAfternoonLeave ||
-            isOfficialAttendanceSignOut(workDate, punch.punchTime)),
+          eligible(punch.punchTime),
       )
       .sort((left, right) => Date.parse(left.punchTime) - Date.parse(right.punchTime))
     if (checkType === "OnDuty") return matching[0]?.punchTime || null
@@ -784,8 +798,8 @@ export function buildAttendanceRecord(
   }
 
   const effectiveSignIn = effectiveTime("OnDuty")
-  const effectiveSignOut = effectiveTime("OffDuty")
-  const workMode = applyPhysicalAttendanceToWorkMode({
+  const effectiveSignOut = effectiveTime("OffDuty", effectiveSignIn)
+  const workMode = morningOffice ? "office" : applyPhysicalAttendanceToWorkMode({
     workMode: resolvedWorkMode,
     workModeSource,
     hasPhysicalAttendance: Boolean(effectiveSignIn || effectiveSignOut),
@@ -844,6 +858,7 @@ export function buildAttendanceRecord(
     effectiveSignIn: expectationSignIn,
     effectiveSignOut,
     required: normallyRequired && !attendanceHoliday,
+    afternoonHomeOffice: morningOffice,
   })
   let effectiveExpectation =
     workDate > today &&
@@ -880,6 +895,7 @@ export function buildAttendanceRecord(
           effectiveSignIn: expectationSignIn,
           effectiveSignOut,
           required: true,
+          afternoonHomeOffice: morningOffice,
         })
       : expectation
     effectiveExpectation = {
@@ -2216,8 +2232,11 @@ export async function saveAttendanceDayEdit(
   const permitsMorningSignOut =
     row.leaveEnabled === true &&
     leavePortion === "pm" &&
-    leaveCode !== "HO" &&
     leaveCode !== "OS"
+  if (signOutTime && leavePortion === "pm" && leaveCode === "HO" &&
+      isOfficialAttendanceSignOut(workDate, signOutTime)) {
+    throw new AttendanceValidationError("PM home office requires a sign-out before 17:00.")
+  }
   if (
     signOutTime &&
     !isOfficialAttendanceSignOut(workDate, signOutTime) &&

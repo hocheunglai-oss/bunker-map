@@ -199,6 +199,7 @@ export function deriveAttendanceExpectation(input: {
   effectiveSignIn: string | null
   effectiveSignOut: string | null
   required: boolean
+  afternoonHomeOffice?: boolean
 }) {
   const schedule = ATTENDANCE_SCHEDULES[input.team]
   const fullLeave = input.leavePortions.includes("full")
@@ -216,7 +217,7 @@ export function deriveAttendanceExpectation(input: {
       ? null
       : hktTimestampForDateAndTime(
           input.workDate,
-          afternoonLeave ? schedule.amCutoff : schedule.workEnd,
+          afternoonLeave || input.afternoonHomeOffice ? schedule.amCutoff : schedule.workEnd,
         )
   const signInLateFrom =
     signInDeadline && !morningLeave
