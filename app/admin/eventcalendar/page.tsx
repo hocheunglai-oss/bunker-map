@@ -2075,17 +2075,15 @@ export default function EventCalendarPage() {
                       <td
                         style={{ ...tdStyle, color: "var(--fc-admin-panel-text)", fontWeight: isTodayEvent ? 900 : 500 }}
                       >
-                        {cancelled && (
-                          <span className="block w-fit md:inline-block" style={{ verticalAlign: "middle", color: "var(--fc-admin-danger-text)", background: "var(--fc-admin-danger-bg)", borderRadius: "5px", padding: "2px 5px", fontSize: "11px", fontWeight: 900, marginRight: "8px" }}>
-                            CANCELLED
-                          </span>
-                        )}
-                        {canEdit ? (
-                          <button type="button" onClick={() => openEditModal(event)} style={{
-                            font: "inherit", color: "inherit", textAlign: "left", background: "transparent", border: 0,
-                            padding: 0, cursor: "pointer", textDecoration: cancelled ? "line-through" : "underline", textUnderlineOffset: "3px",
-                          }}>{event.title}</button>
-                        ) : <span style={{ textDecoration: cancelled ? "line-through" : "none" }}>{event.title}</span>}
+                        <span className={cancelled ? "inline-block max-w-[max(6rem,calc(100vw_-_14rem))] wrap-anywhere md:max-w-none" : undefined}>
+                          {canEdit ? (
+                            <button type="button" onClick={() => openEditModal(event)} style={{
+                              font: "inherit", color: "inherit", textAlign: "left", background: "transparent", border: 0,
+                              padding: 0, cursor: "pointer", maxWidth: "100%", overflowWrap: "inherit",
+                            }}>{event.title}</button>
+                          ) : <span>{event.title}</span>}
+                          {cancelled && <>{" "}<span style={{ color: "var(--fc-admin-danger-border)", fontWeight: 400, whiteSpace: "nowrap" }}>(CANCELLED)</span></>}
+                        </span>
                         {!eventVersions[event.id] && (
                           <span style={{ display: "inline-block", color: "var(--fc-admin-muted)", fontSize: "11px", marginLeft: "8px" }}>
                             NOT YET SHARED
