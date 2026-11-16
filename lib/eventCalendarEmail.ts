@@ -1,6 +1,7 @@
 import { OfficeCalendarEvent } from "@/data/eventCalendar"
 import { normalizeEmailList, sendNoticeEmail } from "@/lib/emailNotice"
 import { fcunoConnectionPolicy } from "@/config/fcunoConnections"
+import type { EventCalendarEmailAction } from "@/lib/eventCalendarProtocol"
 
 export { normalizeEmailList }
 
@@ -49,7 +50,14 @@ export function buildChangedEventEmail(event: OfficeCalendarEvent) {
   }
 }
 
-export function buildChangedEventsEmail(events: OfficeCalendarEvent[], action: "created" | "updated") {
+export function buildChangedEventsEmail(events: OfficeCalendarEvent[], action: EventCalendarEmailAction) {
+  if (action === "cancelled") {
+    const [event] = events
+    return {
+      subject: "FC Uno Event Calendar: Event Cancelled",
+      html: `<div style="font-family:Arial,Helvetica,sans-serif;color:#10243a;line-height:1.5"><h2>Event cancelled</h2><p><strong>${escapeHtml(event.title)}</strong><br />${escapeHtml(formatEventRange(event))}</p><p>This event will not take place.</p><p><a href="${EVENT_CALENDAR_URL}">Open Event Calendar</a></p></div>`,
+    }
+  }
   if (events.length === 1) return buildChangedEventEmail(events[0])
   return {
     subject: "***** Event Calendar Update",
@@ -58,8 +66,9 @@ export function buildChangedEventsEmail(events: OfficeCalendarEvent[], action: "
 }
 
 export function buildDailyReminderEmail(events: OfficeCalendarEvent[], dateText: string) {
-  const rows = events.length
-    ? events
+  const activeEvents = events.filter((event) => event.cancelled !== true)
+  const rows = activeEvents.length
+    ? activeEvents
         .map(
           (event) => `
             <tr>

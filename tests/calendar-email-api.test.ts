@@ -158,6 +158,26 @@ test("any missing or stale batch event rejects the whole notification before del
   }
 })
 
+test("cancellation notices require a saved cancellation and are not sent twice", async () => {
+  const active = event("booking", "MEETING <AM>")
+  const cancelled = { ...active, cancelled: true as const }
+  const notification = { ...eventRequest([cancelled]), action: "cancelled" }
+  const pending = harness({ snapshots: [snapshot([active])] })
+  assert.equal((await pending.request({ ...eventRequest([active]), action: "cancelled" })).status, 409)
+  assert.equal((await pending.request(notification)).status, 409)
+  assert.equal(pending.sends.length, 0)
+  const app = harness({ snapshots: [snapshot([cancelled])] })
+  assert.equal((await app.request(eventRequest([cancelled]))).status, 409)
+  assert.equal((await app.request({ ...eventRequest([cancelled, event("other")]), action: "cancelled" })).status, 400)
+  assert.equal(app.sends.length, 0)
+  assert.equal((await app.request(notification)).body.status, "delivered")
+  assert.equal((await app.request(notification)).body.status, "already_delivered")
+  assert.equal(app.sends.length, 1)
+  assert.match(app.sends[0].subject, /Event Cancelled/)
+  assert.match(app.sends[0].html, /MEETING &lt;AM&gt;/)
+  assert.match(app.sends[0].html, /will not take place/)
+})
+
 test("canonical read failure, invalid/empty recipients, and unavailable SMTP config never claim delivery", async () => {
   for (const options of [{ canonicalError: true }, { snapshots: [snapshot([event()], { emailRecipientsText: "" })] }, { snapshots: [snapshot([event()], { emailRecipientsText: "office@example.test; not-an-email" })] }, { missingConfiguration: true }]) {
     const app = harness(options)

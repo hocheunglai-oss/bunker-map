@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { validateCalendarEmailList } from "@/lib/calendarRecipients"
+import { isCalendarHoliday, type EventCalendarOperation } from "@/lib/eventCalendarProtocol"
 
 export type CalendarMutation = {
-  operation: "create" | "update" | "upsert" | "insert" | "delete" | "people" | "settings"
+  operation: EventCalendarOperation
   events?: unknown[]
   eventIds?: string[]
   expectedEventVersions?: Record<string, unknown>
@@ -175,6 +176,9 @@ function validatedIncomingEvents(value: unknown) {
     if (record.eventType !== undefined && (typeof record.eventType !== "string" || !EVENT_TYPES.has(record.eventType))) {
       throw new EventCalendarValidationError(`Event ${index + 1} has an invalid event type.`)
     }
+    if (Object.hasOwn(record, "cancelled") && (record.cancelled !== true || isCalendarHoliday(record))) {
+      throw new EventCalendarValidationError(`Event ${index + 1} has an invalid cancellation status.`)
+    }
     return event
   })
 }
@@ -307,8 +311,26 @@ export function applyEventCalendarMutation(
   if (mutation.operation === "insert" && !incomingEvents.length && !Object.hasOwn(settings, "people")) {
     throw new EventCalendarValidationError("At least one valid event is required for this calendar change.")
   }
+  if (mutation.operation !== "insert" && incomingEvents.some((event) => asRecord(event).cancelled === true)) {
+    throw new EventCalendarValidationError("Use Cancel Event to mark a saved event as cancelled.")
+  }
 
-  if (mutation.operation === "create" || mutation.operation === "update" || mutation.operation === "upsert") {
+  if (mutation.operation === "cancel") {
+    if (requestedEventIds.length !== 1 || incomingEvents.length) {
+      throw new EventCalendarValidationError("Select one saved event to cancel.")
+    }
+    const [id] = requestedEventIds
+    const existing = rebuildEventIndex().get(id)
+    if (!existing || blockedIds.has(id) || expectedVersions[id] !== getEventCalendarRecordVersion(existing.event)) {
+      conflict(current, "This event changed or was removed. Reopen the latest version before cancelling.")
+    }
+    const event = asRecord(existing.event)
+    if (isCalendarHoliday(event)) {
+      throw new EventCalendarValidationError("Public holidays cannot be cancelled here. Manage them in Calendar Settings.")
+    }
+    if (event.cancelled === true) conflict(current, "This event is already cancelled.")
+    events[existing.index] = { ...event, cancelled: true }
+  } else if (mutation.operation === "create" || mutation.operation === "update" || mutation.operation === "upsert") {
     const eventIndex = rebuildEventIndex()
 
     for (const incomingEvent of incomingEvents) {
@@ -338,6 +360,7 @@ export function applyEventCalendarMutation(
       }
 
       if (recordsEqual(existing.event, incomingEvent)) continue
+      if (asRecord(existing.event).cancelled === true) conflict(current, "This event is cancelled and cannot be edited.")
       if (!expectedVersions[id] || expectedVersions[id] !== getEventCalendarRecordVersion(existing.event)) {
         conflict(current)
       }

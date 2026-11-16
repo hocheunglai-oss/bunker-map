@@ -67,6 +67,16 @@ test("actual CAS mutation envelopes remain compatible, including independently m
   assert.deepEqual((next as typeof current).people, ["CY"])
 })
 
+test("cancel acknowledgement proves only the cancellation marker was added to the reviewed event", async () => {
+  const current = payload()
+  const cancelled = { ...event, cancelled: true as const }
+  const input = { operation: "cancel" as const, events: [], eventIds: [event.id], settings: {}, expectedEventVersions: getEventCalendarEventVersions(current) }
+  await parseEventCalendarResponse({ success: true, ...envelope({ ...current, events: [cancelled] }) }, input)
+  for (const value of [current, { ...current, events: [] }, { ...current, events: [{ ...cancelled, title: "Changed title" }] }, { ...current, events: [cancelled], deletedEventIds: [event.id] }]) {
+    await assert.rejects(parseEventCalendarResponse({ success: true, ...envelope(value) }, input))
+  }
+})
+
 test("1001-event SHA verification is parallel and measured locally without a hosted latency claim", async t => {
   const value = { ...payload(), events: Array.from({ length: 1001 }, (_, index) => ({ ...event, id: `synthetic-${index}`, title: `SYNTHETIC EVENT ${index} 中文` })) }
   const start = performance.now(), result = await parseEventCalendarResponse(envelope(value))
@@ -108,7 +118,7 @@ test("actual GET refuses malformed shared JSON before200, keeps null/empty legac
 
 test("client applies only decoded canonical replies and keeps refresh ownership guards after async hashes", () => {
   const source = readFileSync(new URL("../app/admin/eventcalendar/page.tsx", import.meta.url), "utf8")
-  assert.match(source, /await parseEventCalendarResponse\(payload, \{ operation, events: mutationEvents, eventIds, settings \}\)/)
+  assert.match(source, /await parseEventCalendarResponse\(payload, \{ operation, events: mutationEvents, eventIds, settings, expectedEventVersions \}\)/)
   assert.match(source, /const canonical = await parseEventCalendarResponse\(data\)[\s\S]*?requestSequence !== refreshRequestSequenceRef.current[\s\S]*?applyCanonicalCalendarPayload\(canonical\)/)
   assert.match(source, /Calendar refresh unavailable\. Showing the last verified calendar; your unsaved changes have been kept/)
 })

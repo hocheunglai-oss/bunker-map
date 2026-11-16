@@ -17,7 +17,7 @@ import {
   getEventCalendarStoreVersion,
   mutateEventCalendarStore,
 } from "@/lib/eventCalendarStore"
-import { EVENT_CALENDAR_PROTOCOL_VERSION } from "@/lib/eventCalendarProtocol"
+import { EVENT_CALENDAR_PROTOCOL_VERSION, isEventCalendarOperation } from "@/lib/eventCalendarProtocol"
 import { validateEventCalendarPayload } from "@/lib/eventCalendarResponse"
 import { TASK_CALENDAR_PROTOCOL_VERSION, TaskCalendarValidationError, validateTaskCalendarTask } from "@/data/taskCalendar"
 import { getTaskCalendarVersions, mutateTaskCalendarStore, TaskCalendarConflictError } from "@/lib/taskCalendarStore"
@@ -199,8 +199,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ key: 
       }, { status: 409 })
     }
     const operation = typeof body.operation === "string" ? body.operation : ""
-    if (!['create', 'update', 'upsert', 'insert', 'delete', 'people', 'settings'].includes(operation)) {
+    if (!isEventCalendarOperation(operation)) {
       return NextResponse.json({ message: "Unknown Event Calendar mutation." }, { status: 400 })
+    }
+    if (Array.isArray(body.events) && body.events.some((event) => Object.hasOwn(asRecord(event), "cancelled"))) {
+      throw new EventCalendarValidationError("Use Cancel Event to mark a saved event as cancelled.")
     }
 
     const supabase = session
@@ -210,7 +213,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ key: 
         )
       : getSupabaseClient()
     const data = await mutateEventCalendarStore(supabase, {
-      operation: operation as "create" | "update" | "upsert" | "insert" | "delete" | "people" | "settings",
+      operation,
       events: Array.isArray(body.events) ? body.events : [],
       eventIds: normalizeStringList(body.eventIds),
       expectedEventVersions: asRecord(body.expectedEventVersions),

@@ -48,7 +48,7 @@ function isOfficeCalendarEvent(value: unknown): value is OfficeCalendarEvent {
 }
 
 function isMeetingRoomEvent(event: OfficeCalendarEvent) {
-  return event.eventType === "Meeting Room" || event.eventType === "Meeting"
+  return event.cancelled !== true && (event.eventType === "Meeting Room" || event.eventType === "Meeting")
 }
 
 type CanonicalGoogleState = {
@@ -154,7 +154,7 @@ async function reconcileGoogleEvent(
 
   if (!event) {
     for (const googleEvent of existing) {
-      await calendar.events.delete({ calendarId, eventId: googleEvent.id as string })
+      await calendar.events.delete({ calendarId, eventId: googleEvent.id as string, sendUpdates: "none" })
       deleted += 1
     }
     return { inserted, updated, deleted }
