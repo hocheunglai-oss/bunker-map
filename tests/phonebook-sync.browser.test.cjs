@@ -235,6 +235,23 @@ async function main() {
     console.log("PASS: an open page clears a delayed save warning only after verified CardDAV readback")
 
     await reset({ clock: true })
+    await selectCompany()
+    await page.evaluate(() => { window.__phonebookSyncHarness.syncPlan.push({ failedIds: ["synthetic-contact-a", "synthetic-contact-b"] }) })
+    await syncCompany()
+    await page.getByText(/2 contacts are awaiting verification/).waitFor()
+    const attemptedWrites = (await requests(page)).length
+    await page.evaluate(() => { window.__phonebookSyncHarness.verifiedRetryIds = ["synthetic-contact-a"] })
+    await page.clock.fastForward(31_000)
+    await page.getByText(/1 contact is awaiting verification/).waitFor()
+    assert.deepEqual((await retries(page)).map(({ id }) => id), ["synthetic-contact-b"])
+    await page.evaluate(() => { window.__phonebookSyncHarness.verifiedRetryIds = ["synthetic-contact-b"] })
+    await page.clock.fastForward(31_000)
+    await page.getByText("CardDAV verified the latest contact changes.", { exact: true }).waitFor()
+    assert.deepEqual(await retries(page), [])
+    assert.equal((await requests(page)).length, attemptedWrites)
+    console.log("PASS: an open page updates the pending count as a batch finishes")
+
+    await reset({ clock: true })
     await page.evaluate((key) => {
       const ids = ["synthetic-contact-a", "synthetic-contact-b", "synthetic-contact-c"]
       localStorage.setItem(key, JSON.stringify(ids.map((id) => ({ id, operation: "upsert", token: id }))))

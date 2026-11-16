@@ -109,7 +109,12 @@ type CarddavRetryFeedback = {
   message: string
   entries: Map<string, PendingPhonebookSync>
   nextId?: string
+  pendingPrefix?: string
   verifiedMessage: string
+}
+
+function carddavPendingMessage(prefix: string, count: number) {
+  return `${prefix} ${count} ${count === 1 ? "contact is" : "contacts are"} awaiting verification.`
 }
 
 type ChangeLogEntry = {
@@ -1150,13 +1155,21 @@ export default function PhonebookPage() {
       else nextCarddavRetryIdRef.current = followingId
       const verifiedIds = await checkPhonebookSyncRetries(localStorage, batch, fetch, controller.signal)
       if (!feedback || carddavRetryFeedbackRef.current !== feedback || controller.signal.aborted) return
+      const previousSize = feedback.entries.size
       for (const id of verifiedIds) feedback.entries.delete(id)
-      if (feedback.entries.size === 0) {
-        carddavRetryFeedbackRef.current = null
-        setMessage((current) => contactMessageEpochRef.current === feedback.epoch && !contactSaveTokenRef.current && current === feedback.message
-          ? feedback.verifiedMessage
-          : current)
+      const remaining = feedback.entries.size
+      if (remaining === previousSize) return
+      let updatedMessage = feedback.verifiedMessage
+      if (remaining) {
+        if (!feedback.pendingPrefix) return
+        updatedMessage = carddavPendingMessage(feedback.pendingPrefix, remaining)
       }
+      const previousMessage = feedback.message
+      feedback.message = updatedMessage
+      if (!remaining) carddavRetryFeedbackRef.current = null
+      setMessage((current) => contactMessageEpochRef.current === feedback.epoch && !contactSaveTokenRef.current && current === previousMessage
+        ? updatedMessage
+        : current)
     } catch {
       // Keep the retry information and visible feedback if checking fails.
     } finally {
@@ -2418,7 +2431,7 @@ export default function PhonebookPage() {
     },
   ) {
     const messageEpoch = contactMessageEpochRef.current
-    const setSyncMessage = (nextMessage: string, pending?: PendingPhonebookSync[]) => {
+    const setSyncMessage = (nextMessage: string, pending?: PendingPhonebookSync[], pendingPrefix?: string) => {
       // An older job still finishes/records retries, but cannot acknowledge or
       // erase feedback for a newer editor or database save.
       if (contactMessageEpochRef.current !== messageEpoch || contactSaveTokenRef.current) return
@@ -2426,6 +2439,7 @@ export default function PhonebookPage() {
         epoch: messageEpoch,
         message: nextMessage,
         entries: new Map(pending.map((entry) => [entry.id, entry])),
+        pendingPrefix,
         verifiedMessage: options?.backgroundSuccessMessage || "CardDAV verified the latest contact changes.",
       } : null
       setMessage(nextMessage)
@@ -2476,9 +2490,11 @@ export default function PhonebookPage() {
         if (result.failed.length > 0) {
           const detail = result.failed[0].error || result.failed[0].label
           const failedIds = new Set(result.failed.map(({ id }) => id))
+          const prefix = options?.failureMessage || "CardDAV sync was not fully verified."
           setSyncMessage(
-            `${options?.failureMessage || "CardDAV sync was not fully verified."} ${failedIds.size} ${failedIds.size === 1 ? "contact is" : "contacts are"} awaiting verification. ${detail}`,
+            `${carddavPendingMessage(prefix, failedIds.size)} ${detail}`,
             entries.filter(({ id }) => failedIds.has(id)),
+            prefix,
           )
           return false
         }
