@@ -3,10 +3,12 @@
 import { startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
+import { isAdminRole } from "@/lib/adminPages"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { phonebookCompanyPatch, validPhonebookCompanyVersion } from "@/lib/phonebookCompanySave"
 import { phonebookContactUndoPatch, validPhonebookContactVersion, verifiedPhonebookContactRow, phonebookContactReadResult, PHONEBOOK_CONTACT_ARCHIVE_CONFLICT, PHONEBOOK_CONTACT_SAVE_CONFLICT, PHONEBOOK_CONTACT_UNDO_CONFLICT, PHONEBOOK_CONTACT_OLD_UNDO } from "@/lib/phonebookContactWrite"
 import {
+  checkPhonebookSyncRetries,
   enqueuePhonebookSync,
   loadPhonebookSyncScope,
   readPhonebookSyncRetries,
@@ -544,7 +546,8 @@ function normalizeDialablePhone(value: string | null | undefined) {
 }
 
 export default function PhonebookPage() {
-  const { loading: adminLoading, authenticated, actorKey } = useSimpleAdminAuth()
+  const { loading: adminLoading, authenticated, actorKey, role, permissions, resetRequired } = useSimpleAdminAuth()
+  const canCheckRetries = authenticated && !resetRequired && (isAdminRole(role) || permissions?.phonebook === "edit")
   const isMobile = useIsMobile()
   const searchRef = useRef<HTMLInputElement | null>(null)
   const companyRefs = useRef<Record<string, HTMLButtonElement | null>>({})
@@ -1114,6 +1117,7 @@ export default function PhonebookPage() {
   }, [adminLoading, authenticated])
 
   const refreshCarddavCounts = useCallback(async () => {
+    if (canCheckRetries) void checkPhonebookSyncRetries(localStorage).catch(() => undefined)
     setCarddavCountLoading(true)
     try {
       const response = await fetch("/api/phonebook/carddav-sync", { cache: "no-store" })
@@ -1131,7 +1135,7 @@ export default function PhonebookPage() {
     } finally {
       setCarddavCountLoading(false)
     }
-  }, [])
+  }, [canCheckRetries])
 
   useEffect(() => {
     if (adminLoading || !authenticated) return
@@ -2342,6 +2346,7 @@ export default function PhonebookPage() {
       failureMessage?: string
       silentFailure?: boolean
       retryEntries?: PendingPhonebookSync[]
+      checkBeforeRetry?: boolean
     },
   ) {
     const messageEpoch = contactMessageEpochRef.current
@@ -2390,6 +2395,7 @@ export default function PhonebookPage() {
           entries,
           storage: localStorage,
           fullResync: fullRebuild,
+          checkBeforeRetry: options?.checkBeforeRetry,
           onProgress: (completed, total) => setContactSyncLabel(`Checking ${completed}/${total}`),
         })
         if (result.failed.length > 0) {
@@ -2397,8 +2403,7 @@ export default function PhonebookPage() {
           setSyncMessage(`${options?.failureMessage || "CardDAV sync was not fully verified."} ${result.failed.length} contact(s) remain queued for Retry Failed. ${detail}`)
           return false
         }
-        const remaining = readPhonebookSyncRetries(localStorage).length
-        setSyncMessage(`${options?.successMessage || `Verified ${result.verifiedCount} contact(s) on CardDAV.`}${remaining ? ` ${remaining} other saved operation(s) still need Retry Failed.` : ""}`)
+        setSyncMessage(options?.successMessage || `Verified ${result.verifiedCount} contact(s) on CardDAV.`)
         void refreshCarddavCounts()
         return true
       } catch (error) {
@@ -2418,7 +2423,7 @@ export default function PhonebookPage() {
     try {
       const entries = readPhonebookSyncRetries(localStorage)
       if (entries.length > 0) {
-        await syncPhoneContacts(false, null, { retryEntries: entries, successMessage: "Saved CardDAV operations were retried and verified." })
+        await syncPhoneContacts(false, null, { retryEntries: entries, checkBeforeRetry: true, successMessage: "Saved CardDAV operations verified." })
       } else {
         setMessage("No pending CardDAV operations to retry in this browser.")
       }
