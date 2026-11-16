@@ -130,7 +130,7 @@ test("actual Drive receipt writer and streamed verifier use bounded capability m
   for (const version of ["none", "creation-v1", "recovery-v2"] as const) {
     let properties: Record<string, string> = {}
     const drive = { files: { update: async (request: { requestBody: { appProperties: Record<string, string> } }) => { properties = request.requestBody.appProperties; return { data: {} } } } }
-    const contract = getContract(head, version)
+    const contract = getContract(head, version, "none", "calendar-only/v1")
     const prepared = {
       artifactPrefix: { backupRunId: "11111111-1111-4111-8111-111111111111", source: "vercel-cron", deploymentCommit: "a".repeat(40) },
       migrationHead: head, pricingSchemaVersion: version, attendanceSchemaVersion: "none", databaseEpoch: 12, inventorySha256: sha, catalogSha256: sha,
@@ -144,6 +144,12 @@ test("actual Drive receipt writer and streamed verifier use bounded capability m
     for (const [key, value] of Object.entries(properties)) assert.ok(Buffer.byteLength(key + value, "utf8") <= 124, key)
     const verified = await verify({}, { id: "owned-synthetic-file", appProperties: properties }, "Synthetic")
     assert.equal(verified.sectionCount, contract.requiredDataKeys.length)
+    assert.equal(properties.externalSourcePolicy, "calendar-only/v1")
+    const legacy = { ...properties, sectionCount: String(contract.requiredDataKeys.length + 1) }
+    delete (legacy as Record<string, string>).externalSourcePolicy
+    assert.equal((await verify({}, { id: "owned-synthetic-file", appProperties: legacy }, "Legacy")).sectionCount, contract.requiredDataKeys.length + 1)
+    await assert.rejects(verify({}, { id: "owned-synthetic-file", appProperties: { ...legacy, sectionCount: properties.sectionCount } }, "Lost scope"), /inventory contract/)
+    await assert.rejects(verify({}, { id: "owned-synthetic-file", appProperties: { ...properties, externalSourcePolicy: "unknown" } }, "Bad scope"), /external-source policy/)
     if (version === "none") {
       const historical = { ...properties }; delete historical.pricingSchemaVersion
       assert.equal((await verify({}, { id: "owned-synthetic-file", appProperties: historical }, "Historical")).sectionCount, contract.requiredDataKeys.length)
@@ -196,7 +202,7 @@ test("actual annual Drive writer and streamed health reject removed or malformed
   let downloads = 0
   const verify = bind([healthConstants, slice(health, "function asRecord", "function requireExactKeys"), slice(health, "function requireStreamBackupProperties", "function verifyBackupArtifact")].join("\n"), "verifyStreamedBackupFile", { ...shared, readDriveFileDigest: async () => { downloads++; return { uploadedFileSha256: sha, fileByteLength: 4096 } } })
   let properties: Record<string, string> = {}
-  const contract = getContract(head, "none", "annual-v1")
+  const contract = getContract(head, "none", "annual-v1", "calendar-only/v1")
   const prepared = { artifactPrefix: { backupRunId: "11111111-1111-4111-8111-111111111111", source: "vercel-cron", deploymentCommit: "a".repeat(40) },
     migrationHead: head, pricingSchemaVersion: "none", attendanceSchemaVersion: "annual-v1", databaseEpoch: 12, inventorySha256: sha, catalogSha256: sha,
     liveTableCount: contract.requiredLiveTables.length, sectionCount: contract.requiredDataKeys.length, totalRecordCount: 5,

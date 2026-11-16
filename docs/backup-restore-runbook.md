@@ -361,9 +361,15 @@ enabled a recurring schedule or monitoring. The separate
 [2026-10-26 capability](#separately-gated-recurring-media-capability--2026-10-26)
 does not retroactively expand either dated result.
 
-Google Calendar and Google Contacts remain their own live systems, although a
-current API export is included for investigation. Google Drive remains the live
-source for CCINFO file bytes; Google Cloud Storage is the independent copy.
+Google Calendar remains its own live system; the archive includes its API export.
+The FC Uno Phonebook source is Supabase, and phone sync uses CardDAV. New Drive
+JSON archives declare `externalSourcePolicy: "calendar-only/v1"` in the hashed
+header and Drive verification metadata. They do not read the retired Google
+Contacts mirror or back up unrelated contacts in that Google account. Older
+archives without the marker retain their original validation contract, including
+the Google Contacts section. This change does not delete Google contacts, edit
+existing archives, or change their normal retention. Google Drive remains the
+live source for CCINFO file bytes; Google Cloud Storage is the independent copy.
 
 ## Supabase-managed backups and PITR
 

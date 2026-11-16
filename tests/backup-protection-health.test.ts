@@ -74,7 +74,8 @@ const recordObserver = () => {
 test("normal System Health get remains read-only without an observer", async () => {
   const f = fixture()
   const health = await f.getSystemHealth()
-  assert.equal(health.checks.length, 13)
+  assert.equal(health.checks.length, 12)
+  assert.equal(health.checks.some((check) => check.id === "contacts"), false, "retired Google Contacts is no longer probed or alerted")
   assert.equal(health.checks.find((check) => check.id === "storage-media-backup")?.details?.notificationEligible, false)
   assert.equal(health.checks.find((check) => check.id === "backup")?.details?.notificationEligible, true)
   assert.doesNotMatch(JSON.stringify(health), /firstUncoveredAt|firstDueAt|fcuno.backup-protection-gaps/)

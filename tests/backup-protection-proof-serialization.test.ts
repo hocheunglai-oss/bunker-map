@@ -100,7 +100,7 @@ function fixture(options: { fault?: Fault; combinedProofFault?: CombinedProofFau
   const require = createRequire(import.meta.url)
   const google = {
     auth: { OAuth2: class { setCredentials() {} } },
-    people: () => ({ people: { connections: { async list() { googleReads++; return { data: { connections: [] } } } } } }),
+    people: () => assert.fail("An FC Uno backup must not read personal Google Contacts"),
     calendar: () => ({ events: { async list() { googleReads++; return { data: { items: [] } } } } }),
     drive: () => assert.fail("Preparing data must not publish a Drive artifact"),
   }
@@ -124,7 +124,7 @@ function fixture(options: { fault?: Fault; combinedProofFault?: CombinedProofFau
   } } }
   new Function("require", "module", "exports", "process", "fetch", code)(
     (name: string) => name.startsWith("node:") ? require(name) : (assert.ok(name in modules, name), modules[name]), loaded, loaded.exports,
-    { env: { GOOGLE_OAUTH_CLIENT_ID: "synthetic", GOOGLE_OAUTH_CLIENT_SECRET: "synthetic", GOOGLE_OAUTH_REFRESH_TOKEN: "synthetic", GOOGLE_CALENDAR_REFRESH_TOKEN: "synthetic", GOOGLE_CALENDAR_ID: "synthetic@example.invalid" } },
+    { env: { GOOGLE_OAUTH_CLIENT_ID: "synthetic", GOOGLE_OAUTH_CLIENT_SECRET: "synthetic", GOOGLE_CALENDAR_REFRESH_TOKEN: "synthetic", GOOGLE_CALENDAR_ID: "synthetic@example.invalid" } },
     () => assert.fail("No global network transport"),
   )
   return { events, calls, artifact, checkpoint,
@@ -153,7 +153,9 @@ test("actual backup builder obtains two fresh combined proofs without redundant 
   assert.equal(f.calls.get(ledgerRpc), undefined, "the template RPC's full proof replaces only its redundant direct scan")
   assert.equal(f.calls.get("get_bunker_map_backup_export_fence"), 2)
   assert.equal(f.calls.get("get_bunker_map_backup_inventory"), 2)
-  assert.equal(f.googleReads, 2)
+  assert.equal(f.googleReads, 1)
+  assert.equal(prepared.counts.googleContacts, undefined)
+  assert.equal(prepared.counts.googleCalendarEvents, 0)
   assert.equal(prepared.databaseEpoch, 7)
   assert.ok(prepared.stagingFileByteLength > 0)
   assert.equal(prepared.counts.outlookExchangeTruthLedger, 2)

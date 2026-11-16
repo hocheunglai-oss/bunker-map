@@ -324,7 +324,11 @@ const BACKUP_STREAM_REQUIRED_PROPERTIES = [
   "previousUploadedFileSha256",
 ] as const
 
-function getBackupArtifactContract(migrationHead: string, pricingSchemaVersion: PricingBackupSchemaVersion = "none", attendanceSchemaVersion: AttendanceBackupSchemaVersion = "none") {
+function getBackupArtifactContract(migrationHead: string, pricingSchemaVersion: PricingBackupSchemaVersion = "none", attendanceSchemaVersion: AttendanceBackupSchemaVersion = "none", externalSourcePolicy?: unknown) {
+  // Unmarked historical backups are still required to contain Google Contacts.
+  if (externalSourcePolicy !== undefined && externalSourcePolicy !== "calendar-only/v1") {
+    throw new Error("Unsupported backup external-source policy.")
+  }
   const tableSections = BACKUP_TABLE_SECTIONS.filter(
     (section) =>
       section.table === "price_setter_creation_receipts" ? pricingSchemaVersion !== "none" : section.table === "attendance_annual_confirmations" ? attendanceSchemaVersion === "annual-v1" : !("introducedAt" in section) || migrationHead >= section.introducedAt
@@ -340,7 +344,7 @@ function getBackupArtifactContract(migrationHead: string, pricingSchemaVersion: 
     ...(migrationHead >= ATTENDANCE_DINGTALK_ANOMALY_MIGRATION_HEAD
       ? BACKUP_PRIVATE_ATTENDANCE_SECTION_KEYS : []),
     ...BACKUP_TRUTH_SECTIONS.map(({ key }) => key),
-    ...BACKUP_EXTERNAL_SECTION_KEYS,
+    ...BACKUP_EXTERNAL_SECTION_KEYS.filter((key) => key !== "googleContacts" || externalSourcePolicy === undefined),
   ].sort()
   const requiredDataKeys = [
     ...requiredSectionKeys,
@@ -1799,7 +1803,7 @@ async function verifyStreamedBackupFile(
     `${label} latest Exchange projection snapshot SHA-256`
   )
 
-  const backupContract = getBackupArtifactContract(migrationHead, parsePricingBackupSchemaVersion(properties.pricingSchemaVersion), parseAttendanceBackupSchemaVersion(properties.attendanceSchemaVersion))
+  const backupContract = getBackupArtifactContract(migrationHead, parsePricingBackupSchemaVersion(properties.pricingSchemaVersion), parseAttendanceBackupSchemaVersion(properties.attendanceSchemaVersion), properties.externalSourcePolicy)
   if (
     sectionCount !== backupContract.requiredDataKeys.length ||
     liveTableCount < backupContract.requiredLiveTables.length ||
@@ -1857,6 +1861,9 @@ function verifyBackupArtifact(
   bytes: Buffer,
   appProperties: Record<string, string> | null | undefined
 ) {
+  if (appProperties?.externalSourcePolicy !== backup.externalSourcePolicy) {
+    throw new Error("The backup's external-source policy does not match its Drive metadata.")
+  }
   requireExactKeys(
     backup,
     [
@@ -1869,6 +1876,7 @@ function verifyBackupArtifact(
       "migrationHead",
       "deploymentCommit",
       "previousVerifiedBackup",
+      ...(Object.hasOwn(backup, "externalSourcePolicy") ? ["externalSourcePolicy"] : []),
       "databaseInventory",
       "counts",
       "data",
@@ -1934,7 +1942,7 @@ function verifyBackupArtifact(
   }
   const pricingSchema = pricingBackupSchemaFromArtifact(backup.databaseInventory)
   const attendanceSchema = attendanceBackupSchemaFromArtifact(backup.databaseInventory)
-  const backupContract = getBackupArtifactContract(migrationHead, pricingBackupSchemaVersion(pricingSchema), attendanceBackupSchemaVersion(attendanceSchema))
+  const backupContract = getBackupArtifactContract(migrationHead, pricingBackupSchemaVersion(pricingSchema), attendanceBackupSchemaVersion(attendanceSchema), backup.externalSourcePolicy)
   if (
     backup.deploymentCommit !== null &&
     !/^[0-9a-f]{7,64}$/i.test(String(backup.deploymentCommit || ""))
@@ -3114,21 +3122,6 @@ async function checkGoogleCalendar(): Promise<HealthCheckResult> {
   }
 }
 
-async function checkGoogleContacts(): Promise<HealthCheckResult> {
-  const { google } = await loadGoogleApis()
-  const people = google.people({ version: "v1", auth: await getOAuthClient("GOOGLE_OAUTH_REFRESH_TOKEN") })
-  await people.people.connections.list({
-    resourceName: "people/me",
-    pageSize: 1,
-    personFields: "names,emailAddresses",
-  })
-
-  return {
-    status: "ok",
-    message: "Google Contacts reachable",
-  }
-}
-
 function createOutlookTemplateTruthReader(): () => Promise<unknown> {
   // One complete proof per health assessment. The template verifier already
   // returns its full Exchange proof; sharing that same promise avoids a second
@@ -3417,7 +3410,6 @@ export async function getSystemHealth(options: { backupGapObserver?: BackupGapOb
     runCheck("drive-file-content-backup", "Drive File Content Backup", () => checkDriveFileContentBackup(observer), 45_000, observer),
     runCheck("storage-media-backup", "Uploaded-file Backup", checkStorageMediaBackup, 45_000),
     runCheck("calendar", "Google Calendar", checkGoogleCalendar),
-    runCheck("contacts", "Google Contacts", checkGoogleContacts),
     runCheck("exchange-truth", "Exchange Truth Chain", () => checkExchangeTruth(readTemplateTruth), OUTLOOK_TRUTH_CHECK_TIMEOUT_MS),
     runCheck(
       "outlook-template-recipient-truth",
