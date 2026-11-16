@@ -38,6 +38,31 @@ test("the pre-streaming comparison baseline is immutable, self-contained and ind
   assert.equal(source.split('"../lib/backupPricingSchema.mjs"').length,2)
 })
 
+test("the real validator accepts both historical backups and the declared no-Contacts scope, not silent omissions", () => {
+  const directory = temporary(), file = path.join(directory, "backup.json")
+  try {
+    const legacy = makeBackupFixture()
+    const { databaseInventory, counts, data, warnings, integrity, ...prefix } = structuredClone(legacy)
+    delete data.googleContacts
+    const current = rehashBackupFixture({ ...prefix, externalSourcePolicy: "calendar-only/v1", databaseInventory, counts, data, warnings, integrity })
+    for (const candidate of [legacy, current]) {
+      fs.writeFileSync(file, JSON.stringify(candidate))
+      const outcome = cli(file)
+      assert.equal(outcome.status, 0, outcome.stdout + outcome.stderr)
+    }
+    const omitted = structuredClone(current); delete omitted.externalSourcePolicy
+    const noCalendar = structuredClone(current); delete noCalendar.data.googleCalendarEvents
+    const invalidPolicy = { ...structuredClone(current), externalSourcePolicy: "unknown" }
+    const overbroad = structuredClone(current); overbroad.data.googleContacts = []
+    for (const [candidate, error] of [[omitted, /missing sections googleContacts/], [noCalendar, /missing sections googleCalendarEvents/], [invalidPolicy, /Unsupported backup external-source policy/], [overbroad, /unexpected sections googleContacts/]]) {
+      fs.writeFileSync(file, JSON.stringify(rehashBackupFixture(candidate)))
+      const outcome = cli(file)
+      assert.equal(outcome.status, 1, outcome.stdout + outcome.stderr)
+      assert.match(outcome.stdout + outcome.stderr, error)
+    }
+  } finally { fs.rmSync(directory, { recursive: true, force: true }) }
+})
+
 test("disk-backed views preserve JSON.stringify/v1 hashes, escaped UTF8, scalar normalization and derived array semantics", async () => {
   const directory = temporary(), file = path.join(directory, "values.json")
   const input = '{"schemaVersion":2,"data":{"auditLogs":[{"id":"x","escaped":"\\u00e9🛳\\n\\\"","n":-0,"exponent":1e+2,"integerKeys":{"2":"b","1":"a"}},{"id":"y","v":null},{}]},"warnings":[]}'

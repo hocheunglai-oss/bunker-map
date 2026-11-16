@@ -31,6 +31,7 @@ const DAILY_FOLDER_NAME = "Daily Supabase Backups"
 const BACKUP_SCHEMA_VERSION = 2
 const BACKUP_INTEGRITY_SCHEMA = "bunker-map-backup-integrity/v2"
 const BACKUP_FILE_SCHEMA = "bunker-map-backup/v2"
+const BACKUP_EXTERNAL_SOURCE_POLICY = "calendar-only/v1"
 const BACKUP_STREAM_VERIFICATION_SCHEMA =
   "bunker-map-backup-stream-verification/v1"
 const TRUTH_CHECKPOINT_SCHEMA = "fcuno-exchange-backup-checkpoint/v1"
@@ -399,43 +400,6 @@ async function getGoogleOAuthClient(refreshToken: string) {
   )
   auth.setCredentials({ refresh_token: refreshToken })
   return auth
-}
-
-async function streamGoogleContacts(
-  appendRows: (rows: unknown[]) => Promise<void>
-) {
-  const { google } = await loadGoogleApis()
-  const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN
-  if (!refreshToken) throw new Error("GOOGLE_OAUTH_REFRESH_TOKEN is not configured.")
-
-  const people = google.people({ version: "v1", auth: await getGoogleOAuthClient(refreshToken) })
-  let pageToken: string | undefined
-
-  do {
-    const response = await people.people.connections.list({
-      resourceName: "people/me",
-      pageSize: 1000,
-      pageToken,
-      personFields: [
-        "addresses",
-        "biographies",
-        "birthdays",
-        "emailAddresses",
-        "events",
-        "memberships",
-        "metadata",
-        "names",
-        "nicknames",
-        "organizations",
-        "phoneNumbers",
-        "photos",
-        "relations",
-        "urls",
-      ].join(","),
-    })
-    await appendRows(response.data.connections || [])
-    pageToken = response.data.nextPageToken || undefined
-  } while (pageToken)
 }
 
 async function streamGoogleCalendarEvents(
@@ -1192,6 +1156,7 @@ async function buildBackupFile(
     migrationHead: inventory.migrationHead,
     deploymentCommit: getDeploymentCommit(),
     previousVerifiedBackup,
+    externalSourcePolicy: BACKUP_EXTERNAL_SOURCE_POLICY,
     databaseInventory: {
       schema: BACKUP_INVENTORY_SCHEMA,
       liveTables: [...inventory.liveTables].sort(),
@@ -1466,22 +1431,6 @@ async function buildBackupFile(
     } catch (error) {
       throw new Error(
         `Backup failed while exporting the bounded Exchange truth evidence: ${summarizeSupabaseReadError(error)}`
-      )
-    }
-
-    try {
-      await writeBackupSection(
-        writer,
-        "googleContacts",
-        isFirstSection,
-        (appendRows) => streamGoogleContacts(appendRows),
-        sections,
-        counts
-      )
-      isFirstSection = false
-    } catch (error) {
-      throw new Error(
-        `Backup failed while reading Google Contacts: ${getErrorMessage(error)}`
       )
     }
 
@@ -1937,6 +1886,7 @@ async function markBackupVerified(
         backupSchema: BACKUP_FILE_SCHEMA,
         verificationContract: BACKUP_STREAM_VERIFICATION_SCHEMA,
         verificationStatus: "complete",
+        externalSourcePolicy: BACKUP_EXTERNAL_SOURCE_POLICY,
         artifactSha256: streamed.artifactSha256,
         uploadedFileSha256: streamed.uploadedFileSha256,
         fileByteLength: String(streamed.fileByteLength),

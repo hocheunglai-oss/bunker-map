@@ -312,7 +312,10 @@ const EXCLUDED_CREDENTIAL_FIELDS = [
   "spc_users.password_hash",
 ]
 
-function getBackupContract(migrationHead, pricingSchemaVersion = "none", attendanceSchemaVersion = "none") {
+function getBackupContract(migrationHead, pricingSchemaVersion = "none", attendanceSchemaVersion = "none", externalSourcePolicy) {
+  if (externalSourcePolicy !== undefined && externalSourcePolicy !== "calendar-only/v1") {
+    throw new Error("Unsupported backup external-source policy.")
+  }
   const tableSections = TABLE_SECTIONS.filter(
     (section) =>
       section.table === "price_setter_creation_receipts" ? pricingSchemaVersion !== "none" : section.table === "attendance_annual_confirmations" ? attendanceSchemaVersion === "annual-v1" : !section.introducedAt || migrationHead >= section.introducedAt
@@ -328,7 +331,7 @@ function getBackupContract(migrationHead, pricingSchemaVersion = "none", attenda
     ...(migrationHead >= ATTENDANCE_DINGTALK_ANOMALY_MIGRATION_HEAD
       ? PRIVATE_ATTENDANCE_SECTIONS : []),
     ...TRUTH_SECTIONS,
-    ...EXTERNAL_SECTIONS,
+    ...EXTERNAL_SECTIONS.filter(({ key }) => key !== "googleContacts" || externalSourcePolicy === undefined),
   ]
   const requiredSections = sectionSpecs.map((section) => section.key)
   const expectedDataSections = [
@@ -1140,7 +1143,7 @@ function exactObjectCounts(actual, expected) {
 }
 
 function validateDatabaseInventory(backup, errors) {
-  const contract = getBackupContract(String(backup.migrationHead || ""), pricingBackupSchemaVersion(pricingBackupSchemaFromArtifact(backup.databaseInventory)), attendanceBackupSchemaVersion(attendanceBackupSchemaFromArtifact(backup.databaseInventory)))
+  const contract = getBackupContract(String(backup.migrationHead || ""), pricingBackupSchemaVersion(pricingBackupSchemaFromArtifact(backup.databaseInventory)), attendanceBackupSchemaVersion(attendanceBackupSchemaFromArtifact(backup.databaseInventory)), backup.externalSourcePolicy)
   const inventory = backup.databaseInventory
   if (!isPlainObject(inventory)) {
     addError(errors, "databaseInventory: missing or not an object")
@@ -1276,10 +1279,13 @@ function validateTopLevelAndManifest(backup, rawFile, errors, warnings) {
   }
 
   const actualTopLevelKeys = Object.keys(backup)
-  if (JSON.stringify(actualTopLevelKeys) !== JSON.stringify(TOP_LEVEL_KEYS)) {
+  const expectedTopLevelKeys = Object.hasOwn(backup, "externalSourcePolicy")
+    ? TOP_LEVEL_KEYS.flatMap((key) => key === "databaseInventory" ? ["externalSourcePolicy", key] : [key])
+    : TOP_LEVEL_KEYS
+  if (JSON.stringify(actualTopLevelKeys) !== JSON.stringify(expectedTopLevelKeys)) {
     addError(
       errors,
-      `top-level keys/order: expected ${TOP_LEVEL_KEYS.join(", ")}, found ${actualTopLevelKeys.join(", ")}`
+      `top-level keys/order: expected ${expectedTopLevelKeys.join(", ")}, found ${actualTopLevelKeys.join(", ")}`
     )
   }
 
@@ -1425,6 +1431,7 @@ function validateTopLevelAndManifest(backup, rawFile, errors, warnings) {
     migrationHead: backup.migrationHead,
     deploymentCommit: backup.deploymentCommit,
     previousVerifiedBackup: backup.previousVerifiedBackup,
+    ...(Object.hasOwn(backup, "externalSourcePolicy") ? { externalSourcePolicy: backup.externalSourcePolicy } : {}),
     databaseInventory: backup.databaseInventory,
     counts: backup.counts,
     data: backup.data,
@@ -1670,7 +1677,7 @@ function validateAttendanceDingtalkEvidence(data, migrationHead = "") {
 function validateSections(backup, errors, warnings) {
   const pricingSchemaVersion = pricingBackupSchemaVersion(pricingBackupSchemaFromArtifact(backup.databaseInventory))
   const attendanceSchemaVersion = attendanceBackupSchemaVersion(attendanceBackupSchemaFromArtifact(backup.databaseInventory))
-  const contract = getBackupContract(String(backup.migrationHead || ""), pricingSchemaVersion, attendanceSchemaVersion)
+  const contract = getBackupContract(String(backup.migrationHead || ""), pricingSchemaVersion, attendanceSchemaVersion, backup.externalSourcePolicy)
   const data = isPlainObject(backup?.data) ? backup.data : {}
   const counts = isPlainObject(backup?.counts) ? backup.counts : {}
   const dataKeys = Object.keys(data).sort()
@@ -2766,9 +2773,9 @@ const warnings = []
 const safeBackup = isPlainObject(backup) ? backup : {}
 let backupContract
 try {
-  backupContract = getBackupContract(String(safeBackup.migrationHead || ""), pricingBackupSchemaVersion(pricingBackupSchemaFromArtifact(safeBackup.databaseInventory)), attendanceBackupSchemaVersion(attendanceBackupSchemaFromArtifact(safeBackup.databaseInventory)))
+  backupContract = getBackupContract(String(safeBackup.migrationHead || ""), pricingBackupSchemaVersion(pricingBackupSchemaFromArtifact(safeBackup.databaseInventory)), attendanceBackupSchemaVersion(attendanceBackupSchemaFromArtifact(safeBackup.databaseInventory)), safeBackup.externalSourcePolicy)
 } catch (error) {
-  addError(errors, error instanceof Error ? error.message : "Backup pricing schema is invalid.")
+  addError(errors, error instanceof Error ? error.message : "Backup coverage metadata is invalid.")
   backupContract = getBackupContract(String(safeBackup.migrationHead || ""))
 }
 function runValidationStep(label, callback, fallback) {

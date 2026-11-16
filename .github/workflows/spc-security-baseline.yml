@@ -268,7 +268,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/backup-protection-*.test.ts tests/postgres-backup-maintenance.test.ts tests/backup-truth-snapshot-export.test.ts tests/backup-audit-log-export.test.ts tests/drive-file-backup-health.test.ts tests/storage-media-backup-health.test.ts tests/system-health-alerts.test.ts tests/system-health-backup-window.test.ts 2>&1 | tee backup-protection-tests.tap
+          NODE_OPTIONS=--conditions=react-server npx --no-install tsx --test tests/backup-protection-*.test.ts tests/backup-schema-consumers.test.ts tests/postgres-backup-maintenance.test.ts tests/backup-truth-snapshot-export.test.ts tests/backup-audit-log-export.test.ts tests/drive-file-backup-health.test.ts tests/storage-media-backup-health.test.ts tests/system-health-alerts.test.ts tests/system-health-backup-window.test.ts 2>&1 | tee backup-protection-tests.tap
           node --test --test-reporter=tap tests/backup-receipt-description.test.mjs 2>&1 | tee backup-receipt-description.tap
 
       - name: Verify nonretryable backup observation failures through the SDK callback

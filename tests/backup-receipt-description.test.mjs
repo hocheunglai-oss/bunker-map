@@ -15,7 +15,7 @@ const constant = name => {
   return declaration.initializer.text
 }
 const code = ts.transpileModule(fn.getText(tree), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText
-const markBackupVerified = new Function("BACKUP_FILE_SCHEMA", "BACKUP_STREAM_VERIFICATION_SCHEMA", `${code}; return markBackupVerified;`)(constant("BACKUP_FILE_SCHEMA"), constant("BACKUP_STREAM_VERIFICATION_SCHEMA"))
+const markBackupVerified = new Function("BACKUP_FILE_SCHEMA", "BACKUP_STREAM_VERIFICATION_SCHEMA", "BACKUP_EXTERNAL_SOURCE_POLICY", `${code}; return markBackupVerified;`)(constant("BACKUP_FILE_SCHEMA"), constant("BACKUP_STREAM_VERIFICATION_SCHEMA"), constant("BACKUP_EXTERNAL_SOURCE_POLICY"))
 const prepared = { artifactPrefix: { deploymentCommit: "synthetic-commit", backupRunId: "synthetic-run", source: "admin-manual" },
   truthHeadSequence: 7, truthHeadSha256: "a".repeat(64), migrationHead: "20261022092121", pricingSchemaVersion: "synthetic-pricing", attendanceSchemaVersion: "annual-v1", databaseEpoch: 4,
   inventorySha256: "b".repeat(64), catalogSha256: "c".repeat(64), liveTableCount: 12, sectionCount: 15, totalRecordCount: 27,
@@ -44,6 +44,7 @@ test("description correction preserves every backup receipt property, predecesso
       fileId: "synthetic-new-backup", supportsAllDrives: true, fields: "id,name,webViewLink,createdTime,mimeType,appProperties",
       requestBody: { description: "COPY ONLY", appProperties: {
         backupSchema: constant("BACKUP_FILE_SCHEMA"), verificationContract: constant("BACKUP_STREAM_VERIFICATION_SCHEMA"), verificationStatus: "complete",
+        externalSourcePolicy: "calendar-only/v1",
         artifactSha256: streamed.artifactSha256, uploadedFileSha256: streamed.uploadedFileSha256, fileByteLength: "12345",
         truthHeadSequence: "7", truthHeadSha256: prepared.truthHeadSha256, migrationHead: prepared.migrationHead, pricingSchemaVersion: prepared.pricingSchemaVersion,
         attendanceSchemaVersion: prepared.attendanceSchemaVersion,

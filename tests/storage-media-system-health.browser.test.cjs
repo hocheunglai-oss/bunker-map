@@ -78,6 +78,13 @@ async function main() {
               assert.ok(bounds && bounds.width > 150 && bounds.x >= 0 && bounds.x + bounds.width <= width + 1)
               states.push({ mode, dimensions, screenshot })
             }
+            await page.getByRole("button", { name: "BACK UP NOW", exact: true }).click()
+            const receipt = page.getByRole("status").filter({ hasText: "SYNTHETIC VERIFIED BACKUP" })
+            await receipt.waitFor()
+            assert.match(await receipt.innerText(), /GOOGLE CALENDAR EVENTS: 12/)
+            assert.doesNotMatch(await receipt.innerText(), /GOOGLE CONTACTS|999/)
+            await receipt.scrollIntoViewIfNeeded()
+            await page.screenshot({ path: path.join(output, `${engine}-${width}-${scheme}-backup-receipt.png`), fullPage: true })
             await page.evaluate(() => {
               const h = window.__storageMediaHealthHarness; h.auth = { ...h.auth, authenticated: false }; h.render()
             })

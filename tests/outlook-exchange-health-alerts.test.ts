@@ -176,7 +176,7 @@ function healthAssessmentHarness(options: {
   const unrelated = Object.fromEntries([
     "checkSupabase", "checkOptionalSchema", "checkAttendanceSync", "checkDriveBackup",
     "checkDriveFileContentBackup", "checkStorageMediaBackup", "checkGoogleCalendar",
-    "checkGoogleContacts", "checkExchangeConfig", "checkEmailNoticeConfig", "checkCronConfig",
+    "checkExchangeConfig", "checkEmailNoticeConfig", "checkCronConfig",
   ].map(name => [name, async () => ({ status: "ok", message: "Unrelated provider fixture" })]))
   const context = {
     ...unrelated, exports: {}, Date: Clock, setTimeout, clearTimeout,

@@ -213,7 +213,7 @@ export default function SystemHealthPage() {
               </strong>
               <span>{backupResult.file?.name || "BACKUP FILE CREATED"}</span>
               <span>
-                GOOGLE CONTACTS: {backupResult.counts?.googleContacts ?? 0} · GOOGLE CALENDAR EVENTS:{" "}
+                GOOGLE CALENDAR EVENTS:{" "}
                 {backupResult.counts?.googleCalendarEvents ?? 0} · OLDER VERIFIED FILES PERMANENTLY DELETED: {backupResult.pruned ?? 0}
               </span>
               {backupWarnings.map((warning, index) => (

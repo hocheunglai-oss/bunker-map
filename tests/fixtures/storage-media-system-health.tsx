@@ -20,10 +20,14 @@ const harness = {
 }
 declare global { interface Window { __storageMediaHealthHarness: typeof harness } }
 window.__storageMediaHealthHarness = harness
-window.fetch = async input => {
+window.fetch = async (input, init) => {
   const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, location.origin)
   if (url.origin !== location.origin) throw Error("No external requests in this fixture")
   if (url.pathname === "/api/parser-reports") return Response.json({ readyForUserReview: 0 })
+  if (url.pathname === "/api/backups/bunker-map-drive" && init?.method === "POST") {
+    return Response.json({ success: true, file: { name: "SYNTHETIC VERIFIED BACKUP" },
+      counts: { googleCalendarEvents: 12, googleContacts: 999 }, pruned: 0 })
+  }
   if (url.pathname !== "/api/admin/system-health") throw Error("Unexpected fixture API")
   harness.reads++
   return Response.json({ status: states[harness.mode].status, checkedAt: "2026-10-26T00:00:00.000Z",
