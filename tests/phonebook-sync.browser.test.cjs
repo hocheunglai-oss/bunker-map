@@ -199,6 +199,24 @@ async function main() {
     await contact(page).click()
     await button(page, "Edit").click()
     await field(page, "Mobile 1").fill("+85295556666")
+    await page.evaluate((key) => {
+      localStorage.setItem(key, JSON.stringify([
+        { id: "synthetic-contact-b", operation: "upsert", token: "old-upload" },
+        { id: "synthetic-removed-contact", operation: "delete", token: "old-deletion" },
+      ]))
+      window.__phonebookSyncHarness.verifiedRetryIds = ["synthetic-contact-b", "synthetic-removed-contact"]
+    }, RETRY_KEY)
+    await button(page, "Save").click()
+    await page.getByText("Saved and verified on CardDAV.", { exact: true }).waitFor()
+    await page.waitForFunction((key) => localStorage.getItem(key) === "[]", RETRY_KEY)
+    assert.deepEqual((await requests(page)).map((r) => r.body), [{ contactIds: ["synthetic-contact-a"] }])
+    console.log("PASS: old, verified retries clear after a subsequent save without another write")
+
+    await reset()
+    await selectCompany()
+    await contact(page).click()
+    await button(page, "Edit").click()
+    await field(page, "Mobile 1").fill("+85295556666")
     await page.evaluate(() => { window.__phonebookSyncHarness.syncPlan.push({ reject: true }) })
     await button(page, "Save").click()
     await page.getByText(/Synthetic CardDAV network failure/).waitFor()

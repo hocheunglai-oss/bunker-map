@@ -15,6 +15,7 @@ export type PhonebookSyncHarness = {
   operations: Operation[]
   contactReads: Operation[]
   syncPlan: SyncPlan[]
+  verifiedRetryIds?: string[]
   malformedContacts: boolean
   releaseSync: (() => void) | null
   activeSyncs: number
@@ -83,7 +84,11 @@ export function installPhonebookSyncHarness() {
       affected.forEach((row) => { row.company = company.name })
       return json({ company: clone(company), contactIds: affected.map((row) => row.id) })
     }
-    if (url.pathname === "/api/phonebook/carddav-sync" && method === "GET") return json({ savedContactCount: harness.contacts.length, carddavContactCount: harness.contacts.length, carddavTotalCount: harness.contacts.length + 5, carddavOtherCount: 5, carddavMatchedCount: harness.contacts.length, carddavMissingCount: 0, carddavOrphanCount: 0, ...harness.countOverrides, checkedAt: new Date().toISOString() })
+    if (url.pathname === "/api/phonebook/carddav-sync" && method === "GET") {
+      const retryIds = url.searchParams.getAll("retryContactId")
+      if (retryIds.length) return json({ verifiedIds: retryIds.filter((id) => harness.verifiedRetryIds?.includes(id)) })
+      return json({ savedContactCount: harness.contacts.length, carddavContactCount: harness.contacts.length, carddavTotalCount: harness.contacts.length + 5, carddavOtherCount: 5, carddavMatchedCount: harness.contacts.length, carddavMissingCount: 0, carddavOrphanCount: 0, ...harness.countOverrides, checkedAt: new Date().toISOString() })
+    }
     if (url.pathname === "/api/phonebook/contacts" && method === "GET") {
       if (harness.malformedContacts) return json({})
       if (url.searchParams.has("company") && harness.deferCompanyContacts) {

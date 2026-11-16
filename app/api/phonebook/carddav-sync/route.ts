@@ -5,7 +5,7 @@ import { requireAdminPagePermission, requireAdminSession } from "@/lib/adminAuth
 import { isAdminRole } from "@/lib/adminPages"
 import { observePhonebookCarddavSemanticShadow } from "@/lib/phonebookCarddavSemanticShadow"
 
-import { SYNC_BATCH_SIZE, SyncError, safeSyncError, logSyncFailure, logVerifiedContacts, requireEnv, getCardDavConfig, getCardDavAddressBookUrl, readSavedContactIds, readCardDavInventoryXml, countAddressBookCards, inspectOtherCards, validateSyncRequest, deleteCard, fetchContacts, putContact, type SyncStage, acquireCardDavWriteLease, readCardDavQueueVersions, acknowledgeCardDavQueue } from "@/lib/phonebookCarddav"
+import { SYNC_BATCH_SIZE, SyncError, safeSyncError, logSyncFailure, logVerifiedContacts, requireEnv, getCardDavConfig, getCardDavAddressBookUrl, readSavedContactIds, readCardDavInventoryXml, countAddressBookCards, inspectOtherCards, validateSyncRequest, deleteCard, fetchContacts, putContact, type SyncStage, acquireCardDavWriteLease, readCardDavQueueVersions, acknowledgeCardDavQueue, verifySettledCardDavRetries } from "@/lib/phonebookCarddav"
 
 export const maxDuration = 300
 
@@ -55,6 +55,7 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams
   const configurationRequested = params.has("configuration")
   const contentRequested = params.getAll("verifyContent").includes("1")
+  const retryIds = params.getAll("retryContactId")
   const requestStartedMonotonicMs = contentRequested ? performance.now() : 0
   try {
     if (configurationRequested) {
@@ -80,7 +81,16 @@ export async function GET(request: Request) {
         checkedAt: new Date().toISOString(),
       }, 200)
     }
-    await requireAdminPagePermission("phonebook", "view")
+    await requireAdminPagePermission("phonebook", retryIds.length ? "edit" : "view")
+    if (retryIds.length) {
+      if ([...params.keys()].some((key) => key !== "retryContactId")) {
+        return diagnosticJson({ message: "Use retryContactId without other parameters." }, 400)
+      }
+      const { contactIds } = validateSyncRequest({ contactIds: retryIds })
+      const supabase = createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), requireEnv("SUPABASE_SERVICE_ROLE_KEY"))
+      const verifiedIds = await verifySettledCardDavRetries(supabase, contactIds)
+      return diagnosticJson({ verifiedIds }, 200)
+    }
     if (contentRequested) {
       const window = fixedDiagnosticWindow(params)
       if (!window) return diagnosticJson({ message: "A current fixed content-verification window of at most 15 minutes is required." }, 400)
@@ -146,9 +156,13 @@ export async function GET(request: Request) {
   } catch (error) {
     if (error instanceof Error && ["Unauthorized", "Forbidden"].includes(error.message)) {
       const status = error.message === "Unauthorized" ? 401 : 403
-      return contentRequested || configurationRequested ? diagnosticJson({ message: error.message }, status) : NextResponse.json({ message: error.message }, { status })
+      return contentRequested || configurationRequested || retryIds.length ? diagnosticJson({ message: error.message }, status) : NextResponse.json({ message: error.message }, { status })
     }
     if (configurationRequested) return diagnosticJson({ message: "CardDAV configuration unavailable." }, 503)
+    if (retryIds.length) {
+      const safeError = safeSyncError(error, "verification")
+      return diagnosticJson({ message: safeError.message }, safeError.stage === "input" ? 400 : 503)
+    }
     if (contentRequested) return diagnosticJson({ message: "CardDAV content verification did not complete." }, 503)
     const safeError = safeSyncError(error, "verification")
     logSyncFailure(undefined, safeError)

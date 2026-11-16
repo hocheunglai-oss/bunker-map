@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import {
   acknowledgePhonebookSync,
+  checkPhonebookSyncRetries,
   enqueuePhonebookSync,
   loadPhonebookSyncScope,
   LEGACY_PHONEBOOK_SYNC_RETRY_KEY,
@@ -100,6 +101,47 @@ test("an unrelated successful upload leaves failed uploads and deletions pending
   assert.deepEqual(readPhonebookSyncRetries(storage).map(({ id, operation }) => ({ id, operation })), [
     { id: "failed-upload", operation: "upsert" }, { id: "failed-delete", operation: "delete" },
   ])
+})
+
+test("automatic verification clears only confirmed entries and leaves newer edits and larger backlogs intact", async () => {
+  const storage = memoryStorage()
+  stage(storage, ["settled", "edited-again", "next-batch"])
+  const result = await checkPhonebookSyncRetries(storage, undefined, async (url, init) => {
+    assert.equal(String(url), "/api/phonebook/carddav-sync?retryContactId=settled&retryContactId=edited-again")
+    assert.equal(init?.method, undefined)
+    stage(storage, ["edited-again"], "delete")
+    return Response.json({ verifiedIds: ["settled", "edited-again"] })
+  })
+  assert.deepEqual(result, ["settled", "edited-again"])
+  assert.deepEqual(readPhonebookSyncRetries(storage).map(({ id, operation }) => [id, operation]), [
+    ["edited-again", "delete"], ["next-batch", "upsert"],
+  ])
+  for (const response of [
+    Response.json({ verifiedIds: ["next-batch", "unexpected"] }),
+    Response.json({ verifiedIds: ["next-batch"] }, { status: 503 }),
+  ]) {
+    assert.deepEqual(await checkPhonebookSyncRetries(storage, undefined, async () => response), [])
+    assert.equal(readPhonebookSyncRetries(storage).length, 2)
+  }
+})
+
+test("manual retry reads back settled entries and writes only entries still needing delivery", async () => {
+  const storage = memoryStorage()
+  const entries = stage(storage, ["settled", "remaining"], "delete")
+  const writes: Record<string, unknown>[] = []
+  const result = await runPhonebookSync({
+    storage,
+    entries,
+    checkBeforeRetry: true,
+    fetcher: async (_url, init) => {
+      if (init?.method !== "POST") return Response.json({ verifiedIds: ["settled"] })
+      writes.push(requestBody(init))
+      return Response.json(verified(["remaining"]))
+    },
+  })
+  assert.deepEqual(writes, [{ deleteContactIds: ["remaining"] }])
+  assert.deepEqual(result, { verifiedCount: 2, failed: [] })
+  assert.deepEqual(readPhonebookSyncRetries(storage), [])
 })
 
 test("all pending operations are saved before the network request and survive network/HTTP failures", async () => {

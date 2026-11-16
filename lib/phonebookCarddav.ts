@@ -858,6 +858,47 @@ export async function fetchContacts(
   }
 }
 
+export async function verifySettledCardDavRetries(supabase: SupabaseClient, requestedIds: string[]) {
+  const ids = [...new Set(requestedIds.map((id) => id.toLowerCase()))]
+  const pending = new Set((await readCardDavQueueVersions(supabase, ids)).map((item) => item.contact_id))
+  const candidates = ids.filter((id) => !pending.has(id))
+  if (!candidates.length) return []
+
+  const { contacts } = await fetchContacts(supabase, { contactIds: candidates })
+  const byId = new Map(contacts.map((contact) => [contact.id, contact]))
+  const checks = await Promise.allSettled(candidates.map(async (id) => {
+    const contact = byId.get(id)
+    if (contact) {
+      const hash = buildContactSyncHash(contact)
+      await verifyContact(contact, hash)
+      return { id, hash }
+    }
+    const response = await cardDavRequest(cardHref(id), {
+      method: "GET",
+      headers: { "Cache-Control": "no-cache" },
+      cache: "no-store",
+    })
+    await response.body?.cancel()
+    return response.status === 404 ? { id, hash: null } : null
+  }))
+  const matches = checks.flatMap((check) => check.status === "fulfilled" && check.value ? [check.value] : [])
+  if (!matches.length) return []
+
+  // The source may have changed during the provider read. A newly queued
+  // version or a changed contact must remain eligible for delivery.
+  const matchedIds = matches.map(({ id }) => id)
+  const [current, queued] = await Promise.all([
+    fetchContacts(supabase, { contactIds: matchedIds }),
+    readCardDavQueueVersions(supabase, matchedIds),
+  ])
+  const currentHashes = new Map(current.contacts.map((contact) => [contact.id, buildContactSyncHash(contact)]))
+  const queuedIds = new Set(queued.map((item) => item.contact_id))
+  const verified = new Set(matches.filter(({ id, hash }) =>
+    !queuedIds.has(id) && (currentHashes.get(id) ?? null) === hash,
+  ).map(({ id }) => id))
+  return requestedIds.filter((id) => verified.has(id.toLowerCase()))
+}
+
 export function validateSyncRequest(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new SyncError("A phonebook sync scope is required.", "input")

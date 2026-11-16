@@ -84,6 +84,36 @@ export function acknowledgePhonebookSync(storage: RetryStorage, requested: Pendi
   writeRetries(storage, remaining)
 }
 
+// Automatic checks are limited to one batch. An explicit retry checks each
+// batch as it proceeds, including retries left by older versions of Phonebook.
+export async function checkPhonebookSyncRetries(
+  storage: RetryStorage,
+  entries = readPhonebookSyncRetries(storage).slice(0, SYNC_BATCH_SIZE),
+  fetcher: typeof fetch = fetch,
+): Promise<string[]> {
+  if (!entries.length) return []
+  const params = new URLSearchParams()
+  for (const entry of entries) params.append("retryContactId", entry.id)
+
+  let result: { verifiedIds?: unknown } | null
+  try {
+    const response = await fetcher(`/api/phonebook/carddav-sync?${params}`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(20_000),
+    })
+    if (!response.ok) return []
+    result = await response.json()
+  } catch {
+    // A missing verification response cannot acknowledge any browser entry.
+    return []
+  }
+  const ids = result?.verifiedIds
+  const requested = new Set<string>(entries.map((entry) => entry.id))
+  if (!Array.isArray(ids) || ids.some((id) => !requested.has(id)) || new Set(ids).size !== ids.length) return []
+  if (ids.length) acknowledgePhonebookSync(storage, entries, ids)
+  return ids
+}
+
 export function enqueuePhonebookSync<T>(queue: { current: Promise<unknown> }, operation: () => Promise<T>) {
   const result = queue.current.catch(() => undefined).then(operation)
   queue.current = result.catch(() => undefined)
@@ -158,6 +188,7 @@ export async function runPhonebookSync(options: {
   storage: RetryStorage
   fetcher?: typeof fetch
   fullResync?: boolean
+  checkBeforeRetry?: boolean
   onProgress?: (completed: number, total: number) => void
 }): Promise<PhonebookSyncResult> {
   const { entries, storage, onProgress } = options
@@ -197,7 +228,14 @@ export async function runPhonebookSync(options: {
     for (const operation of ["upsert", "delete"] as const) {
       const sameOperation = entries.filter((entry) => entry.operation === operation)
       for (let offset = 0; offset < sameOperation.length; offset += SYNC_BATCH_SIZE) {
-        const batch = sameOperation.slice(offset, offset + SYNC_BATCH_SIZE)
+        let batch = sameOperation.slice(offset, offset + SYNC_BATCH_SIZE)
+        if (options.checkBeforeRetry) {
+          const settled = await checkPhonebookSyncRetries(storage, batch, fetcher)
+          settled.forEach((id) => verified.add(id))
+          batch = batch.filter((entry) => !verified.has(entry.id))
+          if (settled.length) onProgress?.(verified.size + failures.size, expected.size)
+          if (!batch.length) continue
+        }
         const ids = batch.map((entry) => entry.id)
         const payload = await requestSync(fetcher, { [operation === "delete" ? "deleteContactIds" : "contactIds"]: ids })
         if (!payload.done || payload.nextCursor !== null || payload.total !== ids.length

@@ -169,8 +169,56 @@ function fixture(options: FixtureOptions = {}) {
   }))
   const get = (details = false, signal?: AbortSignal) => exports.GET!(new Request(`https://app-fixture.invalid/api/phonebook/carddav-sync${details ? "?details=1" : ""}`, { signal }))
   const diagnostic = (query: Record<string, string> = {}, rawQuery?: string) => exports.GET!(new Request(`https://app-fixture.invalid/api/phonebook/carddav-sync?${rawQuery ?? new URLSearchParams({ verifyContent: "1", ...query })}`))
-  return { post, get, diagnostic, calls, queries, logs, permissions, observations, rpcCalls, clientCreations: () => clientCreations, remote, rows, queue }
+  const checkRetries = (...ids: string[]) => diagnostic({}, new URLSearchParams(ids.map((id) => ["retryContactId", id])).toString())
+  return { post, get, diagnostic, checkRetries, calls, queries, logs, permissions, observations, rpcCalls, clientCreations: () => clientCreations, remote, rows, queue }
 }
+
+test("verifies previously delivered retries by current content or absence without writing anything", async () => {
+  const f = fixture()
+  assert.equal((await f.post({ contactIds: [id(1)] })).status, 200)
+  f.calls.length = 0
+  f.rpcCalls.length = 0
+  const response = await f.checkRetries(id(1), id(3))
+  assert.equal(response.status, 200)
+  assert.match(response.headers.get("cache-control") || "", /private, no-store/)
+  assert.deepEqual(await response.json(), { verifiedIds: [id(1), id(3)] })
+  assert.deepEqual(f.permissions.at(-1), ["phonebook", "edit"])
+  assert.deepEqual(f.calls.map(({ method }) => method), ["GET", "GET"])
+  assert.deepEqual(f.rpcCalls, [])
+  assert.deepEqual(f.queue, [])
+})
+
+test("keeps stale cards, unverified absences and newer queued versions eligible for retry", async () => {
+  let changedDuringRead = false
+  const f = fixture({ onFetch(call, _remote, rows) {
+    if (changedDuringRead && call.method === "GET" && call.contactId === id(2)) rows[1].position = "CONCURRENT EDIT"
+    return undefined
+  } })
+  assert.equal((await f.post({ contactIds: [id(1), id(2)] })).status, 200)
+  f.rows[0].position = "SAVED CHANGE"
+  f.remote.set(id(3), "BEGIN:VCARD\r\nFN:EXISTING CARD\r\nEND:VCARD")
+  assert.deepEqual(await (await f.checkRetries(id(1), id(3))).json(), { verifiedIds: [] })
+
+  changedDuringRead = true
+  assert.deepEqual(await (await f.checkRetries(id(2))).json(), { verifiedIds: [] })
+
+  f.queue.push({ contact_id: id(2), version: randomUUID() })
+  f.calls.length = 0
+  assert.deepEqual(await (await f.checkRetries(id(2))).json(), { verifiedIds: [] })
+  assert.equal(f.calls.length, 0)
+  assert.equal(f.queue.length, 1)
+})
+
+test("requires edit permission and a bounded UUID scope for retry verification", async () => {
+  const denied = fixture({ permissionError: "Forbidden" })
+  assert.equal((await denied.checkRetries(id(1))).status, 403)
+  assert.equal(denied.clientCreations(), 0)
+  const f = fixture()
+  assert.equal((await f.checkRetries("invalid")).status, 400)
+  assert.equal((await f.checkRetries(id(1), id(2), id(3))).status, 400)
+  assert.equal(f.clientCreations(), 0)
+  assert.deepEqual(f.calls, [])
+})
 
 test("read-only count reports saved contacts and distinct managed CardDAV cards", async () => {
   const f = fixture({ onFetch: (call) => call.method === "PROPFIND" ? new Response(
