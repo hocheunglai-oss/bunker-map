@@ -1,6 +1,4 @@
-// Exact GHSA-g3hv-75wg-m249 applicability evidence, not an audit replacement.
-// Keep the raw npm audit result and the security report's review state visible.
-// Changed versions, callers or parser configuration require fresh assessment.
+// Retain the tooling boundary checks after patching GHSA-g3hv-75wg-m249.
 import assert from "node:assert/strict"
 import { readFileSync, readdirSync } from "node:fs"
 import { createRequire } from "node:module"
@@ -34,7 +32,7 @@ test("all locked minimatch copies remain development-only and match the reviewed
     assert.equal(installed.version, entry.version, `${name}: installed source must match the audited lock`)
   }
   assert.equal(lock.packages[legacyPath].version, "3.1.5")
-  assert.equal(lock.packages[modernPath].version, "10.2.5")
+  assert.equal(lock.packages[modernPath].version, "11.0.1")
   const dependents = Object.entries(lock.packages).filter(([, entry]) => entry.dependencies?.minimatch)
   assert.deepEqual(dependents.map(([name]) => name).sort(), [
     "node_modules/@eslint/config-array", "node_modules/@eslint/eslintrc",

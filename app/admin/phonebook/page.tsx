@@ -11,6 +11,7 @@ import {
   checkPhonebookSyncRetries,
   enqueuePhonebookSync,
   loadPhonebookSyncScope,
+  PHONEBOOK_SYNC_BATCH_SIZE,
   readPhonebookSyncRetries,
   runPhonebookSync,
   stagePhonebookSync,
@@ -101,6 +102,16 @@ type CarddavCounts = {
   carddavOrphanCount?: number
   checkedAt: string
 }
+
+const CARDDAV_RETRY_CHECK_MS = 30_000
+type CarddavRetryFeedback = {
+  epoch: number
+  message: string
+  entries: Map<string, PendingPhonebookSync>
+  nextId?: string
+  verifiedMessage: string
+}
+
 type ChangeLogEntry = {
   id: string
   entityType: "contact" | "company"
@@ -567,6 +578,9 @@ export default function PhonebookPage() {
   const [saving, setSaving] = useState(false)
   const contactSaveTokenRef = useRef<string | null>(null)
   const contactMessageEpochRef = useRef(0)
+  const carddavRetryFeedbackRef = useRef<CarddavRetryFeedback | null>(null)
+  const carddavRetryCheckRef = useRef<AbortController | null>(null)
+  const nextCarddavRetryIdRef = useRef<string | undefined>(undefined)
   const contactOwnerKey = JSON.stringify([authenticated, actorKey])
   const contactOwnerKeyRef = useRef(contactOwnerKey)
   const contactOwnerMountedRef = useRef(true)
@@ -581,6 +595,10 @@ export default function PhonebookPage() {
       contactSaveTokenRef.current = null
       contactMessageEpochRef.current += 1
       contactOwnerMountedRef.current = false
+      carddavRetryFeedbackRef.current = null
+      carddavRetryCheckRef.current?.abort()
+      carddavRetryCheckRef.current = null
+      nextCarddavRetryIdRef.current = undefined
     }
   }, [contactOwnerKey])
   const [editing, setEditing] = useState(false)
@@ -1116,8 +1134,55 @@ export default function PhonebookPage() {
     void loadAll()
   }, [adminLoading, authenticated])
 
+  const recheckCarddavRetries = useCallback(async () => {
+    if (!canCheckRetries || !contactOwnerMountedRef.current || document.visibilityState !== "visible" || carddavRetryCheckRef.current) return
+    const controller = new AbortController()
+    carddavRetryCheckRef.current = controller
+    try {
+      const latestFeedback = carddavRetryFeedbackRef.current
+      const feedback = latestFeedback?.epoch === contactMessageEpochRef.current ? latestFeedback : null
+      const entries = feedback ? [...feedback.entries.values()] : readPhonebookSyncRetries(localStorage)
+      const nextId = feedback ? feedback.nextId : nextCarddavRetryIdRef.current
+      const start = Math.max(0, entries.findIndex(({ id }) => id === nextId))
+      const batch = entries.slice(start, start + PHONEBOOK_SYNC_BATCH_SIZE)
+      const followingId = entries[start + batch.length]?.id
+      if (feedback) feedback.nextId = followingId
+      else nextCarddavRetryIdRef.current = followingId
+      const verifiedIds = await checkPhonebookSyncRetries(localStorage, batch, fetch, controller.signal)
+      if (!feedback || carddavRetryFeedbackRef.current !== feedback || controller.signal.aborted) return
+      for (const id of verifiedIds) feedback.entries.delete(id)
+      if (feedback.entries.size === 0) {
+        carddavRetryFeedbackRef.current = null
+        setMessage((current) => contactMessageEpochRef.current === feedback.epoch && !contactSaveTokenRef.current && current === feedback.message
+          ? feedback.verifiedMessage
+          : current)
+      }
+    } catch {
+      // Keep the retry information and visible feedback if checking fails.
+    } finally {
+      if (carddavRetryCheckRef.current === controller) carddavRetryCheckRef.current = null
+    }
+  }, [canCheckRetries])
+
+  useEffect(() => {
+    if (adminLoading || !canCheckRetries) return
+    const recheck = () => {
+      if (!queuedContactSyncsRef.current) void recheckCarddavRetries()
+    }
+    const timer = window.setInterval(recheck, CARDDAV_RETRY_CHECK_MS)
+    document.addEventListener("visibilitychange", recheck)
+    window.addEventListener("online", recheck)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", recheck)
+      window.removeEventListener("online", recheck)
+      carddavRetryCheckRef.current?.abort()
+      carddavRetryCheckRef.current = null
+    }
+  }, [adminLoading, canCheckRetries, contactOwnerKey, recheckCarddavRetries])
+
   const refreshCarddavCounts = useCallback(async () => {
-    if (canCheckRetries) void checkPhonebookSyncRetries(localStorage).catch(() => undefined)
+    void recheckCarddavRetries()
     setCarddavCountLoading(true)
     try {
       const response = await fetch("/api/phonebook/carddav-sync", { cache: "no-store" })
@@ -1135,7 +1200,7 @@ export default function PhonebookPage() {
     } finally {
       setCarddavCountLoading(false)
     }
-  }, [canCheckRetries])
+  }, [recheckCarddavRetries])
 
   useEffect(() => {
     if (adminLoading || !authenticated) return
@@ -1603,6 +1668,7 @@ export default function PhonebookPage() {
             retryEntries: deleteRetries,
             successMessage: "Contact deleted and CardDAV deletion verified, but company could not be deleted.",
             failureMessage: "Contact deleted, but company could not be deleted and CardDAV deletion remains unverified.",
+            backgroundSuccessMessage: "CardDAV verified the latest contact changes. The company could not be deleted.",
           })
           return
         }
@@ -1926,6 +1992,7 @@ export default function PhonebookPage() {
           retryEntries: deleteRetries,
           successMessage: "Contacts deleted and CardDAV deletions verified, but company could not be deleted.",
           failureMessage: "Contacts deleted, but company could not be deleted and CardDAV deletions remain unverified.",
+          backgroundSuccessMessage: "CardDAV verified the latest contact changes. The company could not be deleted.",
         })
       } else {
         setMessage("Unable to delete company.")
@@ -2344,16 +2411,24 @@ export default function PhonebookPage() {
       deleteContactIds?: string[]
       successMessage?: string
       failureMessage?: string
+      backgroundSuccessMessage?: string
       silentFailure?: boolean
       retryEntries?: PendingPhonebookSync[]
       checkBeforeRetry?: boolean
     },
   ) {
     const messageEpoch = contactMessageEpochRef.current
-    const setSyncMessage = (nextMessage: string) => {
+    const setSyncMessage = (nextMessage: string, pending?: PendingPhonebookSync[]) => {
       // An older job still finishes/records retries, but cannot acknowledge or
       // erase feedback for a newer editor or database save.
-      if (contactMessageEpochRef.current === messageEpoch && !contactSaveTokenRef.current) setMessage(nextMessage)
+      if (contactMessageEpochRef.current !== messageEpoch || contactSaveTokenRef.current) return
+      carddavRetryFeedbackRef.current = pending?.length ? {
+        epoch: messageEpoch,
+        message: nextMessage,
+        entries: new Map(pending.map((entry) => [entry.id, entry])),
+        verifiedMessage: options?.backgroundSuccessMessage || "CardDAV verified the latest contact changes.",
+      } : null
+      setMessage(nextMessage)
     }
     const companyToSync = selectedCompany
     let entries: PendingPhonebookSync[] | undefined = options?.retryEntries
@@ -2400,7 +2475,11 @@ export default function PhonebookPage() {
         })
         if (result.failed.length > 0) {
           const detail = result.failed[0].error || result.failed[0].label
-          setSyncMessage(`${options?.failureMessage || "CardDAV sync was not fully verified."} ${result.failed.length} contact(s) remain queued for Retry Failed. ${detail}`)
+          const failedIds = new Set(result.failed.map(({ id }) => id))
+          setSyncMessage(
+            `${options?.failureMessage || "CardDAV sync was not fully verified."} ${failedIds.size} ${failedIds.size === 1 ? "contact is" : "contacts are"} awaiting verification. ${detail}`,
+            entries.filter(({ id }) => failedIds.has(id)),
+          )
           return false
         }
         setSyncMessage(options?.successMessage || `Verified ${result.verifiedCount} contact(s) on CardDAV.`)
@@ -2408,7 +2487,7 @@ export default function PhonebookPage() {
         return true
       } catch (error) {
         const detail = error instanceof Error ? error.message : "Unverified contacts remain queued for retry."
-        setSyncMessage(`${options?.failureMessage || "CardDAV sync was not confirmed."} ${detail}`)
+        setSyncMessage(`${options?.failureMessage || "CardDAV sync was not confirmed."} ${detail}`, entries)
         return false
       } finally {
         queuedContactSyncsRef.current -= 1
