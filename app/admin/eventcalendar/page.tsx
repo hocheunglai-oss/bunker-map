@@ -2083,17 +2083,17 @@ export default function EventCalendarPage() {
                             }}>{event.title}</button>
                           ) : <span>{event.title}</span>}
                           {cancelled && <>{" "}<span style={{ color: "var(--fc-admin-danger-border)", fontWeight: 400, whiteSpace: "nowrap" }}>(CANCELLED)</span></>}
+                          {!eventVersions[event.id] && (
+                            <span style={{ display: "inline-block", color: "var(--fc-admin-muted)", fontSize: "11px", marginLeft: "8px" }}>
+                              NOT YET SHARED
+                            </span>
+                          )}
+                          {meetingRoomBooked && (
+                            <span style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, marginLeft: "8px" }}>
+                              MEETING ROOM BOOKED
+                            </span>
+                          )}
                         </span>
-                        {!eventVersions[event.id] && (
-                          <span style={{ display: "inline-block", color: "var(--fc-admin-muted)", fontSize: "11px", marginLeft: "8px" }}>
-                            NOT YET SHARED
-                          </span>
-                        )}
-                        {meetingRoomBooked && (
-                          <span style={{ color: "var(--fc-admin-link)", fontSize: "11px", fontWeight: 900, marginLeft: "8px" }}>
-                            MEETING ROOM BOOKED
-                          </span>
-                        )}
                       </td>
                       {people.map((person) => {
                         const attending = !cancelled && event.people.includes(person)
