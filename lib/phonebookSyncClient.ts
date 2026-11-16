@@ -1,7 +1,7 @@
 export const PHONEBOOK_SYNC_RETRY_KEY = "phonebook_carddav_pending:v2"
 export const LEGACY_PHONEBOOK_SYNC_RETRY_KEY = "phonebook_last_carddav_sync_failed"
 export const PHONEBOOK_SYNC_REQUEST_TIMEOUT_MS = 220_000
-const SYNC_BATCH_SIZE = 2
+export const PHONEBOOK_SYNC_BATCH_SIZE = 2
 
 export type PhonebookSyncOperation = "upsert" | "delete"
 export type PendingPhonebookSync = {
@@ -84,22 +84,22 @@ export function acknowledgePhonebookSync(storage: RetryStorage, requested: Pendi
   writeRetries(storage, remaining)
 }
 
-// Automatic checks are limited to one batch. An explicit retry checks each
-// batch as it proceeds, including retries left by older versions of Phonebook.
 export async function checkPhonebookSyncRetries(
   storage: RetryStorage,
-  entries = readPhonebookSyncRetries(storage).slice(0, SYNC_BATCH_SIZE),
+  entries = readPhonebookSyncRetries(storage).slice(0, PHONEBOOK_SYNC_BATCH_SIZE),
   fetcher: typeof fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<string[]> {
-  if (!entries.length) return []
+  if (!entries.length || signal?.aborted) return []
   const params = new URLSearchParams()
   for (const entry of entries) params.append("retryContactId", entry.id)
 
   let result: { verifiedIds?: unknown } | null
   try {
+    const timeout = AbortSignal.timeout(20_000)
     const response = await fetcher(`/api/phonebook/carddav-sync?${params}`, {
       cache: "no-store",
-      signal: AbortSignal.timeout(20_000),
+      signal: signal && typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeout]) : timeout,
     })
     if (!response.ok) return []
     result = await response.json()
@@ -107,6 +107,7 @@ export async function checkPhonebookSyncRetries(
     // A missing verification response cannot acknowledge any browser entry.
     return []
   }
+  if (signal?.aborted) return []
   const ids = result?.verifiedIds
   const requested = new Set<string>(entries.map((entry) => entry.id))
   if (!Array.isArray(ids) || ids.some((id) => !requested.has(id)) || new Set(ids).size !== ids.length) return []
@@ -227,8 +228,8 @@ export async function runPhonebookSync(options: {
   } else {
     for (const operation of ["upsert", "delete"] as const) {
       const sameOperation = entries.filter((entry) => entry.operation === operation)
-      for (let offset = 0; offset < sameOperation.length; offset += SYNC_BATCH_SIZE) {
-        let batch = sameOperation.slice(offset, offset + SYNC_BATCH_SIZE)
+      for (let offset = 0; offset < sameOperation.length; offset += PHONEBOOK_SYNC_BATCH_SIZE) {
+        let batch = sameOperation.slice(offset, offset + PHONEBOOK_SYNC_BATCH_SIZE)
         if (options.checkBeforeRetry) {
           const settled = await checkPhonebookSyncRetries(storage, batch, fetcher)
           settled.forEach((id) => verified.add(id))

@@ -144,6 +144,18 @@ test("manual retry reads back settled entries and writes only entries still need
   assert.deepEqual(readPhonebookSyncRetries(storage), [])
 })
 
+test("a readback from a departed session cannot clear browser retries", async () => {
+  const storage = memoryStorage()
+  const entries = stage(storage, ["saved"])
+  const controller = new AbortController()
+  const verified = await checkPhonebookSyncRetries(storage, entries, async () => {
+    controller.abort()
+    return Response.json({ verifiedIds: ["saved"] })
+  }, controller.signal)
+  assert.deepEqual(verified, [])
+  assert.deepEqual(readPhonebookSyncRetries(storage), entries)
+})
+
 test("all pending operations are saved before the network request and survive network/HTTP failures", async () => {
   for (const kind of ["network", "http"] as const) {
     const storage = memoryStorage()

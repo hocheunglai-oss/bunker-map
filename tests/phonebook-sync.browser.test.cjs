@@ -63,7 +63,7 @@ async function main() {
     const blockedRequests = []
     let context
     let page
-    async function reset() {
+    async function reset({ clock = false } = {}) {
       if (context) await context.close()
       context = await browser.newContext({ viewport: { width: Number(process.env.PHONEBOOK_TEST_WIDTH || 1440), height: 1000 }, colorScheme: process.env.PHONEBOOK_TEST_SCHEME || "light" })
       await context.route("**/*", (route) => {
@@ -72,6 +72,7 @@ async function main() {
         return route.abort()
       })
       page = await context.newPage()
+      if (clock) await page.clock.install()
       page.setDefaultTimeout(8000)
       page.on("pageerror", (error) => errors.push(error.message))
       page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()) })
@@ -211,6 +212,59 @@ async function main() {
     await page.waitForFunction((key) => localStorage.getItem(key) === "[]", RETRY_KEY)
     assert.deepEqual((await requests(page)).map((r) => r.body), [{ contactIds: ["synthetic-contact-a"] }])
     console.log("PASS: old, verified retries clear after a subsequent save without another write")
+
+    await reset({ clock: true })
+    await selectCompany()
+    await contact(page).click()
+    await button(page, "Edit").click()
+    await field(page, "Mobile 1").fill("+85295556666")
+    await page.evaluate(() => { window.__phonebookSyncHarness.syncPlan.push({ failedIds: ["synthetic-contact-a"] }) })
+    await button(page, "Save").click()
+    const pendingNotice = page.getByText(/1 contact is awaiting verification/)
+    await pendingNotice.waitFor()
+    await page.clock.fastForward(31_000)
+    await page.waitForFunction(() => window.__phonebookSyncHarness.requests.some((r) => r.url.includes("retryContactId=")))
+    assert.equal(await pendingNotice.isVisible(), true)
+    assert.equal((await retries(page)).length, 1)
+    await page.evaluate(() => { window.__phonebookSyncHarness.verifiedRetryIds = ["synthetic-contact-a"] })
+    await page.clock.fastForward(31_000)
+    await page.getByText("CardDAV verified the latest contact changes.", { exact: true }).waitFor()
+    assert.equal(await pendingNotice.count(), 0)
+    assert.deepEqual(await retries(page), [])
+    assert.equal((await requests(page)).length, 1)
+    console.log("PASS: an open page clears a delayed save warning only after verified CardDAV readback")
+
+    await reset({ clock: true })
+    await selectCompany()
+    await page.evaluate(() => { window.__phonebookSyncHarness.syncPlan.push({ failedIds: ["synthetic-contact-a", "synthetic-contact-b"] }) })
+    await syncCompany()
+    await page.getByText(/2 contacts are awaiting verification/).waitFor()
+    const attemptedWrites = (await requests(page)).length
+    await page.evaluate(() => { window.__phonebookSyncHarness.verifiedRetryIds = ["synthetic-contact-a"] })
+    await page.clock.fastForward(31_000)
+    await page.getByText(/1 contact is awaiting verification/).waitFor()
+    assert.deepEqual((await retries(page)).map(({ id }) => id), ["synthetic-contact-b"])
+    await page.evaluate(() => { window.__phonebookSyncHarness.verifiedRetryIds = ["synthetic-contact-b"] })
+    await page.clock.fastForward(31_000)
+    await page.getByText("CardDAV verified the latest contact changes.", { exact: true }).waitFor()
+    assert.deepEqual(await retries(page), [])
+    assert.equal((await requests(page)).length, attemptedWrites)
+    console.log("PASS: an open page updates the pending count as a batch finishes")
+
+    await reset({ clock: true })
+    await page.evaluate((key) => {
+      const ids = ["synthetic-contact-a", "synthetic-contact-b", "synthetic-contact-c"]
+      localStorage.setItem(key, JSON.stringify(ids.map((id) => ({ id, operation: "upsert", token: id }))))
+      window.__phonebookSyncHarness.verifiedRetryIds = [ids[2]]
+    }, RETRY_KEY)
+    await page.clock.fastForward(31_000)
+    await page.waitForFunction(() => window.__phonebookSyncHarness.requests.some((r) => r.url.includes("retryContactId=")))
+    assert.equal((await retries(page)).length, 3)
+    await page.clock.fastForward(31_000)
+    await page.waitForFunction((key) => JSON.parse(localStorage.getItem(key)).length === 2, RETRY_KEY)
+    assert.deepEqual((await retries(page)).map(({ id }) => id), ["synthetic-contact-a", "synthetic-contact-b"])
+    assert.deepEqual(await requests(page), [])
+    console.log("PASS: older unresolved retries cannot hide later verified entries")
 
     await reset()
     await selectCompany()
