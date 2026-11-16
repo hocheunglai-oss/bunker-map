@@ -5,7 +5,7 @@ import { transformSync } from "esbuild"
 import ts from "typescript"
 import * as calendarStore from "../lib/eventCalendarStore"
 import * as calendarResponse from "../lib/eventCalendarResponse"
-import { EVENT_CALENDAR_PROTOCOL_VERSION } from "../lib/eventCalendarProtocol"
+import { EVENT_CALENDAR_PROTOCOL_VERSION, isEventCalendarOperation } from "../lib/eventCalendarProtocol"
 import { validateCalendarEmailList, resolveEventCalendarRecipients } from "../lib/calendarRecipients"
 
 const syntheticEvent = (title = "KEEP EVENT") => ({ id: "synthetic", title, startDate: "2026-10-12", endDate: "2026-10-12", people: ["OL"], tags: [] })
@@ -41,7 +41,7 @@ function apiHarness(options: { payload?: Record<string, unknown>; permission?: "
     "@/lib/adminAuth": { getAdminSession: async () => ({ authenticated: options.signedIn !== false }), hasAdminPagePermission: (_session: unknown, page: string, access: string) => { assert.equal(page, "event-calendar"); return options.permission !== "view" || access === "view" } },
     "@/lib/adminAudit": { createAdminAuditContext: () => ({}), createAdminAuditedSupabaseClient: () => client },
     "@/lib/eventCalendarStore": calendarStore,
-    "@/lib/eventCalendarProtocol": { EVENT_CALENDAR_PROTOCOL_VERSION },
+    "@/lib/eventCalendarProtocol": { EVENT_CALENDAR_PROTOCOL_VERSION, isEventCalendarOperation },
     "@/lib/eventCalendarResponse": calendarResponse,
     "@/data/taskCalendar": {},
     "@/lib/taskCalendarStore": {},

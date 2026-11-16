@@ -24,9 +24,10 @@ export async function POST(request: Request) {
   try {
     await requireAdminPagePermission("event-calendar", "edit")
     const body = await request.json()
-    if (!body || !["created", "updated"].includes(body.action)) return NextResponse.json({ message: "Select a valid email action." }, { status: 400 })
+    if (!body || !["created", "updated", "cancelled"].includes(body.action)) return NextResponse.json({ message: "Select a valid email action." }, { status: 400 })
     const requested: unknown[] = Array.isArray(body.events) ? body.events : [body.event]
-    if (!requested.length || requested.length > 100 || !requested.every(isOfficeCalendarEvent) || new Set(requested.map((event) => event.id)).size !== requested.length) {
+    if (!requested.length || requested.length > 100 || (body.action === "cancelled" && requested.length !== 1) ||
+      !requested.every(isOfficeCalendarEvent) || new Set(requested.map((event) => event.id)).size !== requested.length) {
       return NextResponse.json({ message: "Supply between 1 and 100 distinct saved events." }, { status: 400 })
     }
     const requestedEvents = requested as OfficeCalendarEvent[]
@@ -46,6 +47,9 @@ export async function POST(request: Request) {
     for (const [id, version] of versions) {
       const event = latest.events.find((candidate) => candidate.id === id)
       if (!event || getEventCalendarRecordVersion(event) !== version) return NextResponse.json({ message: "An event changed while its email was being prepared. No email was sent." }, { status: 409 })
+      if ((event.cancelled === true) !== (body.action === "cancelled")) {
+        return NextResponse.json({ message: "The requested email does not match the saved event status. No email was sent." }, { status: 409 })
+      }
       events.push(event)
     }
     let recipients: string[]

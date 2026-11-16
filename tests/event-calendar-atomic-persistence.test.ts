@@ -437,6 +437,29 @@ test("Google reconciliation and event email use committed server-side calendar s
   assert.doesNotMatch(eventCalendarPage, /\{syncStatus\}/)
 })
 
+test("cancellation only marks the reviewed canonical event and cannot be mistaken for deletion or undone by editing", () => {
+  const booked = { ...event("booked", "INTERNAL MEETING", ["OL"]), eventType: "Meeting Room" }
+  const other = event("other", "OTHER EVENT")
+  const initial = { events: [booked, other], deletedEventIds: ["prior"], emailRecipientsText: "office@example.test" }
+  const expectedEventVersions = getEventCalendarEventVersions(initial)
+  const cancel = { operation: "cancel" as const, eventIds: [booked.id], expectedEventVersions }
+  const cancelled = applyEventCalendarMutation(initial, cancel)
+  assert.deepEqual(cancelled.events, [{ ...booked, cancelled: true }, other])
+  assert.deepEqual(cancelled.deletedEventIds, ["prior"])
+  assert.equal((cancelled as Record<string, unknown>).emailRecipientsText, initial.emailRecipientsText)
+  assert.throws(() => applyEventCalendarMutation(cancelled, cancel), EventCalendarConflictError)
+  assert.throws(() => applyEventCalendarMutation(cancelled, { ...cancel, expectedEventVersions: getEventCalendarEventVersions(cancelled) }), /already cancelled/)
+  assert.throws(() => applyEventCalendarMutation(initial, { ...cancel, expectedEventVersions: {} }), EventCalendarConflictError)
+  assert.throws(() => applyEventCalendarMutation(initial, { ...cancel, eventIds: [booked.id, other.id] }), EventCalendarValidationError)
+  assert.throws(() => applyEventCalendarMutation(initial, { ...cancel, events: [{ ...booked, title: "FORGED" }] }), EventCalendarValidationError)
+  const updateVersion = getEventCalendarEventVersions(cancelled)
+  assert.throws(() => applyEventCalendarMutation(cancelled, { operation: "update", events: [booked], expectedEventVersions: updateVersion }), /cancelled and cannot be edited/)
+  assert.throws(() => applyEventCalendarMutation(initial, { operation: "update", events: [{ ...booked, cancelled: true }], expectedEventVersions }), /Use Cancel Event/)
+  assert.deepEqual(applyEventCalendarMutation(cancelled, { operation: "delete", eventIds: [booked.id], expectedEventVersions: updateVersion }).events, [other])
+  const holiday = { events: [{ ...booked, title: "HOLIDAY ATTENDANCE - HK" }] }
+  assert.throws(() => applyEventCalendarMutation(holiday, { ...cancel, expectedEventVersions: getEventCalendarEventVersions(holiday) }), /Public holidays/)
+})
+
 test("calendar commits enqueue Google sync atomically and snapshot audit undo is blocked", () => {
   const outbox = source("../supabase/migrations/20260811125141_event_calendar_google_sync_outbox.sql")
   const serializedOutbox = source("../supabase/migrations/20260811130444_serialize_event_calendar_google_sync_jobs.sql")

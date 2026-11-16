@@ -7,6 +7,7 @@ export type OfficeCalendarEvent = {
   uncertainPeople?: string[]
   tags: string[]
   eventType?: "Public Holiday" | "Leave or Travel" | "Meeting" | "Meeting Room" | "Unclassified"
+  cancelled?: true
   sourceRow?: number
 }
 

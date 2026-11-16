@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { createRequire } from "node:module"
+import { readFileSync } from "node:fs"
 import { build } from "esbuild"
 import { setupNativeCcinfo, literal } from "./fixtures/native-postgres-ccinfo.mjs"
 import { parseEventCalendarResponse } from "../lib/eventCalendarResponse.ts"
@@ -44,4 +45,27 @@ test("native PostgreSQL: actual calendar GET and decoder preserve valid/empty/ab
     assert.deepEqual(await f.owner.one("select to_jsonb(t) from public.office_calendar_store t where key='event-calendar';"),before)
     t.diagnostic(`Actual read-only API reads ${log.reads}; local isolated CAS writes ${log.writes}; stale write refused`)
   }finally{await f.close();t.diagnostic("Owned sessions closed and native server stopped.")}
+})
+
+test("native PostgreSQL: cancellation keeps the event and atomically queues only its room release",{timeout:60000},async t=>{
+  const f=await setupNativeCcinfo(`${fixture} create role anon; create role authenticated;`)
+  try {
+    for (const migration of ["20260811125141_event_calendar_google_sync_outbox.sql","20260811130444_serialize_event_calendar_google_sync_jobs.sql"]) {
+      await f.owner.query(readFileSync(new URL(`../supabase/migrations/${migration}`,import.meta.url),"utf8"))
+    }
+    const original=initial()
+    original.events[0].eventType="Meeting Room"
+    original.events.push({...original.events[0],id:"other-meeting"})
+    await f.owner.query(`insert into public.office_calendar_store(key,payload)values('event-calendar',${literal(JSON.stringify(original))}::jsonb); delete from public.event_calendar_google_sync_jobs;`)
+    const writer=adapter(await f.session("calendar-cancellation-writer"),{reads:0,writes:0})
+    const versions=getEventCalendarEventVersions(original)
+    const operation={operation:"cancel",eventIds:["synthetic"],expectedEventVersions:versions}
+    const after=await mutateEventCalendarStore(writer,operation)
+    await parseEventCalendarResponse({success:true,...envelope(after)},{...operation,events:[],settings:{}})
+    assert.deepEqual(after.events,[{...original.events[0],cancelled:true},original.events[1]])
+    assert.deepEqual(after.deletedEventIds,[])
+    assert.deepEqual(await f.owner.one("select coalesce(jsonb_agg(event_id order by event_id),'[]'::jsonb) from public.event_calendar_google_sync_jobs;"),["synthetic"])
+    assert.deepEqual(await f.owner.one("select coalesce(jsonb_agg(event_id order by event_id),'[]'::jsonb) from public.claim_event_calendar_google_sync_jobs(array['synthetic'],12,'test-worker');"),["synthetic"])
+    await assert.rejects(mutateEventCalendarStore(writer,operation),error=>error.code==="EVENT_CALENDAR_CONFLICT")
+  } finally { await f.close(); t.diagnostic("Owned sessions closed and native server stopped.") }
 })

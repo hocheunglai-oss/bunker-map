@@ -5,7 +5,7 @@ import {
   OfficeCalendarEvent,
   officeCalendarSeedEvents,
 } from "@/data/eventCalendar"
-import { EVENT_CALENDAR_PROTOCOL_VERSION } from "@/lib/eventCalendarProtocol"
+import { EVENT_CALENDAR_PROTOCOL_VERSION, isCalendarHoliday, type EventCalendarEmailAction, type EventCalendarOperation } from "@/lib/eventCalendarProtocol"
 import { parseEventCalendarResponse, type EventCalendarResponse } from "@/lib/eventCalendarResponse"
 import { validateCalendarEmailList } from "@/lib/calendarRecipients"
 import { readClientStorage, writeClientStorage } from "@/lib/clientStorage"
@@ -23,7 +23,7 @@ type GoogleCalendarEvent = MeetingRoomCalendarEvent
 type EmailPromptState = {
   events: ManagedEvent[]
   eventVersions: Record<string, string>
-  action: "created" | "updated"
+  action: EventCalendarEmailAction
   status: "idle" | "sending" | "sent" | "failed"
   error: string
 } | null
@@ -370,9 +370,13 @@ function inferCategory(event: Pick<ManagedEvent, "title" | "eventType">): EventC
   return "Unclassified"
 }
 
-function isMeetingRoomBooked(event: Pick<ManagedEvent, "eventType">) {
+function hasMeetingRoomType(event: Pick<ManagedEvent, "eventType">) {
   const storedEventType = event.eventType as EventCategory | "Meeting" | undefined
   return storedEventType === "Meeting Room" || storedEventType === "Meeting"
+}
+
+function isMeetingRoomBooked(event: Pick<ManagedEvent, "eventType" | "cancelled">) {
+  return event.cancelled !== true && hasMeetingRoomType(event)
 }
 
 function normalizeStoredEvents(value: unknown): ManagedEvent[] {
@@ -875,7 +879,7 @@ export default function EventCalendarPage() {
     }
   }, [])
 
-  async function sendEventEmail(notificationEvents: ManagedEvent[], versions: Record<string, string>, action: "created" | "updated") {
+  async function sendEventEmail(notificationEvents: ManagedEvent[], versions: Record<string, string>, action: EventCalendarEmailAction) {
     const owner = componentLifetimeRef.current.sequence
     if (!ownsCalendar(owner)) throw new Error("This calendar is no longer active.")
     if (!canEdit) throw new Error("You have view-only access to this calendar.")
@@ -896,7 +900,7 @@ export default function EventCalendarPage() {
   }
 
   async function mutateCalendar(
-    operation: "create" | "update" | "upsert" | "insert" | "delete" | "people" | "settings",
+    operation: EventCalendarOperation,
     mutationEvents: ManagedEvent[] = [],
     eventIds: string[] = [],
     settings: Record<string, unknown> = {},
@@ -952,15 +956,15 @@ export default function EventCalendarPage() {
         throw new Error(message)
       }
 
-      const canonical = await parseEventCalendarResponse(payload, { operation, events: mutationEvents, eventIds, settings })
+      const canonical = await parseEventCalendarResponse(payload, { operation, events: mutationEvents, eventIds, settings, expectedEventVersions })
       if (!ownsCalendar(owner)) throw new Error("This calendar is no longer active. Check the saved result in the current account.")
       if (!applyCanonicalCalendarPayload(canonical)) throw new Error("The saved calendar could not be verified. Your unsaved changes have been kept. Refresh the page to check the result.")
 
       setCalendarLoadError("")
       setCalendarRefreshError("")
       setSaveStatus("Shared calendar saved")
-      if (["create", "update", "delete"].includes(operation)) {
-        const affectedEventIds = operation === "delete"
+      if (["create", "update", "delete", "cancel"].includes(operation)) {
+        const affectedEventIds = operation === "delete" || operation === "cancel"
           ? eventIds
           : mutationEvents.map((event) => event.id)
         void syncCanonicalGoogleCalendar(affectedEventIds, owner)
@@ -1090,7 +1094,7 @@ export default function EventCalendarPage() {
   async function saveDraftEvent() {
     const owner = componentLifetimeRef.current.sequence
     if (!ownsCalendar(owner)) return
-    if (!canEdit || calendarMutationPendingRef.current || eventSubmissionPendingRef.current || !eventModalMode) return
+    if (!canEdit || calendarMutationPendingRef.current || eventSubmissionPendingRef.current || !eventModalMode || draftEvent.cancelled) return
     if (!isValidCalendarDate(draftEvent.startDate) || !isValidCalendarDate(draftEvent.endDate) || draftEvent.endDate < draftEvent.startDate) {
       window.alert("Enter a valid start and end date. The end must not be before the start.")
       return
@@ -1546,6 +1550,31 @@ export default function EventCalendarPage() {
     }
   }
 
+  async function cancelDraftEvent() {
+    const owner = componentLifetimeRef.current.sequence
+    if (!ownsCalendar(owner) || !canEdit || !canCancelDraftEvent || calendarMutationPendingRef.current || eventSubmissionPendingRef.current) return
+    const roomNotice = isMeetingRoomBooked(draftEvent) ? " The meeting room booking will be released." : ""
+    if (!window.confirm(`Cancel this event? It will stay on the calendar marked Cancelled.${roomNotice}`)) return
+
+    try {
+      const result = await mutateCalendar("cancel", [], [draftEvent.id], {}, { [draftEvent.id]: draftEventVersion })
+      if (!ownsCalendar(owner)) return
+      const saved = normalizeStoredEvents(result.payload.events).find((event) => event.id === draftEvent.id && event.cancelled)
+      if (!saved) throw new Error("The cancellation could not be verified. Refresh the calendar to check the saved status.")
+      closeEventModal()
+      setEmailPrompt({
+        events: [saved],
+        eventVersions: normalizeEventVersions(result.eventVersions),
+        action: "cancelled",
+        status: "idle",
+        error: "",
+      })
+    } catch (error) {
+      if (!ownsCalendar(owner)) return
+      window.alert(error instanceof Error ? error.message : "The event was not cancelled. Please try again.")
+    }
+  }
+
   async function deleteDraftEvent() {
     const owner = componentLifetimeRef.current.sequence
     if (!ownsCalendar(owner)) return
@@ -1568,6 +1597,9 @@ export default function EventCalendarPage() {
   }
 
   const eventActionPending = calendarMutationPending || eventSubmissionPending
+  const eventFieldsDisabled = eventActionPending || Boolean(draftEvent.cancelled)
+  const canCancelDraftEvent = eventModalMode === "edit" && Boolean(draftEventVersion) &&
+    !draftEvent.cancelled && !draftEventChangedElsewhere && !isCalendarHoliday(draftEvent)
 
   if (loading) return <p style={{ padding: "40px" }}>Loading...</p>
 
@@ -1996,10 +2028,11 @@ export default function EventCalendarPage() {
               </thead>
               <tbody>
                 {visibleEvents.map((event) => {
+                  const cancelled = event.cancelled === true
                   const meetingRoomBooked = isMeetingRoomBooked(event)
-                  const rowHighlighted = eventHasSelectedPeople(event, selectedPeople)
-                  const isTodayEvent = event.startDate <= todayKey && event.endDate >= todayKey
-                  const isTomorrowEvent = !isTodayEvent && event.startDate <= tomorrowKey && event.endDate >= tomorrowKey
+                  const rowHighlighted = !cancelled && eventHasSelectedPeople(event, selectedPeople)
+                  const isTodayEvent = !cancelled && event.startDate <= todayKey && event.endDate >= todayKey
+                  const isTomorrowEvent = !cancelled && !isTodayEvent && event.startDate <= tomorrowKey && event.endDate >= tomorrowKey
                   const rowBackground = isTodayEvent
                     ? "#fff8e5"
                     : isTomorrowEvent
@@ -2040,10 +2073,19 @@ export default function EventCalendarPage() {
                         {formatEventRange(event)}
                       </td>
                       <td
-                        onDoubleClick={() => openEditModal(event)}
                         style={{ ...tdStyle, color: "var(--fc-admin-panel-text)", fontWeight: isTodayEvent ? 900 : 500 }}
                       >
-                        <span>{event.title}</span>
+                        {cancelled && (
+                          <span className="block w-fit md:inline-block" style={{ verticalAlign: "middle", color: "var(--fc-admin-danger-text)", background: "var(--fc-admin-danger-bg)", borderRadius: "5px", padding: "2px 5px", fontSize: "11px", fontWeight: 900, marginRight: "8px" }}>
+                            CANCELLED
+                          </span>
+                        )}
+                        {canEdit ? (
+                          <button type="button" onClick={() => openEditModal(event)} style={{
+                            font: "inherit", color: "inherit", textAlign: "left", background: "transparent", border: 0,
+                            padding: 0, cursor: "pointer", textDecoration: cancelled ? "line-through" : "underline", textUnderlineOffset: "3px",
+                          }}>{event.title}</button>
+                        ) : <span style={{ textDecoration: cancelled ? "line-through" : "none" }}>{event.title}</span>}
                         {!eventVersions[event.id] && (
                           <span style={{ display: "inline-block", color: "var(--fc-admin-muted)", fontSize: "11px", marginLeft: "8px" }}>
                             NOT YET SHARED
@@ -2056,8 +2098,8 @@ export default function EventCalendarPage() {
                         )}
                       </td>
                       {people.map((person) => {
-                        const attending = event.people.includes(person)
-                        const uncertain = (event.uncertainPeople || []).includes(person)
+                        const attending = !cancelled && event.people.includes(person)
+                        const uncertain = !cancelled && (event.uncertainPeople || []).includes(person)
                         const highlighted = selectedPeople.includes(person) && (attending || uncertain)
                         return (
                           <td
@@ -2159,7 +2201,7 @@ export default function EventCalendarPage() {
         <div style={modalBackdropStyle}>
           <div role="dialog" aria-modal="true" aria-labelledby="event-editor-title" style={overlayModalStyle}>
             <h2 id="event-editor-title" style={{ margin: "0 0 14px", fontSize: "24px" }}>
-              {eventModalMode === "add" ? "New Event" : "Edit Event"}
+              {eventModalMode === "add" ? "New Event" : draftEvent.cancelled ? "Cancelled Event" : "Edit Event"}
             </h2>
             {eventModalMode === "edit" && !draftEventVersion && (
               <p role="note" style={{ margin: "0 0 12px", color: "var(--fc-admin-muted)", fontSize: "12px" }}>
@@ -2187,7 +2229,7 @@ export default function EventCalendarPage() {
                 From
                 <input
                   type="date"
-                  disabled={eventActionPending}
+                  disabled={eventFieldsDisabled}
                   value={draftEvent.startDate}
                   onChange={(event) =>
                     setDraftEvent((current) => ({
@@ -2203,7 +2245,7 @@ export default function EventCalendarPage() {
                 To
                 <input
                   type="date"
-                  disabled={eventActionPending}
+                  disabled={eventFieldsDisabled}
                   value={draftEvent.endDate}
                   onChange={(event) => setDraftEvent((current) => ({ ...current, endDate: event.target.value }))}
                   style={inputStyle}
@@ -2214,7 +2256,7 @@ export default function EventCalendarPage() {
               Event
               <input
                 value={draftEvent.title}
-                disabled={eventActionPending}
+                disabled={eventFieldsDisabled}
                 onChange={(event) => setDraftEvent((current) => ({ ...current, title: event.target.value }))}
                 style={{ ...inputStyle, textTransform: "uppercase" }}
               />
@@ -2232,7 +2274,7 @@ export default function EventCalendarPage() {
             >
               <input
                 type="checkbox"
-                disabled={eventActionPending}
+                disabled={eventFieldsDisabled}
                 checked={isMeetingRoomBooked(draftEvent)}
                 onChange={(event) =>
                   setDraftEvent((current) => ({
@@ -2257,7 +2299,7 @@ export default function EventCalendarPage() {
                   <button
                     key={person}
                     type="button"
-                    disabled={eventActionPending}
+                    disabled={eventFieldsDisabled}
                     aria-pressed={attending || uncertain}
                     onClick={() => cycleDraftPerson(person)}
                     style={{
@@ -2277,7 +2319,7 @@ export default function EventCalendarPage() {
               })}
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", justifyContent: eventModalMode === "edit" ? "space-between" : "flex-end", gap: "9px" }}>
-              {eventModalMode === "edit" && (
+              {eventModalMode === "edit" && <div style={{ display: "flex", flexWrap: "wrap", gap: "9px" }}>
                 <button
                   type="button"
                   onClick={deleteDraftEvent}
@@ -2286,7 +2328,12 @@ export default function EventCalendarPage() {
                 >
                   Delete Event
                 </button>
-              )}
+                {canCancelDraftEvent && (
+                  <button type="button" onClick={cancelDraftEvent} disabled={eventActionPending} style={buttonStyle}>
+                    Cancel Event
+                  </button>
+                )}
+              </div>}
               <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: "9px", marginLeft: "auto" }}>
                 <button
                   type="button"
@@ -2294,16 +2341,16 @@ export default function EventCalendarPage() {
                   disabled={eventActionPending}
                   style={{ ...buttonStyle, opacity: eventActionPending ? 0.65 : 1 }}
                 >
-                  Cancel
+                  {draftEvent.cancelled ? "Close" : "Cancel"}
                 </button>
-                <button
+                {!draftEvent.cancelled && <button
                   type="button"
                   onClick={saveDraftEvent}
                   disabled={eventActionPending || draftEventChangedElsewhere}
                   style={{ ...primaryActionButtonStyle, opacity: eventActionPending || draftEventChangedElsewhere ? 0.65 : 1 }}
                 >
                   {eventActionPending ? "Saving" : "Save"}
-                </button>
+                </button>}
               </div>
             </div>
           </div>
@@ -2603,11 +2650,17 @@ export default function EventCalendarPage() {
 
       {emailPrompt && (
         <div style={modalBackdropStyle}>
-          <div style={{ ...overlayModalStyle, width: "min(430px, 100%)" }}>
-            <h2 style={{ margin: "0 0 10px", fontSize: "22px" }}>Send Event Update?</h2>
+          <div role="dialog" aria-modal="true" aria-labelledby="event-email-prompt-title" style={{ ...overlayModalStyle, width: "min(430px, 100%)" }}>
+            <h2 id="event-email-prompt-title" style={{ margin: "0 0 10px", fontSize: "22px" }}>{emailPrompt.action === "cancelled" ? "Email the Cancellation?" : "Send Event Update?"}</h2>
             <p style={{ margin: "0 0 6px", color: "var(--fc-admin-panel-text)", fontSize: "14px", fontWeight: 800 }}>
               {emailPrompt.events[0]?.title || "NEW EVENT"}
             </p>
+            {emailPrompt.action === "cancelled" && (
+              <p style={{ margin: "0 0 16px", color: "var(--fc-admin-muted)", fontSize: "13px" }}>
+                The event is cancelled. {hasMeetingRoomType(emailPrompt.events[0]) && "Room release is queued; check the Meeting Room tab for availability. "}
+                Send a notice to the event update email list?
+              </p>
+            )}
             <p style={{ margin: "0 0 16px", color: "var(--fc-admin-muted)", fontSize: "13px", fontWeight: 700 }}>
               {emailPrompt.events.length === 1 ? formatEventRange(emailPrompt.events[0]) : `${emailPrompt.events.length} recurring occurrences. One email will list all dates.`}
             </p>

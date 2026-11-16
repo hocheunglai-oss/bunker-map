@@ -28,6 +28,7 @@ type CalendarEvent = {
   uncertainPeople?: string[]
   tags: string[]
   eventType?: string
+  cancelled?: true
   sourceRow?: number
   holidaySource?: HolidaySource
 }
@@ -65,6 +66,7 @@ function normalizeEvent(value: unknown): CalendarEvent | null {
     tags: normalizeStringList(event.tags),
     eventType: typeof event.eventType === "string" ? event.eventType : undefined,
     sourceRow: typeof event.sourceRow === "number" ? event.sourceRow : undefined,
+    ...(event.cancelled === true ? { cancelled: true as const } : {}),
     ...(holidaySource ? { holidaySource } : {}),
   }
 }

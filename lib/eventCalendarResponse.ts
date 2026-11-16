@@ -1,5 +1,5 @@
 import type { OfficeCalendarEvent } from "@/data/eventCalendar"
-import { EVENT_CALENDAR_PROTOCOL_VERSION } from "@/lib/eventCalendarProtocol"
+import { EVENT_CALENDAR_PROTOCOL_VERSION, isCalendarHoliday, type EventCalendarOperation } from "@/lib/eventCalendarProtocol"
 
 type RecordValue = Record<string, unknown>
 export type EventCalendarPayload = RecordValue & {
@@ -17,10 +17,11 @@ export type EventCalendarResponse = {
   legacyAbsent: boolean
 }
 export type EventCalendarAcknowledgement = {
-  operation: "create" | "update" | "upsert" | "insert" | "delete" | "people" | "settings"
+  operation: EventCalendarOperation
   events: OfficeCalendarEvent[]
   eventIds: string[]
   settings: RecordValue
+  expectedEventVersions?: Record<string, string>
 }
 
 const invalidMessage = "The shared calendar could not be verified. Your unsaved changes have been kept. Refresh the page to check the saved result before trying again."
@@ -49,6 +50,7 @@ export function validateEventCalendarPayload(value: unknown): EventCalendarPaylo
       !validDate(event.startDate) || !validDate(event.endDate) || event.endDate < event.startDate ||
       typeof event.title !== "string" || !event.title.trim() || !stringList(event.people) || !stringList(event.tags) ||
       (event.uncertainPeople !== undefined && !stringList(event.uncertainPeople)) ||
+      (Object.hasOwn(event, "cancelled") && (event.cancelled !== true || isCalendarHoliday(event))) ||
       (event.eventType !== undefined && (typeof event.eventType !== "string" || !["Public Holiday", "Leave or Travel", "Meeting", "Meeting Room", "Unclassified"].includes(event.eventType)))) invalid()
     ids.add(event.id)
   }
@@ -104,6 +106,13 @@ export async function parseEventCalendarResponse(value: unknown, acknowledgement
     }
     if (operation === "insert" && events.some((event) => !payload.events?.some((saved) => saved.id === event.id) && !payload.deletedEventIds?.includes(event.id))) invalid()
     if (operation === "delete" && eventIds.some((id) => payload.events?.some((event) => event.id === id) || !payload.deletedEventIds?.includes(id))) invalid()
+    if (operation === "cancel") {
+      const [id] = eventIds
+      const saved = payload.events.find((event) => event.id === id)
+      if (eventIds.length !== 1 || !saved || payload.deletedEventIds?.includes(id) || payload.deletedRequiredSeedIds?.includes(id)) invalid()
+      const { cancelled, ...original } = saved
+      if (cancelled !== true || await eventCalendarResponseVersion(original) !== acknowledgement.expectedEventVersions?.[id]) invalid()
+    }
     if (Object.hasOwn(settings, "deletedRequiredSeedIds") && (!stringList(settings.deletedRequiredSeedIds) || settings.deletedRequiredSeedIds.some((id) => !payload.deletedRequiredSeedIds?.includes(id)))) invalid()
   }
   return { payload, eventVersions, settingVersions, storeVersion, legacyAbsent: !payload || Object.keys(payload).length === 0 }
