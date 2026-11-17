@@ -38,7 +38,7 @@
     "@vercel/speed-insights": "2.0.0",
     "googleapis": "^171.4.0",
     "leaflet": "^1.9.4",
-    "next": "16.4.2",
+    "next": "16.4.6",
     "nodemailer": "10.1.4",
     "parse5": "8.0.1",
     "react": "^19.2.8",
