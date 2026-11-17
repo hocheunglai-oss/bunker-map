@@ -36,8 +36,20 @@ backup failure remains the trigger for email.
   `eco-nightly-backup` check can send a notice. Successful checks and recovery,
   storage/retention advice and unverified-monitor warnings remain silent.
   Their truthful health status and incident observations are retained.
-- Confirmed unsuccessful runs, skipped captures, disabled workflows and runs
-  that have not completed within 90 minutes are reported.
+- A failed, cancelled or timed-out run remains a visible warning but can recover
+  quietly within 90 minutes of the earliest unresolved run's **original GitHub
+  creation time**, while the previous verified capture is less than 30 hours old.
+  This is a fixed window from run creation, not another 90 minutes after failure
+  or after the monitor first notices it. A retry or a new failed run cannot reset
+  the deadline. An active retry that passes the same deadline also alerts.
+- Skipped captures, disabled workflows, no verified prior capture and the
+  30-hour freshness deadline bypass that window. A known verified run older than
+  48 hours still escalates once. The first scheduled monitor check after a
+  deadline can send an alert; this policy does not automatically retry a backup.
+- The recovery window requires complete inspected evidence for the unresolved
+  completed runs after the latest verified capture. If the bounded inspection
+  budget leaves any such run uninspected, no failure is suppressed. Missing,
+  invalid or future original timestamps cannot start a new window.
 - Missing verified-run success becomes overdue after 30 hours. This allows the observed
   several-hour GitHub scheduling delays. A known verified run older than
   48 hours escalates an incident once.
@@ -53,6 +65,9 @@ backup failure remains the trigger for email.
   are quiet; escalation is delivered once and verified recovery re-arms a later
   failure. Failed SMTP acceptance releases the lease for retry. Missing incident
   storage fails closed rather than sending uncontrolled repeated emails.
+  A recovery-window observation has a null incident level: it neither sends an
+  email nor closes an existing incident. Only verified recovery closes it,
+  silently; there are no success or recovery emails.
 
 At most twenty runs are read. Job details are inspected for the latest completed
 run, up to three successful runs and up to three failed runs. Each HTTP request has an eight-second timeout, a one-megabyte

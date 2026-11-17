@@ -11,10 +11,10 @@ const now = Date.parse("2026-11-03T01:00:00Z") // 09:00 HKT, after today's deadl
 const checkedAt = new Date(now).toISOString()
 const current = Date.parse("2026-11-02T18:30:00Z")
 const run = (extra: Partial<BackupRun> = {}): BackupRun => ({
-  id: 100, attempt: 1, createdAt: current - 10_000, completedAt: current + 1_000, status: "completed", conclusion: "success",
+  id: 100, attempt: 1, originalCreatedAt: extra.createdAt ?? current - 10_000, createdAt: current - 10_000, completedAt: current + 1_000, status: "completed", conclusion: "success",
   capture: "verified", capturedAt: current, ...extra,
 })
-const evaluate = (runs: BackupRun[], workflowActive = true, at = checkedAt) => evaluateEcoBackup({ checkedAt: at, workflowActive, runs })
+const evaluate = (runs: BackupRun[], workflowActive = true, at = checkedAt) => evaluateEcoBackup({ checkedAt: at, workflowActive, runs, recoveryWindowComplete: true })
 const level = (check: ReturnType<typeof evaluate>[number]) => healthAlertObservation(check, false).alert_level
 
 test("fresh verified capture resolves; 30-hour age allows scheduling delay and 48 hours escalates once", () => {
@@ -34,11 +34,12 @@ test("successful workflow with skipped capture is not backup success; failures, 
   assert.match(evaluate([run({ status: "in_progress", conclusion: null, capturedAt: null, capture: "unverified" })])[0].message, /90 minutes/)
 })
 
-test("pending and unknown observations preserve incidents; a newer failed run outweighs an earlier success", () => {
+test("pending, unknown and recent failure observations preserve incidents without claiming recovery", () => {
   const pending = run({ id: 101, createdAt: now - 60_000, status: "in_progress", conclusion: null, capturedAt: null, capture: "unverified" })
   assert.equal(level(evaluate([pending, run()])[0]), null)
   const failed = run({ id: 102, createdAt: now - 120_000, completedAt: now - 60_000, conclusion: "failure", capture: "failed", capturedAt: null })
-  assert.equal(level(evaluate([pending, failed, run()])[0]), 1)
+  assert.equal(level(evaluate([pending, failed, run()])[0]), null)
+  assert.equal(evaluate([pending, failed, run()])[0].status, "warning")
   const unknown = unknownEcoBackupChecks(now)
   assert.equal(level(unknown[0]), null)
   assert.equal(level(unknown[1]), null)
@@ -47,11 +48,69 @@ test("pending and unknown observations preserve incidents; a newer failed run ou
 })
 
 test("a rerun that completes after another failure recovers regardless of original run ID or creation order", () => {
-  const failed = run({ id: 200, createdAt: now - 120_000, completedAt: now - 60_000, conclusion: "failure", capture: "failed", capturedAt: null })
+  const failed = run({ id: 200, createdAt: now - 120_000, originalCreatedAt: now - 91 * 60_000, completedAt: now - 60_000, conclusion: "failure", capture: "failed", capturedAt: null })
   const retried = run({ id: 99, attempt: 2, createdAt: now - 180_000, completedAt: now - 1_000, capturedAt: now - 2_000 })
   assert.equal(level(evaluate([failed, retried])[0]), 0)
   const laterFailure = { ...failed, completedAt: now }
   assert.equal(level(evaluate([retried, laterFailure])[0]), 1)
+})
+
+test("first failure has a fixed 90-minute window while the prior capture stays fresh", () => {
+  const start = now - 60 * 60_000
+  const failed = run({ id: 101, createdAt: start, completedAt: start + 5 * 60_000, conclusion: "failure", capture: "failed", capturedAt: null })
+  const before = evaluate([failed, run()], true, new Date(start + 90 * 60_000 - 1).toISOString())[0]
+  assert.equal(before.status, "warning", "the real failure remains visible")
+  assert.equal(before.details?.incidentResolved, false)
+  assert.equal(level(before), null)
+  assert.equal(level(evaluate([failed, run()], true, new Date(start + 90 * 60_000).toISOString())[0]), 1)
+})
+
+test("retries and new failures cannot restart the earliest unresolved run's deadline", () => {
+  const original = now - 90 * 60_000
+  const oldFailure = run({ id: 101, originalCreatedAt: original, createdAt: original, completedAt: original + 5 * 60_000,
+    conclusion: "failure", capture: "failed", capturedAt: null })
+  const freshFailure = run({ id: 102, createdAt: now - 60_000, completedAt: now - 1_000,
+    conclusion: "failure", capture: "failed", capturedAt: null })
+  assert.equal(level(evaluate([freshFailure, oldFailure, run()])[0]), 1)
+  for (const attempt of [2, 3]) {
+    const retry = { ...oldFailure, attempt, createdAt: now - 30_000, completedAt: now - 1_000 }
+    assert.equal(level(evaluate([retry, run()])[0]), 1)
+    const active = { ...retry, status: "in_progress", conclusion: null, capture: "unverified" as const, completedAt: null }
+    assert.equal(level(evaluate([active, run()])[0]), 1)
+    assert.equal(level(evaluate([{ ...active, originalCreatedAt: now - 89 * 60_000 }, run()])[0]), null)
+  }
+})
+
+test("30-hour freshness and immediate failure categories override the recovery window", () => {
+  const failed = run({ id: 101, createdAt: now - 60_000, completedAt: now - 1_000,
+    conclusion: "failure", capture: "failed", capturedAt: null })
+  const prior = run({ createdAt: now - 30 * 3_600_000 - 1_000, capturedAt: now - 30 * 3_600_000 + 1,
+    completedAt: now - 30 * 3_600_000 + 2 })
+  assert.equal(level(evaluate([failed, prior])[0]), null)
+  assert.equal(level(evaluate([failed, prior], true, new Date(now + 1).toISOString())[0]), 1)
+  assert.equal(level(evaluate([failed])[0]), 1, "no verified prior capture cannot grant grace")
+  assert.equal(level(evaluate([failed, run()], false)[0]), 1, "disabled workflow alerts immediately")
+  assert.equal(level(evaluate([{ ...failed, capture: "skipped" }, run()])[0]), 1)
+  assert.equal(level(evaluate([{ ...failed, conclusion: "skipped" }, run()])[0]), 1)
+  const earlierSkip = { ...failed, id: 102, createdAt: now - 120_000, originalCreatedAt: now - 120_000,
+    completedAt: now - 60_000, capture: "skipped" as const, conclusion: "skipped" }
+  const afterSkip = evaluate([failed, earlierSkip, run()])[0]
+  assert.equal(level(afterSkip), 1, "an earlier unresolved skip still bypasses grace")
+  assert.match(afterSkip.message, /latest completed backup run was unsuccessful/)
+  assert.doesNotMatch(afterSkip.message, /latest backup was skipped/)
+  assert.equal(level(evaluate([failed, run({ capturedAt: now - 49 * 3_600_000 })])[0]), 2)
+  assert.equal(level(evaluate([failed, run({ maintenance: "attention" })])[0]), null, "capacity advice does not erase the verified prior capture")
+})
+
+test("missing or incomplete recovery history never invents a new suppression window", () => {
+  const failed = run({ id: 101, createdAt: now - 60_000, completedAt: now - 1_000,
+    conclusion: "failure", capture: "failed", capturedAt: null })
+  for (const recoveryWindowComplete of [undefined, false]) {
+    assert.equal(level(evaluateEcoBackup({ checkedAt, workflowActive: true, runs: [failed, run()], recoveryWindowComplete })[0]), 1)
+  }
+  for (const originalCreatedAt of [NaN, Infinity, now + 1, failed.createdAt + 1]) {
+    assert.equal(level(evaluate([{ ...failed, originalCreatedAt }, run()])[0]), 1)
+  }
 })
 
 function apiFixture(change?: (path: string, data: Record<string, unknown>) => unknown) {
@@ -117,6 +176,7 @@ test("current-attempt start is used for reruns and retired older step contracts 
     return { ...data, workflow_runs: [{ ...original, created_at: "2026-10-01T00:00:00Z" }] }
   })
   assert.equal((await readEcoBackupObservation(now, rerun.fetcher)).runs[0].createdAt, current - 10_000)
+  assert.equal((await readEcoBackupObservation(now, rerun.fetcher)).runs[0].originalCreatedAt, Date.parse("2026-10-01T00:00:00Z"))
   const historical = apiFixture((path, data) => {
     if (!path.includes("/runs?")) return data
     const original = (data.workflow_runs as Record<string, unknown>[])[0]
@@ -130,6 +190,43 @@ test("current-attempt start is used for reruns and retired older step contracts 
     completed_at: new Date(current + 1_000).toISOString(), steps: [{ name: "unrecognized capture", status: "completed", conclusion: "success" }],
   }] } : data)
   await assert.rejects(readEcoBackupObservation(now, badCurrent.fetcher), /could not be verified/)
+})
+
+test("original creation must be present, canonical UTC and no later than the current attempt", async () => {
+  for (const created_at of [undefined, null, "bad", "2026-02-30T00:00:00Z", "2026-11-03", "2026-11-03T02:00:00Z", new Date(current).toISOString()]) {
+    const fixture = apiFixture((path, data) => path.includes("/runs?") ? {
+      ...data, workflow_runs: (data.workflow_runs as Record<string, unknown>[]).map((value) => ({ ...value, created_at })),
+    } : data)
+    await assert.rejects(readEcoBackupObservation(now, fixture.fetcher), /timestamp|chronology/)
+  }
+})
+
+test("the bounded job-inspection budget cannot hide older unresolved failures behind new runs", async () => {
+  const fixture = apiFixture()
+  const failures = [101, 102, 103, 104]
+  const fetcher = (async (url: string | URL | Request, init?: RequestInit) => {
+    const match = String(url).match(/\/runs\/(10[1-4])\//)
+    const response = await fixture.fetcher(String(url).replace(/\/runs\/10[1-4]\//, "/runs/100/"), init)
+    const data = await response.json()
+    if (String(url).includes("/runs?")) {
+      const original = data.workflow_runs[0]
+      data.workflow_runs.push(...failures.map((id, index) => ({ ...original, id, conclusion: "failure",
+        created_at: new Date(now - (index + 2) * 60_000).toISOString(),
+        run_started_at: new Date(now - (index + 2) * 60_000).toISOString(),
+        updated_at: new Date(now - (index + 1) * 60_000).toISOString() })))
+      data.total_count = 5
+    }
+    if (match) {
+      const id = Number(match[1]), index = failures.indexOf(id), job = data.jobs[0]
+      job.run_id = id; job.conclusion = "failure"; job.completed_at = new Date(now - (index + 1) * 60_000).toISOString()
+      job.steps[0].conclusion = "failure"
+    }
+    return Response.json(data)
+  }) as typeof fetch
+  const observation = await readEcoBackupObservation(now, fetcher)
+  assert.equal(observation.recoveryWindowComplete, false)
+  assert.equal(level(evaluateEcoBackup(observation)[0]), 1)
+  assert.equal(fixture.paths.filter((path) => path.includes("jobs?")).length, 4, "one success and three failure jobs remain the bounded read set")
 })
 
 test("confirmed job setup failure remains a backup failure even before a capture step exists", async () => {
@@ -352,10 +449,40 @@ test("verified copies with capacity attention remain visible but never send emai
   assert.deepEqual(events, [])
 })
 
+test("the recovery window preserves an existing incident and a verified retry closes it silently", async () => {
+  const { deps, sent } = dependencies()
+  const failed = run({ id: 101, createdAt: now - 60 * 60_000, completedAt: now - 55 * 60_000,
+    conclusion: "failure", capture: "failed", capturedAt: null })
+  let incidentOpen = true
+  let observed: number | null | undefined
+  deps.store = () => ({ claim: async (observations) => {
+    observed = observations.find((item) => item.check_id === "eco-nightly-backup")?.alert_level
+    if (observed === 0) incidentOpen = false
+    return observations.filter((item) => item.alert_level !== null && item.alert_level > 0).map((item) => item.check_id)
+  }, finish: async () => assert.fail("quiet grace and recovery must not deliver mail") })
+  deps.read = async () => ({ checkedAt, workflowActive: true, runs: [failed, run()], recoveryWindowComplete: true })
+  const graceResponse = await handleEcoBackupWatchdog(request(), deps)
+  assert.equal(graceResponse.status, 200)
+  assert.equal((await graceResponse.json()).sent, false)
+  assert.equal(observed, null)
+  assert.equal(incidentOpen, true)
+  deps.read = async () => ({ checkedAt, workflowActive: true, runs: [
+    run({ id: 101, attempt: 2, originalCreatedAt: failed.originalCreatedAt,
+      createdAt: now - 60_000, capturedAt: now - 2_000, completedAt: now - 1_000 }), run(),
+  ], recoveryWindowComplete: true })
+  const recoveryResponse = await handleEcoBackupWatchdog(request(), deps)
+  assert.equal(recoveryResponse.status, 200)
+  assert.equal((await recoveryResponse.json()).sent, false)
+  assert.equal(observed, 0)
+  assert.equal(incidentOpen, false)
+  assert.equal(sent.length, 0)
+})
+
 test("a real failure alongside storage advice emails only the failed-backup check", async () => {
   const { deps, sent } = dependencies()
-  deps.read = async () => ({ checkedAt, workflowActive: true, runs: [
-    run({ id: 101, createdAt: now - 120_000, completedAt: now - 60_000, conclusion: "failure", capture: "failed", capturedAt: null }),
+  deps.read = async () => ({ checkedAt, workflowActive: true, recoveryWindowComplete: true, runs: [
+    run({ id: 101, createdAt: now - 120_000, originalCreatedAt: now - 90 * 60_000,
+      completedAt: now - 60_000, conclusion: "failure", capture: "failed", capturedAt: null }),
     run({ maintenance: "attention" }),
   ] })
   deps.store = () => ({ claim: async (observations) => {
