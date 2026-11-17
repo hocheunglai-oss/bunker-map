@@ -42,7 +42,7 @@ test("installed and locked dependencies retain their security fixes", () => {
     readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"),
   ) as { packages: Record<string, PackageVersion> }
   const floors: Record<string, string> = {
-    next: "16.4.1",
+    next: "16.4.5", // GHSA-mfr8-8qww-v76h: preserve root-parameter cache isolation.
     nodemailer: "10.1.4",
     qs: "6.16.1",
     sharp: "0.35.5",
@@ -105,11 +105,11 @@ test("comma query serialization safely handles non-callable toString elements", 
   )
 })
 
-test("framework manifest, tooling and all platform compilers retain the October security patch", () => {
+test("framework manifest, tooling and all platform compilers retain the security patches", () => {
   const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"))
   const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"))
   const nextVersion = lock.packages["node_modules/next"].version
-  assertVersionFloor(manifest.dependencies.next.replace(/^\^/, ""), "16.4.1", "framework manifest")
+  assertVersionFloor(manifest.dependencies.next.replace(/^\^/, ""), "16.4.5", "framework manifest")
   assert.equal(manifest.devDependencies["eslint-config-next"], manifest.dependencies.next)
   const framework = JSON.parse(readFileSync(new URL("../node_modules/next/package.json", import.meta.url), "utf8"))
   assertVersionFloor(framework.optionalDependencies.sharp.replace(/^\^/, ""), "0.35.5", "framework Sharp constraint")

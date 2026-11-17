@@ -14,6 +14,8 @@ type Json = Record<string, unknown>
 export type BackupRun = {
   id: number
   attempt: number
+  // Immutable across attempts; retries must not restart the recovery window.
+  originalCreatedAt: number
   createdAt: number
   completedAt: number | null
   status: string
@@ -26,6 +28,8 @@ export type BackupObservation = {
   checkedAt: string
   workflowActive: boolean
   runs: BackupRun[]
+  // False/absent cannot grant grace based on an incomplete bounded history.
+  recoveryWindowComplete?: boolean
 }
 
 function object(value: unknown): Json {
@@ -92,11 +96,19 @@ function parseRun(value: unknown, now: number): BackupRun {
     throw new Error("Invalid GitHub conclusion")
   }
   if ((run.status === "completed") !== (run.conclusion !== null)) throw new Error("Incomplete GitHub run state")
+  if (typeof run.created_at !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(run.created_at)) {
+    throw new Error("Invalid original run timestamp")
+  }
+  const originalCreatedAt = timestamp(run.created_at, now)
+  const canonicalCreatedAt = run.created_at.includes(".") ? run.created_at : run.created_at.slice(0, -1) + ".000Z"
+  if (originalCreatedAt > now || new Date(originalCreatedAt).toISOString() !== canonicalCreatedAt) {
+    throw new Error("Invalid original run timestamp")
+  }
   const createdAt = timestamp(run.run_started_at ?? run.created_at, now)
   const completedAt = run.status === "completed" ? timestamp(run.updated_at, now) : null
-  if (completedAt !== null && completedAt < createdAt) throw new Error("Invalid attempt chronology")
+  if (originalCreatedAt > createdAt || completedAt !== null && completedAt < createdAt) throw new Error("Invalid attempt chronology")
   return {
-    id: positiveInt(run.id), attempt: positiveInt(run.run_attempt), createdAt, completedAt,
+    id: positiveInt(run.id), attempt: positiveInt(run.run_attempt), originalCreatedAt, createdAt, completedAt,
     status: String(run.status), conclusion: run.conclusion as string | null,
     capture: "unverified", capturedAt: null,
   }
@@ -201,7 +213,9 @@ export async function readEcoBackupObservation(now = Date.now(), fetcher: typeof
       (!newestVerified || run.completedAt! >= newestVerified.completedAt!))) {
     throw new Error("Current backup capture evidence could not be verified")
   }
-  return { checkedAt: new Date(now).toISOString(), workflowActive: workflow.state === "active", runs: inspected }
+  const recoveryWindowComplete = Boolean(newestVerified && inspected.every((run) => run.status !== "completed" ||
+    run.completedAt! <= newestVerified.completedAt! || candidates.has(run.id) && !invalid.has(run.id)))
+  return { checkedAt: new Date(now).toISOString(), workflowActive: workflow.state === "active", runs: inspected, recoveryWindowComplete }
 }
 
 function check(id: string, status: HealthCheck["status"], message: string, checkedAt: string, details: NonNullable<HealthCheck["details"]> = {}): HealthCheck {
@@ -226,10 +240,19 @@ export function evaluateEcoBackup(observation: BackupObservation): HealthCheck[]
   const success = successes[0]
   const lastSuccess = success?.capturedAt ?? null
   const latestCompleted = runs.filter((run) => run.status === "completed").sort((a, b) => b.completedAt! - a.completedAt!)[0]
-  const latest = runs[0]
   const laterFailure = latestCompleted && (!success || latestCompleted.completedAt! > success.completedAt!) &&
     (latestCompleted.conclusion !== "success" || latestCompleted.capture === "skipped" || latestCompleted.capture === "failed")
   const stale = lastSuccess === null || now - lastSuccess >= MAX_CAPTURE_AGE
+  const unresolved = runs.filter((run) => run.status !== "completed" ||
+    run.capture !== "verified" && (!success || run.completedAt! > success.completedAt!))
+  const skipped = unresolved.some((run) => run.capture === "skipped" || run.conclusion === "skipped")
+  const originalTimesValid = unresolved.every((run) => Number.isFinite(run.originalCreatedAt) &&
+    run.originalCreatedAt <= run.createdAt && run.originalCreatedAt <= now)
+  const recoveryDeadline = originalTimesValid && unresolved.length > 0
+    ? Math.min(...unresolved.map((run) => run.originalCreatedAt)) + MAX_RUN_AGE : null
+  const inRecoveryWindow = Boolean(observation.recoveryWindowComplete && observation.workflowActive && !stale && !skipped &&
+    laterFailure && ["failure", "cancelled", "timed_out"].includes(latestCompleted.conclusion ?? "") &&
+    recoveryDeadline !== null && now < Math.min(recoveryDeadline, lastSuccess! + MAX_CAPTURE_AGE))
   let message = "A recent verified backup run was confirmed, including its successful capture step."
   let warning = false
   if (!observation.workflowActive) {
@@ -239,19 +262,20 @@ export function evaluateEcoBackup(observation: BackupObservation): HealthCheck[]
     message = latestCompleted.capture === "skipped" || latestCompleted.conclusion === "skipped"
       ? "ECO's latest backup was skipped; no completed capture was confirmed for that run."
       : "ECO's latest completed backup run was unsuccessful. Check its run details before relying on it."
-  } else if (latest && latest.status !== "completed" && now - latest.createdAt >= MAX_RUN_AGE) {
+  } else if (unresolved.some((run) => run.status !== "completed") &&
+      (recoveryDeadline === null || now >= recoveryDeadline)) {
     warning = true; message = "ECO's backup run has not completed within 90 minutes."
   } else if (stale) {
     warning = true; message = "No verified ECO backup run was confirmed in the past 30 hours."
   }
   // Incomplete evidence never closes an existing incident, even if an older
   // successful run is still within the daily freshness window.
-  const pending = latest?.status !== "completed" || latestCompleted?.capture === "unverified"
+  const pending = unresolved.some((run) => run.status !== "completed") || latestCompleted?.capture === "unverified"
   const severity = warning && lastSuccess !== null && now - lastSuccess >= 48 * HOUR ? 2 : 1
   return [
     check("eco-nightly-backup", warning ? (severity === 2 ? "error" : "warning") : "ok", message, observation.checkedAt, {
       alertLevel: severity, incidentResolved: !warning && !pending,
-      notificationEligible: warning, lastSuccessfulRunAt: lastSuccess === null ? null : new Date(lastSuccess).toISOString(),
+      notificationEligible: warning && !inRecoveryWindow, lastSuccessfulRunAt: lastSuccess === null ? null : new Date(lastSuccess).toISOString(),
       action: "Review the ECO nightly backup workflow. A successful run is capture evidence; it is not a restoration test.",
     }),
     check("eco-backup-monitor", "ok", "Public backup workflow status was checked.", observation.checkedAt),
