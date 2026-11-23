@@ -214,7 +214,7 @@ function getExplicitPermissions(permissions: unknown) {
   )
 }
 
-function getStoredAdminRole(row: Pick<AdminUserRow, "role" | "permissions">) {
+export function getStoredAdminRole(row: Pick<AdminUserRow, "role" | "permissions">) {
   const metadataRole = row.permissions?.[ADMIN_ROLE_METADATA_KEY]
   return normaliseAdminRole(
     typeof metadataRole === "string" ? metadataRole : row.role

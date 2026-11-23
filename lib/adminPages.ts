@@ -92,6 +92,12 @@ export const ADMIN_PAGE_DEFINITIONS: AdminPageDefinition[] = [
     path: "/admin/taskcalendar",
   },
   {
+    id: "task-allocation",
+    label: "TASK ALLOCATION",
+    group: "office",
+    path: "/admin/taskallocation",
+  },
+  {
     id: "attendance-record",
     label: "ATTENDANCE RECORD",
     group: "office",

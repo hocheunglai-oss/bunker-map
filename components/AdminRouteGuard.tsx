@@ -346,7 +346,7 @@ export function AdminRouteGuard({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      {viewOnly ? (
+      {viewOnly && page.id !== "task-allocation" ? (
         <div
           role="status"
           style={{
