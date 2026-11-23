@@ -23,6 +23,7 @@ import {
 import { requireSpcPagePermission } from "@/lib/spcAuth"
 import { recordOpenAiUsage } from "@/lib/openAiUsage"
 import { DEFAULT_PARSER_AI_MODEL } from "@/lib/parserAiConfig"
+import { normalizeIndexedEnquiryPort } from "@/lib/enquiryPortIndex"
 
 export const maxDuration = 60
 
@@ -340,6 +341,8 @@ function isDateOnlySegment(value: string) {
 function getPortOnlySegment(value: string) {
   const normalized = cleanText(value).toLowerCase()
   if (!normalized || /\d/.test(normalized)) return ""
+  const indexed = normalizeIndexedEnquiryPort(normalized, { includeShortAliases: true })
+  if (indexed) return displayPortForShortenedOutput(indexed)
 
   const beforeComma = normalized.split(/[,，]/)[0] || normalized
   const withoutCountry = beforeComma
@@ -358,8 +361,14 @@ function getPortOnlySegment(value: string) {
   return displayPortForShortenedOutput(beforeComma) === displayPort ? displayPort : ""
 }
 
-function normalizeHongKongScheduleSegment(value: string) {
+function normalizeWorksheetScheduleSegment(value: string) {
   const normalized = cleanText(value)
+  const date = DATE_EXPRESSION_PATTERN.exec(normalized)
+  if (date && date.index > 0) {
+    const prefix = normalized.slice(0, date.index).trim()
+    const port = normalizeIndexedEnquiryPort(prefix, { includeShortAliases: true }) || extractEnquiryPort(prefix)
+    if (port) return `${displayPortForShortenedOutput(port)} ${normalized.slice(date.index)}`
+  }
   if (!normalized || extractEnquiryPort(normalized) !== "hong kong") return normalized
   if (!DATE_EXPRESSION_PATTERN.test(normalized)) return normalized
 
@@ -390,7 +399,7 @@ function normalizeEnquiryWorksheetAiOutput(output: string) {
       continue
     }
 
-    normalized.push(normalizeEnquiryQuantityText(normalizeHongKongScheduleSegment(part)))
+    normalized.push(normalizeEnquiryQuantityText(normalizeWorksheetScheduleSegment(part)))
   }
 
   return normalized.join(" / ")
@@ -445,6 +454,8 @@ function buildInstructions(source: ParserAiSource) {
     "For enquiryworksheet, use hk in correctedOutput for HK, HKG, Hong Kong, Hongkong, and 香港.",
     "The Chinese place name 新加坡 explicitly means Singapore. For SPC, render it as the separate SG port segment; do not warn that the port is missing when it appears.",
     "Prefer these port spellings: busan, yosu, port klang, inchon.",
+    "Demand port is an explicit delivery-port label. Normalize Gibralter to gibraltar and recognize Malta. Preserve Shanghai, Wai Gao Qiao as shanghai (wai gao qiao) in the port field and output; this is a terminal qualifier. A standalone HONG KONG (SLA) port line becomes hk in worksheet output; SLA is a note, not part of the port name.",
+    "A quote-request introduction may share a line with an explicit ship prefix: Pls quote us the flwg: MV. Xin Hai Tong 32 names XIN HAI TONG 32. Never use Brgds, Regards or another email signoff as the vessel name.",
     "Normalize mass quantities to mts and add thousands separators, e.g. 100mt -> 100mts, 1000mt -> 1,000mts, and 880-1000mt -> 880-1,000mts. Preserve explicit KL as kl and CBM as cbm; never convert a volume unit into mts.",
     "Quantity fields hsfo, vlsfo, and lsmgo must contain the quantity only, without repeating the fuel name.",
     "Use the calendar year to interpret dates but omit the year from correctedOutput.",
@@ -637,7 +648,7 @@ function normalizeOutputForSource(
     correctedOutput: normalizedWorksheetOutput,
     vesselName: reconciledDraft.vesselName || guess.vesselName,
     imo: reconciledDraft.imo || guess.imo,
-    port: reconciledDraft.port || guess.port,
+    port: normalizeIndexedEnquiryPort(reconciledDraft.port, { includeShortAliases: true }) || extractEnquiryPort(reconciledDraft.port) || reconciledDraft.port || guess.port,
     buyer: reconciledDraft.buyer || guess.buyer,
     eta: reconciledSchedule.dateRange || reconciledDraft.eta,
     vlsfoMaxRemarks,

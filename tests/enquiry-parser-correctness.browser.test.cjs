@@ -34,8 +34,15 @@ const cases = [
   { id: "delivery-continuation-date-stays-separate", raw: "VESSEL: ALPHA\nIMO: 9450674\nPORT: SINGAPORE\nDELIVERY: 1000\nMT 12 JUL", vessel: "ALPHA", imo: "9450674", output: "alpha / 9450674 / singapore" },
   { id: "continuation-port-keeps-own-date", raw: "VESSEL: ALPHA\nIMO: 9450674\nPORT: SINGAPORE\nETA: 12 JUL 1000\nMT ROTTERDAM 13 JUL", vessel: "ALPHA", imo: "9450674", output: "alpha / 9450674 / rotterdam 13 jul" },
   ...require("./fixtures/enquiry-metadata-cases.cjs"),
+  ...require("./fixtures/parser-reports-20261123.cjs").flatMap(item =>
+    ["raw", "cleaned"].map(kind => ({
+      id: `report-${item.id}-${kind}`, raw: item[kind], vessel: item.vessel,
+      imo: item.lookup ? "" : item.imo,
+      output: item.lookup ? item.expected.replace(` / ${item.imo} / `, " / ") : item.expected,
+    })),
+  ),
 ]
-assert.equal(cases.length, 40)
+assert.equal(cases.length, 48)
 assert.equal(new Set(cases.map(item => item.id)).size, cases.length)
 
 async function main() {
@@ -56,9 +63,9 @@ async function main() {
   const assets = new Map(bundle.outputFiles.map(file => [path.basename(file.path), file.contents]))
   const server = http.createServer((req, res) => {
     const name = new URL(req.url, "http://127.0.0.1").pathname.slice(1)
-    if (assets.has(name)) { res.setHeader("Content-Type", name.endsWith("css") ? "text/css" : "text/javascript"); return res.end(assets.get(name)) }
-    res.setHeader("Content-Type", "text/html")
-    res.end(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/fixture.css"><style>
+    if (assets.has(name)) { res.setHeader("Content-Type", name.endsWith("css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8"); return res.end(assets.get(name)) }
+    res.setHeader("Content-Type", "text/html; charset=utf-8")
+    res.end(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/fixture.css"><style>
       :root{--fc-admin-font:Arial,sans-serif;--fc-admin-page-bg:#f4f5f8;--fc-admin-panel-bg:#fff;--fc-admin-panel-soft-bg:#fbfbfd;--fc-admin-panel-text:#20242c;--fc-admin-heading:#20242c;--fc-admin-muted:#5a677a;--fc-admin-border:#b7bfcb;--fc-admin-border-soft:#d4dae2;--fc-tool-input-bg:#fff;--fc-tool-input-text:#20242c;--fc-input-border:#b7bfcb;--fc-admin-button-bg:#eef1f6;--fc-admin-button-text:#20242c;--fc-admin-button-border:#b7bfcb;--fc-admin-primary-button-bg:#0672ed;--fc-admin-primary-button-text:#fff;--fc-admin-selected-border:#0672ed;--fc-admin-selected-bg:#e5f0ff;--fc-admin-selected-text:#054c9e;--fc-admin-success-bg:#21883a;--fc-admin-success-text:#fff;--fc-admin-success-border:#166429;--fc-admin-warning-bg:#fff1ca;--fc-admin-warning-text:#392700;--fc-admin-warning-border:#e2b74e;--fc-admin-danger-text:#b00020;}
       @media(prefers-color-scheme:dark){:root{--fc-admin-page-bg:#10151e;--fc-admin-panel-bg:#192332;--fc-admin-panel-soft-bg:#1e2b3e;--fc-admin-panel-text:#eef3fb;--fc-admin-heading:#eef3fb;--fc-admin-muted:#c7d3e3;--fc-admin-border:#718097;--fc-admin-border-soft:#48566c;--fc-tool-input-bg:#101a29;--fc-tool-input-text:#eef3fb;--fc-input-border:#718097;--fc-admin-button-bg:#26354a;--fc-admin-button-text:#eef3fb;--fc-admin-button-border:#718097;--fc-admin-selected-bg:#17385c;--fc-admin-selected-text:#dcecff;--fc-admin-warning-bg:#3d3218;--fc-admin-warning-text:#ffe8a7;}}
       body{margin:0;background:var(--fc-admin-page-bg);color:var(--fc-admin-panel-text);font-family:Arial}button,input,select,textarea{font:inherit}button:disabled{opacity:.5}
@@ -94,6 +101,14 @@ async function main() {
             assert.ok(layout.scroll <= layout.width + 1, JSON.stringify(layout))
             await page.screenshot({ path: path.join(evidence, `${engine}-${width}-${colorScheme}-${item.id}.png`), fullPage: true })
           }
+          if (item.id.startsWith("report-")) {
+            const layout = await page.evaluate(() => ({ width: innerWidth, scroll: document.documentElement.scrollWidth }))
+            assert.ok(layout.scroll <= layout.width + 1, JSON.stringify(layout))
+            if (item.id === "report-8c649cda-68c5-4f2e-a84d-d1fa257e1caf-raw") {
+              await raw.scrollIntoViewIfNeeded()
+              await page.screenshot({ path: path.join(evidence, `${engine}-${width}-${colorScheme}-reported-shanghai.png`), fullPage: true })
+            }
+          }
         }
         assert.deepEqual(blocked, []); assert.deepEqual(errors, [])
         assert.deepEqual(await page.evaluate(() => window.__messages), [])
@@ -105,7 +120,7 @@ async function main() {
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)) }
   assert.deepEqual(hashSources(), sources)
   const receipt = { sourceRoot: root, sources, sourceStable: true, contexts: 12, casesPerContext: cases.length, originalCaseIdsPreserved: 16, originalExpectedOutputChanges: ["actual-fuel-not-vessel"], cases: results.length, passed: results.length - failures.length, failures, results, scope: "Actual worksheet/parser; synthetic auth/port response/theme variables. Chromium/WebKit phone-width contexts, not physical iPhone or complete shell permission/theme verification.", externalRequests: 0, messages: 0, ownedResourcesClosed: true }
-  assert.equal(results.length, 480)
+  assert.equal(results.length, 576)
   writeFileSync(path.join(evidence, "results.json"), JSON.stringify(receipt, null, 2) + "\n")
   console.log(JSON.stringify({ contexts: receipt.contexts, cases: receipt.cases, passed: receipt.passed, failed: failures.length, evidence, ownedResourcesClosed: true }))
   assert.equal(failures.length, 0, "Actual worksheet parser correctness regressions")
