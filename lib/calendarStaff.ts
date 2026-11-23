@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { isValidEmailAddress } from "@/lib/emailAddress"
 import { createCalendarServiceClient } from "@/lib/calendarServiceClient"
+import { compareOfficeStaff } from "@/lib/officeStaffOrder"
 
 export type CalendarStaff = { code: string; email: string | null; name: string; issue?: string }
 type StaffRow = { staff_code: string; display_name?: string; admin_user_id: string | null; is_active: boolean }
@@ -41,7 +42,7 @@ export function buildCalendarStaffDirectory(people: StaffRow[], users: UserRow[]
       if (existing.email !== email) result.set(code, { ...existing, email: null, issue: "Conflicting staff accounts. Check User Management before sending." })
     } else result.set(code, { code, name: user.display_name || code, email })
   }
-  return [...result.values()].sort((a, b) => a.code.localeCompare(b.code))
+  return [...result.values()].sort((a, b) => compareOfficeStaff(a.code, b.code) || a.code.localeCompare(b.code))
 }
 
 export async function loadCalendarStaffDirectory(supabase: SupabaseClient = createCalendarServiceClient()) {

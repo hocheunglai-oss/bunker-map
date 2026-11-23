@@ -4,19 +4,9 @@ import {
   type OfficeCalendarEvent,
 } from "@/data/eventCalendar"
 import { formatIsoDate, parseIsoDate } from "@/lib/attendanceRules"
+import { defaultEventCalendarPeople } from "@/lib/eventCalendarPeople"
 
-export const DEFAULT_ATTENDANCE_STAFF_ORDER = Object.freeze([
-  "VL",
-  "SC",
-  "OL",
-  "DT",
-  "KZ",
-  "CY",
-  "MY",
-  "LC",
-  "LL",
-  "JZ",
-])
+export const DEFAULT_ATTENDANCE_STAFF_ORDER = Object.freeze([...defaultEventCalendarPeople])
 
 export type AttendanceHoliday = {
   eventId: string | null

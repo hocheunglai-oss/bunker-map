@@ -17,6 +17,7 @@ import {
   defaultEventCalendarPeople as defaultPeople,
   normalizeEventCalendarPeople as normalizePeople,
 } from "@/lib/eventCalendarPeople"
+import { compareOfficeStaff } from "@/lib/officeStaffOrder"
 
 type EventCategory = "Public Holiday" | "Leave or Travel" | "Meeting Room" | "Unclassified"
 type ViewMode = "upcoming" | "past" | "google"
@@ -602,7 +603,7 @@ export default function EventCalendarPage() {
     }
     setEvents(nextEvents)
     setDeletedEventIds(deletedIds)
-    setPeople(payload.people === undefined ? defaultPeople : normalizePeople(payload.people))
+    setPeople(payload.people === undefined ? defaultPeople : normalizePeople(payload.people).sort(compareOfficeStaff))
     setEmailRecipientsText(payload.emailRecipientsText ?? "")
     setDeletedRequiredSeedIds(deletedSeedIds)
     return true
@@ -683,7 +684,7 @@ export default function EventCalendarPage() {
       setEventVersions(fallbackEventVersions)
       setSettingVersions(fallbackSettingVersions)
       setEvents(fallbackEvents)
-      setPeople(fallbackPeople)
+      setPeople([...fallbackPeople].sort(compareOfficeStaff))
       setEmailRecipientsText(fallbackEmailRecipients)
       setDeletedEventIds(fallbackDeletedEventIds)
       setDeletedRequiredSeedIds(fallbackDeletedRequiredSeedIds)
@@ -1381,7 +1382,7 @@ export default function EventCalendarPage() {
     const owner = componentLifetimeRef.current.sequence
     if (!ownsCalendar(owner)) return
     if (calendarMutationPendingRef.current) return
-    const nextPeople = normalizePeople(draftPeopleText.split(/\n|,/))
+    const nextPeople = normalizePeople(draftPeopleText.split(/\n|,/)).sort(compareOfficeStaff)
     try {
       await mutateCalendar(
         "people",
