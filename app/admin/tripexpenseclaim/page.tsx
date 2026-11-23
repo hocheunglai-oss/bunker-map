@@ -11,6 +11,7 @@ import {
   TRIP_EXPENSE_PAGE_ID,
   tripClaimHref,
 } from "@/lib/tripExpenseClaim"
+import { TRIP_IMPORT_SECTION } from "@/lib/tripExpenseImport"
 import {
   createTripExpenseDb,
   getTripClaim,
@@ -113,11 +114,19 @@ export default async function TripExpenseClaimPage({ searchParams }: {
   return (
     <div className={styles.page}>
       <div className={styles.shell}>
-        <header className={styles.header}>
-          <h1>Trip Expense Claim</h1>
-          {selected ? <Link className={styles.button} href={TRIP_EXPENSE_PAGE}>← Claims</Link>
-            : canEdit && <Link className={styles.primary} href={tripClaimHref("new")} prefetch={false}>File New Claim</Link>}
-        </header>
+        {selected ? (
+          <nav className={styles.back} aria-label="Trip expense claims">
+            <Link className={styles.button} href={TRIP_EXPENSE_PAGE}>← Back</Link>
+          </nav>
+        ) : (
+          <header className={styles.header}>
+            <h1>Trip Expense Claim</h1>
+            {canEdit && <div className={styles.claimActions}>
+              <Link className={styles.button} href={tripClaimHref("new") + "#" + TRIP_IMPORT_SECTION} prefetch={false}>Prepare from Upload</Link>
+              <Link className={styles.primary} href={tripClaimHref("new")} prefetch={false}>File New Claim</Link>
+            </div>}
+          </header>
+        )}
         {content}
       </div>
     </div>

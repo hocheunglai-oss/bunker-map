@@ -26,6 +26,8 @@ import {
   type TripReceipt,
 } from "@/lib/tripExpenseClaim"
 import { ExpenseSummary } from "./ExpenseSummary"
+import { TripExpenseImportPanel } from "./TripExpenseImportPanel"
+import type { PreparedTripClaim } from "@/lib/tripExpenseImport"
 import styles from "./tripExpense.module.css"
 
 type LocalReceipt = TripReceipt & { file: File }
@@ -91,6 +93,8 @@ export function TripExpenseForm({ id, firstItemId, submitter, claimDate }: {
   const [rateAttempt, setRateAttempt] = useState(0)
   const [notice, setNotice] = useState("")
   const [submitting, setSubmitting] = useState(false)
+  const [preparing, setPreparing] = useState(false)
+  const [reviewed, setReviewed] = useState(true)
   const quoteKey = draft.currency !== "HKD" && isTripDate(draft.departureDate) && draft.departureDate <= claimDate
     ? draft.currency + "/" + draft.departureDate
     : null
@@ -156,9 +160,38 @@ export function TripExpenseForm({ id, firstItemId, submitter, claimDate }: {
     }
   }
 
+  function allowImport() {
+    if (submitting || preparing) return false
+    const filled = draft.travellers !== submitter || draft.country || draft.cities || draft.departureDate || draft.returnDate ||
+      draft.currency !== "HKD" || draft.fundReceived || draft.fundReturned || draft.items.length > 1 ||
+      draft.items.some(item => item.notes || item.amount || item.receipts.length ||
+        item.category !== "miscellaneous" || item.paidBy !== "own" || item.currency !== draft.currency)
+    return !filled || window.confirm("Replace your current claim draft with the imported expenses?")
+  }
+
+  function applyImport(prepared: PreparedTripClaim, receipts: Map<string, File>) {
+    const { issues, rate: importedRate, items, travellers, ...fields } = prepared
+    setDraft(current => ({
+      ...current, ...fields, travellers: travellers || submitter,
+      items: items.map(({ sourceIds, ...item }) => ({
+        ...item,
+        id: crypto.randomUUID(),
+        receipts: sourceIds.flatMap(sourceId => {
+          const file = receipts.get(sourceId)
+          return file ? [{ id: crypto.randomUUID(), name: file.name.trim(), size: file.size, file }] : []
+        }),
+      })),
+    }))
+    setLookup(null)
+    setManualRate(importedRate)
+    setRateAttempt(current => current + 1)
+    setReviewed(issues.length === 0)
+    setNotice("")
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (submitting) return
+    if (submitting || preparing || !reviewed) return
     setNotice("")
     setSubmitting(true)
     let navigated = false
@@ -193,7 +226,9 @@ export function TripExpenseForm({ id, firstItemId, submitter, claimDate }: {
 
   return (
     <form className={styles.panel} aria-label="Trip expense claim" onSubmit={submit}>
-      <fieldset className={styles.fieldset} disabled={submitting}>
+      <TripExpenseImportPanel disabled={submitting} reviewed={reviewed} allowReplace={allowImport}
+        onBusy={setPreparing} onPrepared={applyImport} onReviewed={setReviewed} />
+      <fieldset className={styles.fieldset} disabled={submitting || preparing}>
         <div className={styles.metaGrid}>
           <div className={styles.field}><span>Claim Submitter</span><strong>{submitter}</strong></div>
           <label className={styles.field}>Traveller(s)<input required maxLength={200} value={draft.travellers} onChange={event => updateDraft("travellers", event.target.value)} /></label>
@@ -317,7 +352,7 @@ export function TripExpenseForm({ id, firstItemId, submitter, claimDate }: {
       </fieldset>
       <div className={styles.footer}>
         {notice && <p className={styles.error} role="alert">{notice}</p>}
-        <button type="submit" className={styles.primary} disabled={submitting}>
+        <button type="submit" className={styles.primary} disabled={submitting || preparing}>
           {submitting ? "Submitting…" : "Submit Claim"}
         </button>
       </div>
