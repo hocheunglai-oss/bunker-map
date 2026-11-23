@@ -35,7 +35,7 @@ export default async function TaskAllocationPage() {
           )}
         </header>
         {allocation?.tasks.length ? (
-          <TaskAllocationTable allocation={allocation} />
+          <TaskAllocationTable allocation={allocation} canEdit={hasAdminPagePermission(session, "task-allocation", "edit")} />
         ) : (
           <p className={styles.status} role={loadFailed ? "alert" : undefined}>
             {loadFailed ? "Task allocation could not load." : "No schedule available."}

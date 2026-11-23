@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { TaskCalendarValidationError, validateTaskCalendarTask } from "@/data/taskCalendar"
+import { compareAndSetCalendarPayload } from "@/lib/officeCalendarStore"
 
 type RecordValue = Record<string, unknown>
 export type TaskCalendarMutation = {
@@ -73,14 +74,13 @@ export async function mutateTaskCalendarStore(supabase: SupabaseClient, mutation
     if (readError) throw readError
     const nextPayload = applyTaskCalendarMutation(current?.payload, mutation)
     if (current && json(nextPayload) === json(current.payload)) return current.payload
-    const nextUpdatedAt = new Date(Math.max(Date.now(), current?.updated_at ? new Date(current.updated_at).getTime() + 1 : 0)).toISOString()
     if (!current) {
-      const { data: inserted, error } = await supabase.from("office_calendar_store").insert({ key: "task-calendar", payload: nextPayload, updated_at: nextUpdatedAt }).select("payload").maybeSingle()
+      const { data: inserted, error } = await supabase.from("office_calendar_store").insert({ key: "task-calendar", payload: nextPayload, updated_at: new Date().toISOString() }).select("payload").maybeSingle()
       if (error?.code === "23505") continue
       if (error) throw error
       if (inserted) return inserted.payload
     } else {
-      const { data: updated, error } = await supabase.from("office_calendar_store").update({ payload: nextPayload, updated_at: nextUpdatedAt }).eq("key", "task-calendar").eq("updated_at", current.updated_at).select("payload").maybeSingle()
+      const { data: updated, error } = await compareAndSetCalendarPayload(supabase, "task-calendar", current.updated_at, nextPayload)
       if (error) throw error
       if (updated) return updated.payload
     }
