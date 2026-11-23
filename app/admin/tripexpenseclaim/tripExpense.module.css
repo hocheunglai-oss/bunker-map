@@ -1,0 +1,470 @@
+.page {
+  background: var(--fc-admin-page-bg);
+  color: var(--fc-admin-panel-text);
+  padding: 18px;
+}
+
+.shell {
+  width: min(1320px, 100%);
+  margin-inline: auto;
+}
+
+.header,
+.sectionHeader,
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.header {
+  margin-bottom: 12px;
+}
+
+.header h1,
+.expenses h2,
+.summary h2 {
+  color: var(--fc-admin-heading);
+  margin: 0;
+}
+
+.header h1 {
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.sectionHeader,
+.summary h2 {
+  margin-bottom: 8px;
+}
+
+.expenses h2,
+.summary h2 {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.panel {
+  min-width: 0;
+  background: var(--fc-admin-panel-bg);
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 22px;
+  box-shadow: 0 16px 36px #00000012;
+  padding: 14px;
+  font-size: 13px;
+}
+
+.fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.button,
+.primary,
+.fileButton {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 12px;
+  border: 1px solid var(--fc-admin-button-border);
+  border-radius: 999px;
+  background: var(--fc-admin-button-bg);
+  color: var(--fc-admin-button-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.primary {
+  border-color: var(--fc-admin-primary-button-bg);
+  background: var(--fc-admin-primary-button-bg);
+  color: var(--fc-admin-primary-button-text);
+}
+
+.button:disabled,
+.primary:disabled,
+.fieldset:disabled .fileButton {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.metaGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 248px), 1fr));
+  gap: 12px 16px;
+  margin: 0;
+}
+
+.field,
+.cellField {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+  color: var(--fc-admin-muted);
+  font-size: 12px;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.field strong,
+.field dd {
+  margin: 0;
+  color: var(--fc-admin-panel-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.field input,
+.field select,
+.cellField input,
+.cellField select {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 7px;
+  background: var(--fc-admin-panel-bg);
+  color: var(--fc-admin-panel-text);
+  font: inherit;
+  font-weight: 500;
+  padding: 4px 7px;
+}
+
+.rateEntry {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.rateStatus {
+  font-size: 11px;
+}
+
+.expenses,
+.summary,
+.footer {
+  margin-top: 18px;
+}
+
+.sheet,
+.smallTable {
+  overflow: hidden;
+  border: 1px solid var(--fc-admin-border-soft);
+  border-radius: 10px;
+}
+
+.sheet {
+  overflow-x: auto;
+}
+
+.expenseTable,
+.claimList,
+.smallTable {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  text-align: left;
+}
+
+.expenseTable {
+  min-width: 900px;
+  table-layout: fixed;
+}
+
+.expenseTable thead th:first-child { width: 48px; }
+.expenseTable thead th:nth-child(2) { width: 75px; }
+.expenseTable thead th:nth-child(3) { width: 100px; }
+.expenseTable thead th:nth-child(5) { width: 19%; }
+.expenseTable thead th:nth-child(6) { width: 15%; }
+.expenseTable thead th:nth-child(7) { width: 16%; }
+.expenseTable thead th:last-child { width: 108px; text-align: right; }
+
+.expenseTable :is(th, td),
+.claimList :is(th, td),
+.smallTable :is(th, td) {
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--fc-admin-border-soft);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.expenseTable :is(th, td) {
+  border-right: 1px solid var(--fc-admin-border-soft);
+}
+
+.expenseTable tr > :last-child { border-right: 0; }
+.expenseTable tbody tr:last-child > *,
+.claimList tbody tr:last-child > *,
+.smallTable tbody tr:last-child > *,
+.smallTable tfoot tr:last-child > * { border-bottom: 0; }
+
+.expenseTable thead,
+.claimList thead,
+.smallTable thead {
+  background: var(--fc-table-head-bg);
+  color: var(--fc-table-head-text);
+  font-weight: 800;
+  font-size: 11px;
+}
+
+.expenseTable tbody td:has(.cellField) {
+  padding: 4px;
+}
+
+.cellField > span {
+  display: none;
+}
+
+.cellField input,
+.cellField select {
+  border-color: transparent;
+}
+
+.cellField input:hover,
+.cellField select:hover {
+  border-color: var(--fc-admin-border);
+}
+
+.cellField :is(input, select):focus-visible,
+.field :is(input, select):focus-visible,
+.fileButton:focus-within,
+.button:focus-visible,
+.primary:focus-visible,
+.iconButton:focus-visible {
+  outline: 2px solid var(--fc-admin-selected-border);
+  outline-offset: 1px;
+}
+
+.claimList a,
+.receipts a {
+  color: var(--fc-admin-link);
+  font-weight: 750;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.rowNumber {
+  font-size: 12px;
+  text-align: center;
+}
+
+.rowNumber span {
+  display: block;
+  padding-block: 3px;
+}
+
+.iconButton {
+  min-width: 24px;
+  min-height: 24px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fc-admin-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.iconButton:hover {
+  background: var(--fc-admin-button-bg);
+  border-color: var(--fc-admin-button-border);
+}
+
+.receipts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.receipts li {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 4px;
+  overflow-wrap: anywhere;
+}
+
+.receipts li > :first-child { min-width: 0; }
+.receipts li > button { flex: none; }
+
+.fileButton {
+  position: relative;
+  min-height: 28px;
+  padding: 3px 9px;
+  font-size: 11px;
+}
+
+.fileButton input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.numeric,
+.moneyCell,
+.smallTable tr > :last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.moneyCell { font-weight: 750; }
+
+.summaryGrid {
+  display: grid;
+  align-items: start;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.smallTable th { font-weight: 650; }
+.smallTable tfoot td,
+.smallTable tfoot th {
+  background: var(--fc-admin-panel-soft-bg);
+  font-weight: 800;
+}
+
+.footer,
+.detailStatus {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.detailStatus { margin-bottom: 12px; }
+
+.status {
+  display: inline-block;
+  padding: 3px 8px;
+  border: 1px solid var(--fc-admin-border-soft);
+  border-radius: 999px;
+  background: var(--fc-admin-panel-soft-bg);
+  color: var(--fc-admin-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.status[data-sent="true"] {
+  background: var(--fc-admin-selected-bg);
+  color: var(--fc-admin-selected-text);
+}
+
+.error {
+  flex: 1 1 230px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--fc-admin-warning-bg);
+  color: var(--fc-admin-warning-text);
+  font-weight: 700;
+}
+
+.paging {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.empty,
+.muted {
+  color: var(--fc-admin-muted);
+}
+
+.empty {
+  margin: 0;
+  padding: 12px 4px;
+  font-weight: 650;
+}
+
+@media (max-width: 800px) {
+  .page { padding: 12px; }
+  .panel { padding: 10px; border-radius: 16px; }
+  .metaGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .summaryGrid { grid-template-columns: minmax(0, 1fr); }
+  .button, .primary, .fileButton { min-height: 44px; }
+  .field input, .field select, .cellField input, .cellField select {
+    min-height: 44px;
+    font-size: 16px;
+    border-color: var(--fc-admin-border);
+  }
+  .field input[type="date"] { display: block; }
+  .rateEntry { align-items: stretch; }
+  .rateEntry .button { padding-inline: 7px; }
+
+  .expenseTable,
+  .claimList { display: block; min-width: 0; }
+  .expenseTable thead,
+  .claimList thead { display: none; }
+  .expenseTable tbody,
+  .claimList tbody { display: block; }
+  .expenseTable tbody tr,
+  .claimList tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+    padding: 10px;
+    border-bottom: 1px solid var(--fc-admin-border-soft);
+  }
+
+  .expenseTable tbody tr:last-child,
+  .claimList tbody tr:last-child { border-bottom: 0; }
+  .expenseTable tbody tr > *,
+  .claimList tbody tr > * { min-width: 0; padding: 0; border: 0; }
+  .expenseTable tbody td:has(.cellField) { padding: 0; }
+  .cellField > span { display: inline; }
+  .rowNumber,
+  .destination,
+  .wideCell,
+  .receiptCell { grid-column: 1 / -1; }
+  .claimList .destination {
+    order: -1;
+    font-size: 14px;
+  }
+
+  .expenseTable .rowNumber {
+    min-height: 25px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--fc-admin-muted);
+    background: var(--fc-admin-panel-soft-bg);
+    border-radius: 6px;
+    padding-inline: 7px;
+  }
+
+  .iconButton { min-width: 38px; min-height: 38px; }
+
+  .expenseTable [data-label]::before,
+  .claimList [data-label]::before {
+    content: attr(data-label);
+    display: block;
+    color: var(--fc-admin-muted);
+    font-size: 11px;
+    font-weight: 750;
+    margin-bottom: 3px;
+  }
+
+  .moneyCell { text-align: left; }
+}
+
+@media (max-width: 380px) {
+  .metaGrid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 500px) {
+  .selectCell { grid-column: 1 / -1; }
+}

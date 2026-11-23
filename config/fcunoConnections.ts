@@ -30,6 +30,7 @@ export const fcunoConnectionPolicy = Object.freeze({
   },
   dailyBackupReceipt: {
     googleAccount: "wider.custom@gmail.com",
+    rootFolderId: "12hFXN9VbBz4L0lhjrprUl3kByt27466j",
     dailyFolderId: "1-JU5aMyzGpC6tBDbhe_fBN1EmXpOpf1F",
   },
   // Candidate transport only. There is deliberately no enabled route or job:
