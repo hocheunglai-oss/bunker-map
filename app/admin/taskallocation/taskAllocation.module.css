@@ -9,27 +9,12 @@
   margin-inline: auto;
 }
 
-.header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 4px 16px;
-  margin-bottom: 12px;
-}
-
-.header h1 {
-  margin: 0;
-  color: var(--fc-admin-heading);
-  font-size: 22px;
-  font-weight: 800;
-}
-
-.header p {
-  margin: 0;
+.lastUpdated {
+  margin: 0 1px 6px;
   color: var(--fc-admin-muted);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
+  text-align: right;
 }
 
 .panel,
@@ -57,9 +42,10 @@
 
 .table {
   --person-width: 40px;
-  --task-min-width: 290px;
+  --region-width: 150px;
+  --task-min-width: 260px;
   width: 100%;
-  min-width: calc(var(--task-min-width) + var(--person-count) * var(--person-width));
+  min-width: calc(var(--region-width) + var(--task-min-width) + var(--person-count) * var(--person-width));
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
@@ -100,8 +86,16 @@
   z-index: 3;
 }
 
-.taskHeader,
-.taskLine {
+.regionColumn {
+  width: var(--region-width);
+  padding: 2px 6px;
+  border-right: 1px solid var(--fc-admin-border-soft);
+  color: var(--fc-admin-muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.taskHeader {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -112,6 +106,7 @@
 }
 
 .taskLine {
+  display: block;
   width: 100%;
   min-width: 0;
   padding: 1px 0;
@@ -125,24 +120,11 @@
   text-align: left;
 }
 
-.taskName,
-.region {
+.taskLine,
+.regionColumn {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.region {
-  flex-shrink: 0;
-  max-width: 48%;
-  padding: 0 4px;
-  border: 1px solid var(--fc-admin-border-soft);
-  border-radius: 4px;
-  background: var(--fc-admin-panel-soft-bg);
-  color: var(--fc-admin-muted);
-  font-size: 9px;
-  font-weight: 750;
-  line-height: 13px;
 }
 
 .personColumn,
@@ -205,6 +187,10 @@
   font-weight: 900;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.groupHeading {
+  padding: 2px 6px;
 }
 
 .highlighted > * {
@@ -373,17 +359,21 @@
   }
 
   .table {
-    --person-width: 40px;
-    --task-min-width: clamp(143px, 46vw, 250px);
+    --region-width: 126px;
+    --task-min-width: clamp(116px, 35vw, 230px);
   }
 
-  .taskHeader,
-  .taskLine {
+  .taskHeader {
     gap: 4px;
   }
 
-  .region {
-    max-width: 42%;
+  .regionColumn {
+    padding-inline: 4px;
+    font-size: 10px;
+  }
+
+  .filterButton {
+    padding-inline: 4px;
   }
 
   .personButton,
