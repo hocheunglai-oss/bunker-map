@@ -25,6 +25,7 @@ const supplementalPorts = [
   "Hong Kong",
   "Laemchabang",
   "Linggi",
+  "Malta",
   "Nagasaki",
   "Pasir Gudang",
   "Pyeongtaek",
@@ -37,6 +38,8 @@ const supplementalPorts = [
 const preferredPortAliases: Array<{ label: string; aliases: string[]; short?: boolean }> = [
   { label: "Antwerp", aliases: ["Antwerp", "安特卫普"] },
   { label: "Busan", aliases: ["Busan", "Pusan"] },
+  { label: "Gibraltar", aliases: ["Gibraltar", "Gibralter"] },
+  { label: "Shanghai (Wai Gao Qiao)", aliases: ["Shanghai, Wai Gao Qiao", "Shanghai (Wai Gao Qiao)", "Shanghai Waigaoqiao"] },
   { label: "Yosu", aliases: ["Yosu", "Yeosu", "Yeasu"] },
   { label: "Port Klang", aliases: ["Port Klang", "Port Kelang", "Klang", "Kelang"] },
   { label: "Port Louis", aliases: ["Port Louis", "Port Louis Anchorage"] },
@@ -96,7 +99,7 @@ export function normalizePortKey(value: string) {
 
 function buildAliasPattern(aliasKey: string) {
   const words = aliasKey.split(" ").filter(Boolean)
-  const body = words.map(escapeRegExp).join("[\\s.'/-]+")
+  const body = words.map(escapeRegExp).join("[\\s,().'/-]+")
   return new RegExp(`(^|[^A-Za-z0-9])(${body})(?=$|[^A-Za-z0-9])`, "i")
 }
 

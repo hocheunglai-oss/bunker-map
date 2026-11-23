@@ -9,6 +9,7 @@ import {
   type VlsfoMaxRemark,
 } from "@/lib/enquiryShortener"
 import { extractEnquiryPort, isValidImo, parseEnquiryWorksheetGuess } from "@/lib/enquiryWorksheetParser"
+import { normalizeIndexedEnquiryPort } from "@/lib/enquiryPortIndex"
 
 export type ParsedSpcEnquiry = {
   rawText: string
@@ -190,7 +191,9 @@ function upperText(value: string | null | undefined) {
 }
 
 export function normalizeSpcPort(value: string | null | undefined) {
-  const cleaned = oneLine(value).replace(/^(?:port|location)\s*[:#-]?\s*/i, "").trim()
+  const raw = oneLine(value).replace(/^(?:port|location)\s*[:#-]?\s*/i, "").trim()
+  const indexed = normalizeIndexedEnquiryPort(raw, { includeShortAliases: true })
+  const cleaned = indexed.includes("(") ? indexed : raw
   if (!cleaned) return "SG"
   if (/^(?:singapore|spore|sing|sgp|sin|sg|新加坡)$/i.test(cleaned)) return "SG"
   return upperText(cleaned)

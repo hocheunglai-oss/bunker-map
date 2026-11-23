@@ -18,7 +18,7 @@ type ProductSegment = {
 const QUANTITY_UNIT_PATTERN = String.raw`(?:m\s*\.?\s*tons?|m\s*t|mt|mts|tons?|c\s*\.?\s*b\s*\.?\s*m|k\s*\.?\s*l|[吨噸])`
 const KL_UNIT_PATTERN = String.raw`k\s*\.?\s*l`
 const EXPLICIT_PORT_LINE_PATTERN =
-  /^\s*(?:port|position|location|bunker(?:ing)?\s*(?:port|location|place)|port\s+of\s+(?:call|delivery|supply)|delivery\s+(?:port|place|location)|place\s+of\s+(?:supply|delivery)|supply\s+(?:port|place|location)|loading\s+port|discharging\s+port|加油港口|港口|地点|地點)(?:\s|[:#(（-]|$)/i
+  /^\s*(?:port|position|location|demand\s+port|bunker(?:ing)?\s*(?:port|location|place)|port\s+of\s+(?:call|delivery|supply)|delivery\s+(?:port|place|location)|place\s+of\s+(?:supply|delivery)|supply\s+(?:port|place|location)|loading\s+port|discharging\s+port|加油港口|港口|地点|地點)(?:\s|[:#(（-]|$)/i
 const OPERATIONAL_SCHEDULE_LINE_PATTERN =
   /^\s*((?:e\s*\.?\s*t\s*\.?\s*(?:a|b|d|s|c(?:\s*\.?\s*d)?)|a\s*\.?\s*t\s*\.?\s*a)\s*\.?)\s*[:#-]?\s*(.*)$/i
 
