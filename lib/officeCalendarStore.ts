@@ -11,6 +11,6 @@ export function compareAndSetCalendarPayload(
     .update({ payload, updated_at: nextUpdatedAt })
     .eq("key", key)
     .eq("updated_at", updatedAt)
-    .select("payload")
+    .select("payload,updated_at")
     .maybeSingle()
 }

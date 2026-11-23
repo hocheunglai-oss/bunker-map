@@ -32,6 +32,7 @@ export type TaskAllocationRow = TaskAllocationTask & {
 
 export type TaskAllocation = {
   effectiveDate: string
+  updatedAt: string | null
   tasks: TaskAllocationRow[]
   people: string[]
   btPeople: string[]
@@ -89,6 +90,7 @@ export function resolveTaskAllocation(
   schedule: TaskAllocationSchedule,
   calendarPeople: string[] | null | undefined,
   traders: string[],
+  updatedAt: string | null = null,
 ): TaskAllocation {
   const btPeople = [...new Set(allocationCodes(schedule.btPeople ?? traders))].filter((code) => code !== "BT").sort(compareOfficeStaff)
   const tasks = schedule.tasks.map((task) => {
@@ -104,7 +106,7 @@ export function resolveTaskAllocation(
     ...btPeople,
     ...tasks.flatMap((task) => task.assignees),
   ])].sort(compareOfficeStaff)
-  return { effectiveDate: schedule.effectiveDate, tasks, people, btPeople }
+  return { effectiveDate: schedule.effectiveDate, updatedAt, tasks, people, btPeople }
 }
 
 function readSchedule(supabase: SupabaseClient) {
@@ -141,7 +143,7 @@ export async function loadTaskAllocation(): Promise<TaskAllocation | null> {
 
   const schedule = parseTaskAllocationSchedule(stored.data.payload)
   const traders = schedule.btPeople ?? await loadLegacyBtPeople(supabase)
-  return resolveTaskAllocation(schedule, calendarPeople, traders)
+  return resolveTaskAllocation(schedule, calendarPeople, traders, stored.data.updated_at)
 }
 
 export function applyTaskAllocationMutation(
@@ -178,13 +180,15 @@ export async function saveTaskAllocation(supabase: SupabaseClient, mutation: Tas
 
     const current = parseTaskAllocationSchedule(data.payload)
     const btPeople = current.btPeople ?? (legacyBtPeople ??= await loadLegacyBtPeople(supabase))
-    const allocation = resolveTaskAllocation(current, calendarPeople, btPeople)
+    const allocation = resolveTaskAllocation(current, calendarPeople, btPeople, data.updated_at)
     const next = applyTaskAllocationMutation(current, allocation, mutation)
     if (next === current) return allocation
 
     const saved = await compareAndSetCalendarPayload(supabase, scheduleKey, data.updated_at, next)
     if (saved.error) throw saved.error
-    if (saved.data) return resolveTaskAllocation(parseTaskAllocationSchedule(saved.data.payload), calendarPeople, btPeople)
+    if (saved.data) {
+      return resolveTaskAllocation(parseTaskAllocationSchedule(saved.data.payload), calendarPeople, btPeople, saved.data.updated_at)
+    }
   }
 
   throw new Error("The schedule is busy. Try saving again.")

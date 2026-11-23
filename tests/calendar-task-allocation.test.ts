@@ -90,9 +90,9 @@ test("concurrent saves on different tasks merge and a stale edit keeps the saved
   const client = {
     from(table: string) {
       assert.equal(table, "office_calendar_store")
-      let key: string, version: string, update: typeof row | undefined
+      let key: string, version: string, update: typeof row | undefined, columns: string
       const query = {
-        select() { return query },
+        select(value: string) { columns = value; return query },
         eq(column: string, value: string) {
           if (column === "key") key = value
           else if (column === "updated_at") version = value
@@ -106,6 +106,7 @@ test("concurrent saves on different tasks merge and a stale edit keeps the saved
           assert.equal(key, "task-allocation")
           if (update) {
             if (version !== row.updated_at) return { data: null, error: null }
+            assert.ok(columns.split(",").includes("updated_at"))
             row = structuredClone(update)
           }
           return { data: structuredClone(row), error: null }
@@ -117,10 +118,14 @@ test("concurrent saves on different tasks merge and a stale edit keeps the saved
   const original = resolveTaskAllocation(row.payload, calendarPeople, [])
   const first = { id: 4, version: original.tasks[0].version, assignees: ["KI"] }
   const second = { id: 5, version: original.tasks[1].version, assignees: [] }
-  await Promise.all([saveTaskAllocation(client as never, first), saveTaskAllocation(client as never, second)])
+  const saves = await Promise.all([saveTaskAllocation(client as never, first), saveTaskAllocation(client as never, second)])
   assert.deepEqual(row.payload.tasks.map((task) => task.assignees), [
     ["KI"], [], schedule.tasks[2].assignees, schedule.tasks[3].assignees,
   ])
-  await saveTaskAllocation(client as never, first)
-  await assert.rejects(saveTaskAllocation(client as never, { ...first, assignees: ["LV"] }), TaskAllocationConflictError)
+  assert.equal(saves.map((allocation) => allocation.updatedAt).sort().at(-1), row.updated_at)
+  assert.equal(new Set(saves.map((allocation) => allocation.updatedAt)).size, 2)
+  assert.equal((await saveTaskAllocation(client as never, first)).updatedAt, row.updated_at)
+  await assert.rejects(saveTaskAllocation(client as never, { ...first, assignees: ["LV"] }), (error) =>
+    error instanceof TaskAllocationConflictError && error.allocation?.updatedAt === row.updated_at,
+  )
 })

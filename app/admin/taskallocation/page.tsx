@@ -6,8 +6,6 @@ import styles from "./taskAllocation.module.css"
 
 export const metadata: Metadata = { title: "Task Allocation - FC Uno" }
 
-const dateFormat = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeZone: "UTC" })
-
 export default async function TaskAllocationPage() {
   const session = await getAdminSession({ clearInvalidCookie: false })
   if (!hasAdminPagePermission(session, "task-allocation")) return null
@@ -23,17 +21,7 @@ export default async function TaskAllocationPage() {
   return (
     <div className={styles.page}>
       <div className={styles.shell}>
-        <header className={styles.header}>
-          <h1 id="task-allocation-heading">Task Allocation</h1>
-          {allocation && (
-            <p>
-              Effective{" "}
-              <time dateTime={allocation.effectiveDate}>
-                {dateFormat.format(new Date(`${allocation.effectiveDate}T00:00:00Z`))}
-              </time>
-            </p>
-          )}
-        </header>
+        <h1 id="task-allocation-heading" className="sr-only">Task Allocation</h1>
         {allocation?.tasks.length ? (
           <TaskAllocationTable allocation={allocation} canEdit={hasAdminPagePermission(session, "task-allocation", "edit")} />
         ) : (
