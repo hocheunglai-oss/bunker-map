@@ -13,6 +13,7 @@ export type AdminPageDefinition = {
   path: string
   matchPrefixes?: string[]
   external?: boolean
+  defaultStaffPermission?: AdminPagePermission
 }
 
 export const ADMIN_PAGE_DEFINITIONS: AdminPageDefinition[] = [
@@ -96,6 +97,13 @@ export const ADMIN_PAGE_DEFINITIONS: AdminPageDefinition[] = [
     label: "TASK ALLOCATION",
     group: "office",
     path: "/admin/taskallocation",
+  },
+  {
+    id: "trip-expense-claim",
+    label: "TRIP EXPENSE CLAIM",
+    group: "office",
+    path: "/admin/tripexpenseclaim",
+    defaultStaffPermission: "edit",
   },
   {
     id: "attendance-record",
@@ -192,7 +200,9 @@ export function normaliseAdminPagePermissions(
   const next = pages.reduce<AdminPagePermissionMap>((pagePermissions, page) => {
     const value = source[page.id]
     pagePermissions[page.id] =
-      value === "edit" || value === "view" || value === "none" ? value : fallback
+      value === "edit" || value === "view" || value === "none"
+        ? value
+        : fallback === "view" ? page.defaultStaffPermission ?? fallback : fallback
     return pagePermissions
   }, {})
 

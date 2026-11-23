@@ -237,6 +237,7 @@ const CRON_DESCRIPTIONS: Record<string, readonly [string, string]> = {
   "/api/spc/security-maintenance": ["SPC SECURITY MAINTENANCE", "02:17 HKT DAILY / EXPIRED SECURITY STATE CLEANUP"],
   "/api/cron/spc-mobile-deliveries": ["SPC MOBILE / GROUP DELIVERY", "EVERY MINUTE / DURABLE DELIVERY QUEUES"],
   "/api/cron/fcos-identity-sync": ["FCOS IDENTITY SYNC", "EVERY FIVE MINUTES / FEATURE-GATED SIGNED OUTBOX"],
+  "/api/cron/trip-expense-claims": ["TRIP EXPENSE CLAIMS", "EVERY FIVE MINUTES / RETRY PENDING BACKUPS AND NOTICES"],
 }
 
 function PhonebookServerReadout() {
