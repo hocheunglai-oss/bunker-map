@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
+import { backupDueWindow } from "../lib/backupProtectionPolicy"
 
 const healthSource = readFileSync(
   new URL("../lib/systemHealth.ts", import.meta.url),
@@ -50,14 +51,14 @@ test("System Health keeps enough runtime for full backup-chain byte verification
   assert.ok(noticeDurationSeconds * 1_000 >= backupTimeoutMs + 30_000)
 })
 
-test("daily backup has enough runtime to export and verify the current database", () => {
-  const backupDurationSeconds = numericConstant(
-    backupRouteSource,
-    "maxDuration"
-  )
-
-  assert.ok(backupDurationSeconds >= 600)
-  assert.ok(backupDurationSeconds < 15 * 60)
+test("daily backup has upload headroom, exclusive ownership until exit, and a quiet gap before later jobs", () => {
+  const duration = numericConstant(backupRouteSource, "maxDuration")
+  const lease = numericConstant(backupRouteSource, "BACKUP_LOCK_LEASE_SECONDS")
+  assert.ok(duration >= 20 * 60, "leave time for the Drive upload after a slow audit scan")
+  assert.ok(lease >= duration + 60, "the lock must outlast the whole invocation")
+  assert.ok(lease < 29 * 60, "even a stale lease from :02 must expire before the hourly :31 sync")
+  const window = backupDueWindow(Date.parse("2026-11-23T08:30:00+08:00"))
+  assert.ok(window.deadlineAt - (window.databaseFinalAttemptAt + lease * 1000) >= 30 * 60_000)
 })
 
 test("Attendance Sync remains visible in System Health without sending email notices", () => {

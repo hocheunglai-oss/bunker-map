@@ -7,6 +7,12 @@ type BackupRead = (
 
 const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i
 
+function isStatementTimeout(error: unknown) {
+  return typeof error === "object" && error !== null &&
+    "code" in error && error.code === "57014" &&
+    "message" in error && error.message === "canceling statement due to statement timeout"
+}
+
 // Only audit_logs uses this reader: its non-null UUID primary key provides
 // the unique, indexed order required by a strict greater-than cursor. Do not
 // apply this to nullable, compound, text-collated or non-unique sort columns.
@@ -24,15 +30,28 @@ export async function streamAuditLogRows(options: {
 
   let after: string | null = null
   let exported = 0
+  let limit = pageSize
+  let remainingReductions = 3
   for (;;) {
     // Capture the cursor before passing a fresh request factory to the existing
     // transient-read retry policy. A retry cannot advance or append a page.
     const requestedAfter: string | null = after
-    const data = await options.retryRead(
-      () => options.readPage(requestedAfter, pageSize),
-      `export audit_logs after ${requestedAfter || "start"}`
-    )
-    if (!Array.isArray(data) || data.length > pageSize) {
+    const requestedLimit = limit
+    let data: unknown
+    try {
+      data = await options.retryRead(
+        () => options.readPage(requestedAfter, requestedLimit),
+        `export audit_logs after ${requestedAfter || "start"}`
+      )
+    } catch (error) {
+      // 57014 also covers operator cancellation. Only shrink a timed-out read,
+      // never a failed write, and never advance the cursor on an error.
+      if (!isStatementTimeout(error) || requestedLimit === 1 || remainingReductions === 0) throw error
+      limit = Math.floor(requestedLimit / 2)
+      remainingReductions--
+      continue
+    }
+    if (!Array.isArray(data) || data.length > requestedLimit) {
       throw new Error("Invalid audit-log backup page.")
     }
 
@@ -60,6 +79,6 @@ export async function streamAuditLogRows(options: {
     after = nextAfter
     // No prefetch: downstream compression/backpressure completes before the
     // next read. Exact full pages require a final empty/short page, not a cap.
-    if (data.length < pageSize) return exported
+    if (data.length < requestedLimit) return exported
   }
 }

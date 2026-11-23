@@ -22,7 +22,8 @@ import { streamAuditLogRows } from "@/lib/backupAuditLogExport"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
-export const maxDuration = 800
+// Includes the complete export, Drive upload and verification of its receipt.
+export const maxDuration = 1200
 
 const RETAINED_VERIFIED_BACKUP_COUNT = 2
 const CRON_RETRY_COVERAGE_HOURS = 6
@@ -40,7 +41,9 @@ const FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD = "20260830182946"
 const PHONEBOOK_CARDDAV_RECONCILIATION_MIGRATION_HEAD = "20260930074908"
 const ATTENDANCE_DINGTALK_ANOMALY_MIGRATION_HEAD = "20261014044009"
 const BACKUP_LOCK_NAME = "daily-supabase-drive-v2"
-const BACKUP_LOCK_LEASE_SECONDS = 15 * 60
+// Outlast the invocation by two minutes; even the last regular lease from
+// :02 expires at :24, before the next :31 scheduled Exchange update.
+const BACKUP_LOCK_LEASE_SECONDS = 1_320
 const BACKUP_EXPORT_PAGE_SIZE = 500
 const SUPABASE_BACKUP_READ_ATTEMPTS = 6
 const SUPABASE_BACKUP_READ_RETRY_DELAY_MS = 2_000
