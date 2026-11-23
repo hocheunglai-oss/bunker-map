@@ -12,6 +12,8 @@ import { requireAdminPagePermission } from "@/lib/adminAuth"
 import {
   createCompressedBackupStage,
   createCompressedBackupStageReadStream,
+  openUnlinkedBackupStage,
+  type UnlinkedBackupStage,
 } from "@/lib/compressedBackupStage"
 import { loadGoogleApis } from "@/lib/googleApis"
 import { buildGoogleDriveFolderLookupQuery } from "@/lib/queryEscaping"
@@ -22,7 +24,8 @@ import { streamAuditLogRows } from "@/lib/backupAuditLogExport"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
-export const maxDuration = 800
+// Includes the complete export, Drive upload and verification of its receipt.
+export const maxDuration = 1200
 
 const RETAINED_VERIFIED_BACKUP_COUNT = 2
 const CRON_RETRY_COVERAGE_HOURS = 6
@@ -40,7 +43,9 @@ const FCUNO_IDENTITY_FEDERATION_MIGRATION_HEAD = "20260830182946"
 const PHONEBOOK_CARDDAV_RECONCILIATION_MIGRATION_HEAD = "20260930074908"
 const ATTENDANCE_DINGTALK_ANOMALY_MIGRATION_HEAD = "20261014044009"
 const BACKUP_LOCK_NAME = "daily-supabase-drive-v2"
-const BACKUP_LOCK_LEASE_SECONDS = 15 * 60
+// Outlast the invocation by two minutes; even the last regular lease from
+// :02 expires at :24, before the next :31 scheduled Exchange update.
+const BACKUP_LOCK_LEASE_SECONDS = 1_320
 const BACKUP_EXPORT_PAGE_SIZE = 500
 const SUPABASE_BACKUP_READ_ATTEMPTS = 6
 const SUPABASE_BACKUP_READ_RETRY_DELAY_MS = 2_000
@@ -104,7 +109,7 @@ type BackupFinalWriter = {
 }
 
 type PreparedBackupData = {
-  dataPath: string
+  stageFile: UnlinkedBackupStage
   artifactPrefix: Record<string, unknown>
   counts: Record<string, number>
   sections: BackupSectionManifest
@@ -1094,7 +1099,7 @@ function assertSameTruthHead(
 
 async function buildBackupFile(
   supabase: ReturnType<typeof getSupabaseClient>,
-  filePath: string,
+  stageFile: UnlinkedBackupStage,
   previousVerifiedBackup: PreviousVerifiedBackup | null,
   provenance: BackupProvenance,
   inventory: Awaited<ReturnType<typeof getBackupInventory>>
@@ -1171,7 +1176,7 @@ async function buildBackupFile(
     },
   }
   const stage = createCompressedBackupStage(
-    filePath,
+    stageFile,
     MAX_COMPRESSED_STAGING_BYTES
   )
   const writer: BackupDataWriter = {
@@ -1549,7 +1554,7 @@ async function buildBackupFile(
     )
 
     return {
-      dataPath: filePath,
+      stageFile,
       artifactPrefix,
       counts,
       sections,
@@ -1649,7 +1654,7 @@ async function streamPreparedBackupToDrive(
         `${serializedPrefix.slice(0, -1)},"counts":${JSON.stringify(prepared.counts)},"data":`
       )
       for await (const chunk of createCompressedBackupStageReadStream(
-        prepared.dataPath
+        prepared.stageFile
       )) {
         await writeFinalChunk(writer, chunk)
       }
@@ -2054,6 +2059,7 @@ async function createBackup(provenance: BackupProvenance) {
   const startedAt = Date.now()
   let lockAcquired = false
   let tempDirectory: string | null = null
+  let stageFile: UnlinkedBackupStage | undefined
   let drive: drive_v3.Drive | null = null
   let uploadedFileId: string | null = null
   let uploadVerified = false
@@ -2167,10 +2173,10 @@ async function createBackup(provenance: BackupProvenance) {
     tempDirectory = await mkdtemp(
       join(tmpdir(), "bunker-map-backup-")
     )
-    const dataPath = join(tempDirectory, "data.json.gz")
+    stageFile = await openUnlinkedBackupStage(join(tempDirectory, "data.br"))
     const prepared = await buildBackupFile(
       supabase,
-      dataPath,
+      stageFile,
       previousVerifiedBackup,
       provenance,
       inventory
@@ -2268,7 +2274,11 @@ async function createBackup(provenance: BackupProvenance) {
   } finally {
     if (tempDirectory) {
       try {
-        await rm(tempDirectory, { recursive: true, force: true })
+        try {
+          await stageFile?.close()
+        } finally {
+          await rm(tempDirectory, { recursive: true, force: true })
+        }
       } catch (error) {
         console.error(
           "Failed to remove the bounded backup workspace:",

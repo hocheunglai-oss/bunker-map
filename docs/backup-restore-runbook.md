@@ -178,8 +178,18 @@ it cannot recreate append-only evidence and transaction ordering safely.
 Vercel calls `/api/backups/bunker-map-drive` every day at `19:02` UTC
 (`03:02` the following day in Hong Kong), with retry opportunities at `20:02`
 and `21:02` UTC (`04:02` and `05:02` HKT). Cron attempts skip when a recent
-verified backup already covers the live schema. It stores backup-format-v2
-JSON files in Google Drive under:
+verified backup already covers the live schema. Each attempt has up to 20
+minutes, including the Drive upload and receipt verification. Its exclusive
+lock is normally released on exit and otherwise expires after 22 minutes.
+The final scheduled attempt therefore has room to finish before the 06:10 HKT
+full Exchange check and the 06:15 HKT backup deadline.
+
+If PostgreSQL times out reading an audit-history page, the exporter retries
+the same position with a smaller page (at most three reductions per run).
+It never skips a row to get past a timeout. A persistent timeout fails the
+attempt; a partial export cannot replace a verified copy.
+
+The backup stores format-v2 JSON files in Google Drive under:
 
 ```text
 Bunker Map Backups / Daily Supabase Backups
@@ -203,6 +213,9 @@ download and SHA-256 check its existing predecessor before starting a new
 export; System Health performs the later full-byte checks described below.
 During export, the paged data body is held in a bounded Brotli-compressed
 temporary staging file and decompressed directly into the Drive upload stream.
+The temporary file has no directory entry while it holds backup data. If
+the process is killed mid-run, the operating system releases that space
+when its file handles close; a retry cannot inherit a stranded archive.
 The published artifact remains ordinary JSON, so existing validators and
 restore evidence remain compatible while temporary storage no longer grows at
 the full uncompressed database size.

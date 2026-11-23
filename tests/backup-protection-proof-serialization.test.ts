@@ -120,7 +120,7 @@ function fixture(options: { fault?: Fault; combinedProofFault?: CombinedProofFau
   const code = transformSync(`${source}\nmodule.exports.proofFixture = { buildBackupFile, getBackupInventory };`, { loader: "ts", format: "cjs", target: "node24" }).code
   const loaded = { exports: {} as { proofFixture: {
     getBackupInventory(client: typeof supabase): Promise<unknown>
-    buildBackupFile(client: typeof supabase, path: string, previous: null, provenance: unknown, inventory: unknown): Promise<{ truth: Record<string, unknown>; counts: Record<string, number>; databaseEpoch: number; stagingFileByteLength: number }>
+    buildBackupFile(client: typeof supabase, file: compression.UnlinkedBackupStage, previous: null, provenance: unknown, inventory: unknown): Promise<{ truth: Record<string, unknown>; counts: Record<string, number>; databaseEpoch: number; stagingFileByteLength: number }>
   } } }
   new Function("require", "module", "exports", "process", "fetch", code)(
     (name: string) => name.startsWith("node:") ? require(name) : (assert.ok(name in modules, name), modules[name]), loaded, loaded.exports,
@@ -131,11 +131,15 @@ function fixture(options: { fault?: Fault; combinedProofFault?: CombinedProofFau
     get peakProofs() { return peakProofs }, get tableReads() { return tableReads }, get googleReads() { return googleReads },
     async run() {
       const directory = await mkdtemp(join(tmpdir(), "fcuno-proof-serialization-"))
+      let file: compression.UnlinkedBackupStage | undefined
       try {
         const input = await loaded.exports.proofFixture.getBackupInventory(supabase)
-        return await loaded.exports.proofFixture.buildBackupFile(supabase, join(directory, "synthetic-data.json.br"), null,
+        file = await compression.openUnlinkedBackupStage(join(directory, "synthetic-data.br"))
+        return await loaded.exports.proofFixture.buildBackupFile(supabase, file, null,
           { backupRunId: "11111111-1111-4111-8111-111111111111", source: "vercel-cron", requestedBy: "Synthetic fixture" }, input)
-      } finally { await rm(directory, { recursive: true, force: true }) }
+      } finally {
+        try { await file?.close() } finally { await rm(directory, { recursive: true, force: true }) }
+      }
     },
   }
 }

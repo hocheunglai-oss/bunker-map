@@ -96,17 +96,51 @@ test("the existing retry wrapper recreates the same cursor query and writes only
   assert.equal(names.length, 2)
 })
 
-test("database errors and writer errors stop without advancing or prefetching another page", async () => {
-  let reads = 0
-  const fault = { code: "57014", message: "canceling statement due to statement timeout" }
+const statementTimeout = { code: "57014", message: "canceling statement due to statement timeout" }
+
+test("an audit statement timeout retries the same cursor using smaller pages, without losing the tail or changing the hash", async () => {
+  const rows = Array.from({ length: 1500 }, (_, i) => row(i + 1)), saved: unknown[] = []
+  const reads: Array<[string | null, number]> = []
+  const count = await streamAuditLogRows({
+    readPage: async (after, limit) => {
+      reads.push([after, limit])
+      if (after === id(500) && limit > 125) return { data: null, error: statementTimeout }
+      const start = after === null ? 0 : rows.findIndex(r => r.id === after) + 1
+      return { data: rows.slice(start, start + limit), error: null }
+    },
+    retryRead: directRead, appendRows: async batch => { saved.push(...batch) }, pageSize: 500,
+  })
+  assert.deepEqual(reads.slice(0, 5), [[null, 500], [id(500), 500], [id(500), 250], [id(500), 125], [id(625), 125]])
+  assert.deepEqual(reads.at(-1), [id(1500), 125], "an exact multiple still requires a final empty read")
+  assert.equal(count, rows.length)
+  assert.equal(createHash("sha256").update(JSON.stringify(saved)).digest("hex"), createHash("sha256").update(JSON.stringify(rows)).digest("hex"))
+})
+
+test("persistent statement timeouts have a bounded number of smaller reads; never return partial success", async () => {
+  const limits: number[] = []
   await assert.rejects(() => streamAuditLogRows({
-    readPage: async () => { reads++; return { data: null, error: fault } }, retryRead: directRead,
-    appendRows: async () => assert.fail("Failed read cannot be written"), pageSize: 2,
-  }), (error) => error === fault)
-  assert.equal(reads, 1)
+    readPage: async (after, limit) => { assert.equal(after, null); limits.push(limit); return { data: null, error: statementTimeout } },
+    retryRead: directRead, appendRows: async () => assert.fail("Failed read cannot be written"), pageSize: 500,
+  }), error => error === statementTimeout)
+  assert.deepEqual(limits, [500, 250, 125, 62])
+})
+
+test("cancellation by an operator, permissions, malformed errors and writer errors are not retried as timeouts", async () => {
+  for (const fault of [{ code: "57014", message: "canceling statement due to user request" },
+    { code: "42501", message: "permission denied" }, { message: statementTimeout.message }, Error("network failure")]) {
+    let reads = 0
+    await assert.rejects(() => streamAuditLogRows({
+      readPage: async () => { reads++; return { data: null, error: fault } }, retryRead: directRead,
+      appendRows: async () => assert.fail("Failed read cannot be written"), pageSize: 500,
+    }), error => error === fault)
+    assert.equal(reads, 1)
+  }
   const f = pages([[row(1), row(2)], [row(3)]])
   await assert.rejects(() => f.run(async () => { throw Error("Synthetic writer failure") }), /writer failure/)
   assert.equal(f.reads.length, 1)
+  const writerTimeout = pages([[row(1), row(2)]])
+  await assert.rejects(() => writerTimeout.run(async () => { throw statementTimeout }), error => error === statementTimeout)
+  assert.equal(writerTimeout.reads.length, 1)
 })
 
 test("writer backpressure bounds live pages and next cursor is independent of downstream mutation", async () => {
@@ -140,15 +174,16 @@ function actualProductionReader() {
     return source.slice(from, to)
   }
   const code = transformSync([
-    slice("function redactPasswordHashSnapshot", "function getSupabaseClient"),
+    slice("function getErrorMessage", "function getSupabaseClient"),
+    slice("function isRetryableSupabaseReadError", "async function callTruthRpc"),
     slice("async function streamTableRows", "async function streamPrivateAttendanceRows"),
   ].join("\n"), { loader: "ts", format: "cjs", target: "node24" }).code
-  return new Function("streamAuditLogRows", "retrySupabaseRead", "BACKUP_EXPORT_PAGE_SIZE", `${code}\nreturn streamTableRows;`)(
-    streamAuditLogRows, directRead, 500,
+  return new Function("streamAuditLogRows", "BACKUP_EXPORT_PAGE_SIZE", "SUPABASE_BACKUP_READ_ATTEMPTS", "SUPABASE_BACKUP_READ_RETRY_DELAY_MS", "SUPABASE_BACKUP_READ_MAX_RETRY_DELAY_MS", `${code}\nreturn streamTableRows;`)(
+    streamAuditLogRows, 500, 6, 0, 0,
   ) as (client: TestClient, config: TableConfig, append: (rows: unknown[]) => Promise<void>) => Promise<void>
 }
 
-function clientFor(rows: Array<Record<string, unknown>>) {
+function clientFor(rows: Array<Record<string, unknown>>, responseFor?: (url: URL) => Response | undefined) {
   const requests: URL[] = []
   const client = createClient("https://backup-audit-fixture.invalid", "synthetic-only-key", {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -156,6 +191,8 @@ function clientFor(rows: Array<Record<string, unknown>>) {
       const url = new URL(String(input))
       requests.push(url)
       assert.equal(url.origin, "https://backup-audit-fixture.invalid")
+      const response = responseFor?.(url)
+      if (response) return response
       const after = url.searchParams.get("id")?.slice(3)
       const eligible = after ? rows.filter((row) => String(row.id).toLowerCase() > after) : rows
       const offset = Number(url.searchParams.get("offset") || 0)
@@ -178,6 +215,21 @@ test("actual route and Supabase SDK request indexed UUID pages without offsets, 
     assert.equal(request.searchParams.has("offset"), false)
     assert.equal(request.searchParams.get("id"), index ? `gt.${id(index * 500)}` : null)
   }
+})
+
+test("actual route handles a typed HTTP 500 from PostgREST and resumes without skipping or duplicating records", async () => {
+  const rows = Array.from({ length: 1003 }, (_, i) => row(i + 1)), saved: unknown[] = []
+  const f = clientFor(rows, url => {
+    if (url.searchParams.get("id") === `gt.${id(500)}` && url.searchParams.get("limit") === "500") {
+      return Response.json(statementTimeout, { status: 500 })
+    }
+  })
+  await actualProductionReader()(f.client, auditConfig, async batch => { saved.push(...batch) })
+  assert.deepEqual(saved, rows)
+  assert.deepEqual(f.requests.map(url => [url.searchParams.get("id"), url.searchParams.get("limit")]), [
+    [null, "500"], [`gt.${id(500)}`, "500"], [`gt.${id(500)}`, "250"],
+    [`gt.${id(750)}`, "250"], [`gt.${id(1000)}`, "250"],
+  ])
 })
 
 test("actual route retains credential redaction and refuses unsupported audit ordering before transport", async () => {
