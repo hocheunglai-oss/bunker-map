@@ -56,7 +56,11 @@
 }
 
 .table {
+  --person-width: 40px;
+  --task-min-width: 290px;
   width: 100%;
+  min-width: calc(var(--task-min-width) + var(--person-count) * var(--person-width));
+  table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
   text-align: left;
@@ -85,9 +89,7 @@
   position: sticky;
   left: 0;
   z-index: 1;
-  width: 100%;
-  min-width: clamp(142px, 42vw, 330px);
-  padding: 7px 10px;
+  padding: 2px 6px;
   border-right: 1px solid var(--fc-admin-border-soft);
   background: var(--fc-admin-panel-bg);
   font-weight: 750;
@@ -98,26 +100,66 @@
   z-index: 3;
 }
 
+.taskHeader,
+.taskLine {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.taskHeader > span {
+  margin-right: auto;
+}
+
+.taskLine {
+  width: 100%;
+  min-width: 0;
+  padding: 1px 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  line-height: 17px;
+  text-align: left;
+}
+
+.taskName,
 .region {
-  display: block;
-  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.region {
+  flex-shrink: 0;
+  max-width: 48%;
+  padding: 0 4px;
+  border: 1px solid var(--fc-admin-border-soft);
+  border-radius: 4px;
+  background: var(--fc-admin-panel-soft-bg);
   color: var(--fc-admin-muted);
-  font-size: 10px;
-  font-weight: 700;
+  font-size: 9px;
+  font-weight: 750;
+  line-height: 13px;
 }
 
 .personColumn,
 .assignment {
-  min-width: 46px;
+  width: var(--person-width);
   text-align: center;
+  padding: 1px 2px;
 }
 
 .personColumn {
-  padding: 4px 3px;
+  padding: 3px 2px;
 }
 
 .personButton,
-.actions button {
+.filterButton,
+.pill,
+.dialogActions button {
   border: 1px solid var(--fc-admin-button-border);
   background: var(--fc-admin-button-bg);
   color: var(--fc-admin-button-text);
@@ -128,7 +170,7 @@
 
 .personButton {
   width: 100%;
-  min-height: 30px;
+  min-height: 25px;
   padding: 2px 4px;
   border-radius: 7px;
   overflow-wrap: anywhere;
@@ -140,16 +182,20 @@
   color: var(--fc-admin-primary-button-text);
 }
 
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 8px;
+.filterButton {
+  min-height: 25px;
+  padding: 2px 6px;
+  border-radius: 7px;
+  color: var(--fc-admin-link);
+  font-size: 11px;
+  letter-spacing: normal;
 }
 
-.actions button {
-  border-radius: 999px;
-  padding: 5px 11px;
-  font-size: 12px;
+.filterButton[data-filtered="true"],
+.pill[aria-pressed="true"] {
+  border-color: var(--fc-admin-selected-border);
+  background: var(--fc-admin-selected-bg);
+  color: var(--fc-admin-selected-text);
 }
 
 .category > * {
@@ -167,14 +213,16 @@
 
 .assigned {
   display: inline-block;
-  min-width: 28px;
-  max-width: 72px;
-  padding: 1px 4px;
+  min-width: 25px;
+  max-width: 100%;
+  padding: 0 3px;
   border: 1px solid var(--fc-admin-border-soft);
   border-radius: 999px;
   background: var(--fc-admin-panel-soft-bg);
   font-size: 11px;
   font-weight: 900;
+  line-height: 15px;
+  vertical-align: middle;
   overflow-wrap: anywhere;
 }
 
@@ -182,6 +230,136 @@
   border-color: var(--fc-admin-selected-border);
   background: var(--fc-admin-selected-bg);
   color: var(--fc-admin-selected-text);
+}
+
+.empty {
+  padding: 11px;
+  color: var(--fc-admin-muted);
+  font-weight: 700;
+}
+
+.dialog {
+  width: min(480px, calc(100% - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  margin: auto;
+  padding: 18px;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 22px;
+  background: var(--fc-admin-panel-bg);
+  color: var(--fc-admin-panel-text);
+  box-shadow: 0 18px 42px #0000001f;
+}
+
+.dialog::backdrop {
+  background: #1d1d1fb8;
+}
+
+.dialog h2 {
+  margin: 0 0 12px;
+  font-size: 19px;
+  font-weight: 850;
+  overflow-wrap: anywhere;
+}
+
+.dialogRegion {
+  margin: -7px 0 12px;
+  color: var(--fc-admin-muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.field input,
+.field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 4px 7px;
+  border: 1px solid var(--fc-admin-border);
+  border-radius: 8px;
+  background: var(--fc-tool-input-bg);
+  color: var(--fc-admin-panel-text);
+  font: inherit;
+  font-size: max(12px, 1em);
+}
+
+.filterFields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  margin: 0 0 13px;
+  padding: 0;
+  border: 0;
+}
+
+.picker legend {
+  margin-bottom: 6px;
+  padding: 0;
+  color: var(--fc-admin-link);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+
+.pill,
+.dialogActions button {
+  min-height: 33px;
+  min-width: 38px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.dialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.dialogActions button {
+  padding-inline: 12px;
+}
+
+.dialogActions .clearButton {
+  margin-right: auto;
+}
+
+.dialogActions .primaryButton {
+  border-color: var(--fc-admin-primary-button-bg);
+  background: var(--fc-admin-primary-button-bg);
+  color: var(--fc-admin-primary-button-text);
+}
+
+.dialogActions button:disabled,
+.pill:disabled {
+  cursor: default;
+}
+
+.dialogActions button:disabled {
+  opacity: 0.6;
+}
+
+.error {
+  margin: 6px 0 10px;
+  color: var(--fc-error);
+  font-size: 12px;
+  font-weight: 750;
 }
 
 @media (max-width: 600px) {
@@ -194,12 +372,29 @@
     padding: 8px;
   }
 
-  .personColumn,
-  .assignment {
-    min-width: 49px;
+  .table {
+    --person-width: 40px;
+    --task-min-width: clamp(143px, 46vw, 250px);
   }
 
-  .personButton {
-    min-height: 44px;
+  .taskHeader,
+  .taskLine {
+    gap: 4px;
+  }
+
+  .region {
+    max-width: 42%;
+  }
+
+  .personButton,
+  .filterButton,
+  .pill,
+  .dialogActions button {
+    min-height: 36px;
+  }
+
+  .field input,
+  .field select {
+    font-size: 16px;
   }
 }

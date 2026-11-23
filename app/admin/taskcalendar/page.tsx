@@ -15,6 +15,7 @@ import {
 import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
 import type { CalendarStaff } from "@/lib/calendarStaff"
+import { compareOfficeStaff } from "@/lib/officeStaffOrder"
 
 const SHARED_STORE_KEY = "task-calendar"
 const scheduleTypes: TaskScheduleType[] = ["Weekly", "Monthly", "Yearly"]
@@ -167,7 +168,7 @@ export default function TaskCalendarPage() {
   const [draftError, setDraftError] = useState("")
   const dialogRef = useRef<HTMLDivElement>(null)
   const mutationPendingRef = useRef(false)
-  const people = Array.from(new Set([...staff.map((person) => person.code), ...tasks.flatMap((task) => [...task.notify, ...task.cc])]))
+  const people = [...new Set([...staff.map((person) => person.code), ...tasks.flatMap((task) => [...task.notify, ...task.cc])])].sort(compareOfficeStaff)
 
   useEffect(() => {
     document.title = "Task Calendar - FC Uno"
