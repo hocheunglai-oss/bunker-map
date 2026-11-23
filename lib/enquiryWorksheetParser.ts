@@ -43,7 +43,7 @@ const NON_BUYER_LABEL_PATTERN =
   /^(?:address|agent|bank|berth|date|delivery|eta|etd|ets|imo|location|payment|port|product|quantity|spec|terms|vessel)\b/i
 
 const PORT_LABEL_PATTERN =
-  /^\s*(?:[-•*=]\s*\.?\s*)?(?:\d+\s*[\).:-]\s*)?(?:port|position|location|bunker(?:ing)?\s*(?:port|location|place)|refuell?ing\s*(?:port|location|place)|port\s+of\s+(?:call|delivery|supply)|delivery\s+(?:port|place|location)|place\s+of\s+(?:supply|delivery)|supply\s+(?:port|place|location)|loading\s+port|discharging\s+port|加油港口|港口|地点|地點)\s*(?:[:：#\-\t]|\s{2,})?\s*(.*)$/i
+  /^\s*(?:[-•*=]\s*\.?\s*)?(?:\d+\s*[\).:-]\s*)?(?:port|position|location|demand\s+port|bunker(?:ing)?\s*(?:port|location|place)|refuell?ing\s*(?:port|location|place)|port\s+of\s+(?:call|delivery|supply)|delivery\s+(?:port|place|location)|place\s+of\s+(?:supply|delivery)|supply\s+(?:port|place|location)|loading\s+port|discharging\s+port|加油港口|港口|地点|地點)\s*(?:[:：#\-\t]|\s{2,})?\s*(.*)$/i
 
 const NON_PORT_CONTEXT_PATTERN =
   /^\s*(?:account|agent|buyer|buyer\s+address|business\s+address|email|mail|m\/whatsapp|payment|surveyor|tel|terms)\b/i
@@ -218,7 +218,10 @@ function extractProseVessel(lines: string[]) {
     const unquoted = line.match(
       /\b(?:our\s+|the\s+)?vessel\s+((?:m\s*[./-]?\s*[vt]|mv|mt)?\.?\s*[A-Z0-9][A-Z0-9 .'"-]{1,60}?)(?=\s+(?:will|is|needs?|requires?|eta|at)\b)/i,
     )?.[1] || ""
-    const cleaned = cleanVesselName(quoted || unquoted)
+    const requested = line.match(
+      /^\s*(?:pls|please|kindly)\b[^:]{0,100}:\s*((?:m\s*[./-]?\s*[vt]|mv|mt)\.?\s+[A-Z0-9][A-Z0-9 .'"-]{1,60})\s*$/i,
+    )?.[1] || ""
+    const cleaned = cleanVesselName(quoted || unquoted || requested)
     if (isPlausibleVesselName(cleaned)) return cleaned
   }
 
@@ -258,6 +261,7 @@ function extractFallbackVessel(lines: string[], imo: string) {
 function extractSlashPrefixVessel(lines: string[]) {
   for (const line of lines) {
     if (!line.includes("/")) continue
+    if (/^\s*(?:brgds|best\s+regards|regards|thanks)\b/i.test(line)) continue
 
     const firstPart = line.split("/")[0]
     const cleaned = cleanVesselName(firstPart)
@@ -488,6 +492,9 @@ export function extractEnquiryPort(text: string, options: EnquiryWorksheetParseO
     if (etaAlternatives[0]) return etaAlternatives[0]
 
     const standalonePort = normalizeIndexedEnquiryPort(stripOuterNoise(line), {
+      portNames: options.portNames,
+      includeShortAliases: true,
+    }) || normalizeIndexedEnquiryPort(stripOuterNoise(line.replace(/\([^)]*\)/g, " ")), {
       portNames: options.portNames,
       includeShortAliases: true,
     })
