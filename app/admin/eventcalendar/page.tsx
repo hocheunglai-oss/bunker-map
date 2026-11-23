@@ -13,6 +13,10 @@ import { useSimpleAdminAuth } from "@/lib/useSimpleAdminAuth"
 import { canAccessAdminPage, isAdminRole } from "@/lib/adminPages"
 import { addCalendarDays, getHongKongDateKey, isValidCalendarDate, preserveCalendarEndDate } from "@/lib/eventCalendarDates"
 import { calendarIntervalsOverlap, meetingRoomInterval, type MeetingRoomCalendarEvent } from "@/lib/eventCalendarMeeting"
+import {
+  defaultEventCalendarPeople as defaultPeople,
+  normalizeEventCalendarPeople as normalizePeople,
+} from "@/lib/eventCalendarPeople"
 
 type EventCategory = "Public Holiday" | "Leave or Travel" | "Meeting Room" | "Unclassified"
 type ViewMode = "upcoming" | "past" | "google"
@@ -60,7 +64,6 @@ const EMAIL_RECIPIENTS_STORAGE_KEY = "bunker-map-office-calendar-email-recipient
 const DELETED_EVENT_IDS_STORAGE_KEY = "bunker-map-office-calendar-deleted-event-ids"
 const DELETED_REQUIRED_SEED_IDS_STORAGE_KEY = "bunker-map-office-calendar-deleted-required-seed-ids"
 const SHARED_STORE_KEY = "event-calendar"
-const defaultPeople = ["VL", "SC", "OL", "DT", "KZ", "CY", "MY", "LC", "LL", "JZ"]
 const leaveTypes: LeaveType[] = [
   "Annual Leave",
   "Sick Leave Notification (for medical treatment)",
@@ -334,10 +337,6 @@ function getMeetingRoomStyle(event: GoogleCalendarEvent) {
     color: "var(--fc-admin-panel-text)",
     fontWeight: 900,
   }
-}
-
-function normalizePeople(value: string[]) {
-  return Array.from(new Set(value.map((item) => item.trim().toUpperCase()).filter(Boolean).filter((item) => item !== "??")))
 }
 
 function normalizeStringList(value: string[]) {

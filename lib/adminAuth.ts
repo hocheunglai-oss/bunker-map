@@ -234,7 +234,7 @@ async function resolveAdminSessionToken(
   }
 }
 
-async function resolveAdminSession(): Promise<ResolvedAdminSession> {
+async function resolveAdminSession(clearInvalidCookie = true): Promise<ResolvedAdminSession> {
   const pages = await getDiscoveredAdminPages()
   const cookieStore = await cookies()
   const token = cookieStore.get(ADMIN_COOKIE_NAME)?.value
@@ -242,7 +242,7 @@ async function resolveAdminSession(): Promise<ResolvedAdminSession> {
   if (!token) return unresolvedAdminSession(pages)
 
   const resolved = await resolveAdminSessionToken(token, pages)
-  if (!resolved.publicSession.authenticated) {
+  if (clearInvalidCookie && !resolved.publicSession.authenticated) {
     await clearAdminCookies()
   }
   return resolved
@@ -317,8 +317,8 @@ function requireAuthenticatedResolvedSession(
   return resolved
 }
 
-export async function getAdminSession(): Promise<AdminSession> {
-  return (await resolveAdminSession()).publicSession
+export async function getAdminSession({ clearInvalidCookie = true } = {}): Promise<AdminSession> {
+  return (await resolveAdminSession(clearInvalidCookie)).publicSession
 }
 
 export async function getRefreshedAdminSession(): Promise<AdminSession & { actorKey: string | null }> {
