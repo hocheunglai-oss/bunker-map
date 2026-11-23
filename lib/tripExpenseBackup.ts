@@ -46,7 +46,7 @@ export async function openTripExpenseBackupDrive() {
   const rootId = daily.parents?.[0]
   if (daily.id !== dailyBackupReceipt.dailyFolderId || daily.trashed !== false ||
       daily.mimeType !== FOLDER_MIME || daily.name !== "Daily Supabase Backups" ||
-      daily.parents?.length !== 1 || rootId !== dailyBackupReceipt.rootFolderId) throw new Error("Wrong FCUNO backup location.")
+      daily.parents?.length !== 1 || !rootId) throw new Error("Wrong FCUNO backup location.")
 
   const root = (await drive.files.get({
     fileId: rootId, supportsAllDrives: true, fields: FOLDER_FIELDS + ",capabilities(canAddChildren)",
