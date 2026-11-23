@@ -12,6 +12,8 @@ import { requireAdminPagePermission } from "@/lib/adminAuth"
 import {
   createCompressedBackupStage,
   createCompressedBackupStageReadStream,
+  openUnlinkedBackupStage,
+  type UnlinkedBackupStage,
 } from "@/lib/compressedBackupStage"
 import { loadGoogleApis } from "@/lib/googleApis"
 import { buildGoogleDriveFolderLookupQuery } from "@/lib/queryEscaping"
@@ -107,7 +109,7 @@ type BackupFinalWriter = {
 }
 
 type PreparedBackupData = {
-  dataPath: string
+  stageFile: UnlinkedBackupStage
   artifactPrefix: Record<string, unknown>
   counts: Record<string, number>
   sections: BackupSectionManifest
@@ -1097,7 +1099,7 @@ function assertSameTruthHead(
 
 async function buildBackupFile(
   supabase: ReturnType<typeof getSupabaseClient>,
-  filePath: string,
+  stageFile: UnlinkedBackupStage,
   previousVerifiedBackup: PreviousVerifiedBackup | null,
   provenance: BackupProvenance,
   inventory: Awaited<ReturnType<typeof getBackupInventory>>
@@ -1174,7 +1176,7 @@ async function buildBackupFile(
     },
   }
   const stage = createCompressedBackupStage(
-    filePath,
+    stageFile,
     MAX_COMPRESSED_STAGING_BYTES
   )
   const writer: BackupDataWriter = {
@@ -1552,7 +1554,7 @@ async function buildBackupFile(
     )
 
     return {
-      dataPath: filePath,
+      stageFile,
       artifactPrefix,
       counts,
       sections,
@@ -1652,7 +1654,7 @@ async function streamPreparedBackupToDrive(
         `${serializedPrefix.slice(0, -1)},"counts":${JSON.stringify(prepared.counts)},"data":`
       )
       for await (const chunk of createCompressedBackupStageReadStream(
-        prepared.dataPath
+        prepared.stageFile
       )) {
         await writeFinalChunk(writer, chunk)
       }
@@ -2057,6 +2059,7 @@ async function createBackup(provenance: BackupProvenance) {
   const startedAt = Date.now()
   let lockAcquired = false
   let tempDirectory: string | null = null
+  let stageFile: UnlinkedBackupStage | undefined
   let drive: drive_v3.Drive | null = null
   let uploadedFileId: string | null = null
   let uploadVerified = false
@@ -2170,10 +2173,10 @@ async function createBackup(provenance: BackupProvenance) {
     tempDirectory = await mkdtemp(
       join(tmpdir(), "bunker-map-backup-")
     )
-    const dataPath = join(tempDirectory, "data.json.gz")
+    stageFile = await openUnlinkedBackupStage(join(tempDirectory, "data.br"))
     const prepared = await buildBackupFile(
       supabase,
-      dataPath,
+      stageFile,
       previousVerifiedBackup,
       provenance,
       inventory
@@ -2271,7 +2274,11 @@ async function createBackup(provenance: BackupProvenance) {
   } finally {
     if (tempDirectory) {
       try {
-        await rm(tempDirectory, { recursive: true, force: true })
+        try {
+          await stageFile?.close()
+        } finally {
+          await rm(tempDirectory, { recursive: true, force: true })
+        }
       } catch (error) {
         console.error(
           "Failed to remove the bounded backup workspace:",

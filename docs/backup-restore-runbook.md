@@ -213,6 +213,9 @@ download and SHA-256 check its existing predecessor before starting a new
 export; System Health performs the later full-byte checks described below.
 During export, the paged data body is held in a bounded Brotli-compressed
 temporary staging file and decompressed directly into the Drive upload stream.
+The temporary file has no directory entry while it holds backup data. If
+the process is killed mid-run, the operating system releases that space
+when its file handles close; a retry cannot inherit a stranded archive.
 The published artifact remains ordinary JSON, so existing validators and
 restore evidence remain compatible while temporary storage no longer grows at
 the full uncompressed database size.

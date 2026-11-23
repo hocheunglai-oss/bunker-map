@@ -1,4 +1,5 @@
 import { createReadStream, createWriteStream } from "node:fs"
+import { open, unlink, type FileHandle } from "node:fs/promises"
 import { Transform, type TransformCallback } from "node:stream"
 import { pipeline } from "node:stream/promises"
 import {
@@ -32,8 +33,27 @@ class StoredByteLimit extends Transform {
   }
 }
 
+// The caller supplies a new path inside its own private directory. On our
+// POSIX host, removing the name before writing means a hard process stop
+// releases the bytes even when the route's finally block cannot run.
+export async function openUnlinkedBackupStage(path: string) {
+  const writer = await open(path, "wx", 0o600)
+  let reader: FileHandle | undefined
+  try {
+    reader = await open(path, "r")
+    await unlink(path)
+    const handles = [reader, writer]
+    return { reader, writer, close: async () => { await Promise.all(handles.map(handle => handle.close())) } }
+  } catch (error) {
+    await Promise.allSettled([writer.close(), reader?.close()])
+    throw error
+  }
+}
+
+export type UnlinkedBackupStage = Awaited<ReturnType<typeof openUnlinkedBackupStage>>
+
 export function createCompressedBackupStage(
-  filePath: string,
+  file: string | UnlinkedBackupStage,
   maximumByteLength: number
 ) {
   if (!Number.isSafeInteger(maximumByteLength) || maximumByteLength < 1) {
@@ -56,7 +76,7 @@ export function createCompressedBackupStage(
   const settled = pipeline(
     writable,
     limiter,
-    createWriteStream(filePath, { flags: "wx", mode: 0o600 })
+    typeof file === "string" ? createWriteStream(file, { flags: "wx", mode: 0o600 }) : file.writer.createWriteStream()
   ).catch((error: unknown) => {
     failure =
       error instanceof Error ? error : new Error(String(error || "Staging failed."))
@@ -78,9 +98,10 @@ export function createCompressedBackupStage(
   }
 }
 
-export function createCompressedBackupStageReadStream(filePath: string) {
-  const source = createReadStream(filePath)
+export function createCompressedBackupStageReadStream(file: string | UnlinkedBackupStage) {
+  const source = typeof file === "string" ? createReadStream(file) : file.reader.createReadStream({ start: 0 })
   const brotli = createBrotliDecompress()
   source.once("error", (error) => brotli.destroy(error))
+  brotli.once("close", () => source.destroy())
   return source.pipe(brotli)
 }
