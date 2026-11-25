@@ -17,13 +17,15 @@ const run = (extra: Partial<BackupRun> = {}): BackupRun => ({
 const evaluate = (runs: BackupRun[], workflowActive = true, at = checkedAt) => evaluateEcoBackup({ checkedAt: at, workflowActive, runs, recoveryWindowComplete: true })
 const level = (check: ReturnType<typeof evaluate>[number]) => healthAlertObservation(check, false).alert_level
 
-test("fresh verified capture resolves; 30-hour age allows scheduling delay and 48 hours escalates once", () => {
+test("fresh capture resolves, the 30-hour deadline allows scheduling delay, and 48 hours raises health severity", () => {
   assert.equal(level(evaluate([run()])[0]), 0)
   const old = run({ createdAt: current - 24 * 3_600_000 - 10_000, capturedAt: current - 24 * 3_600_000 })
   assert.equal(level(evaluate([old])[0]), 1)
   assert.equal(level(evaluate([old], true, "2026-11-03T00:29:59Z")[0]), 0, "allow observed GitHub delay up to 30 hours")
   assert.equal(level(evaluate([old], true, "2026-11-03T00:30:00Z")[0]), 1, "30-hour deadline is inclusive")
-  assert.equal(level(evaluate([run({ createdAt: current - 49 * 3_600_000, capturedAt: current - 49 * 3_600_000 })])[0]), 2)
+  const overdue = evaluate([run({ createdAt: current - 49 * 3_600_000, capturedAt: current - 49 * 3_600_000 })])[0]
+  assert.equal(overdue.status, "error")
+  assert.equal(level(overdue), 1)
 })
 
 test("successful workflow with skipped capture is not backup success; failures, disabled and stalled runs alert", () => {
@@ -98,7 +100,9 @@ test("30-hour freshness and immediate failure categories override the recovery w
   assert.equal(level(afterSkip), 1, "an earlier unresolved skip still bypasses grace")
   assert.match(afterSkip.message, /latest completed backup run was unsuccessful/)
   assert.doesNotMatch(afterSkip.message, /latest backup was skipped/)
-  assert.equal(level(evaluate([failed, run({ capturedAt: now - 49 * 3_600_000 })])[0]), 2)
+  const overdue = evaluate([failed, run({ capturedAt: now - 49 * 3_600_000 })])[0]
+  assert.equal(overdue.status, "error")
+  assert.equal(level(overdue), 1)
   assert.equal(level(evaluate([failed, run({ maintenance: "attention" })])[0]), null, "capacity advice does not erase the verified prior capture")
 })
 
@@ -357,10 +361,11 @@ test("only an explicit healthy maintenance result clears storage incidents; lega
   assert.equal(level(evaluate([pending, run({ maintenance: "healthy" })])[2]), null)
 })
 
-test("maintenance warnings never suppress missed-backup escalation", () => {
+test("maintenance warnings never suppress an overdue backup failure", () => {
   const old = run({ maintenance: "attention", capturedAt: now - 49 * 3_600_000 })
   const checks = evaluate([old])
-  assert.equal(level(checks[0]), 2)
+  assert.equal(checks[0].status, "error")
+  assert.equal(level(checks[0]), 1)
   assert.equal(level(checks[2]), null)
 })
 
@@ -502,13 +507,47 @@ test("missed backups remain email-eligible even when their health severity is wa
     const capturedAt = now - ageHours * 3_600_000
     deps.read = async () => ({ checkedAt, workflowActive: true, runs: [run({ createdAt: capturedAt - 10_000, completedAt: capturedAt + 1_000, capturedAt })] })
     deps.store = () => ({ claim: async (observations) => {
-      assert.equal(observations.find((item) => item.check_id === "eco-nightly-backup")?.alert_level, ageHours >= 48 ? 2 : 1)
+      assert.equal(observations.find((item) => item.check_id === "eco-nightly-backup")?.alert_level, 1)
       return observations.filter((item) => item.alert_level !== null && item.alert_level > 0).map((item) => item.check_id)
     }, finish: async (_, delivered) => { assert.equal(delivered, true) } })
     assert.equal((await handleEcoBackupWatchdog(request(), deps)).status, 200)
     assert.equal(sent.length, 1)
     assert.match(sent[0].html, /past 30 hours/)
   }
+})
+
+test("an open backup outage emails once and re-arms only after verified recovery", async () => {
+  const { deps, sent } = dependencies()
+  let notifiedLevel = 0
+  let claimedLevel = 0
+  deps.store = () => ({
+    claim: async (observations) => {
+      const backup = observations.find((item) => item.check_id === "eco-nightly-backup")!
+      if (backup.alert_level === 0) notifiedLevel = 0
+      if (backup.alert_level === null || backup.alert_level <= notifiedLevel) return []
+      claimedLevel = backup.alert_level
+      return [backup.check_id]
+    },
+    finish: async (_, delivered) => { if (delivered) notifiedLevel = claimedLevel },
+  })
+  const hour = 3_600_000
+  const first = run()
+  const recovered = run({ id: 101, createdAt: current + 49 * hour, capturedAt: current + 49 * hour,
+    completedAt: current + 49 * hour + 1_000 })
+  async function observe(hoursSinceFirstCapture: number, runs: BackupRun[]) {
+    const at = new Date(current + hoursSinceFirstCapture * hour).toISOString()
+    deps.read = async () => ({ checkedAt: at, workflowActive: true, runs })
+    const response = await handleEcoBackupWatchdog(request(), deps)
+    assert.equal(response.status, 200)
+    const body = await response.json()
+    return { sent: body.sent, status: body.checks.find((item: { id: string }) => item.id === "eco-nightly-backup").status }
+  }
+  assert.deepEqual(await observe(31, [first]), { sent: true, status: "warning" })
+  assert.deepEqual(await observe(48, [first]), { sent: false, status: "error" })
+  assert.deepEqual(await observe(49, [first]), { sent: false, status: "error" })
+  assert.deepEqual(await observe(50, [recovered, first]), { sent: false, status: "ok" })
+  assert.deepEqual(await observe(80, [recovered, first]), { sent: true, status: "warning" })
+  assert.equal(sent.length, 2)
 })
 
 test("healthy recovery is recorded without email so a later failure can be re-armed", async () => {

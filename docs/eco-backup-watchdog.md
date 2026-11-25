@@ -43,16 +43,15 @@ backup failure remains the trigger for email.
   or after the monitor first notices it. A retry or a new failed run cannot reset
   the deadline. An active retry that passes the same deadline also alerts.
 - Skipped captures, disabled workflows, no verified prior capture and the
-  30-hour freshness deadline bypass that window. A known verified run older than
-  48 hours still escalates once. The first scheduled monitor check after a
-  deadline can send an alert; this policy does not automatically retry a backup.
+  30-hour freshness deadline bypass that window. A known verified run at least
+  48 hours old raises the health status to an error. The first scheduled monitor
+  check after a deadline can send an alert. The monitor only observes backup runs.
 - The recovery window requires complete inspected evidence for the unresolved
   completed runs after the latest verified capture. If the bounded inspection
   budget leaves any such run uninspected, no failure is suppressed. Missing,
   invalid or future original timestamps cannot start a new window.
-- Missing verified-run success becomes overdue after 30 hours. This allows the observed
-  several-hour GitHub scheduling delays. A known verified run older than
-  48 hours escalates an incident once.
+- Missing verified-run success becomes overdue after 30 hours. This allows the
+  observed several-hour GitHub scheduling delays.
 - A successful workflow is insufficient: the exact job and capture step in its
   current attempt must also finish successfully. Skipped guarded jobs cannot
   falsely report success. A later unsuccessful run takes precedence over an
@@ -61,10 +60,10 @@ backup failure remains the trigger for email.
   a separate unverified-monitor warning without email. They do not mark a backup
   failed or recovered. No retries or writes are sent to GitHub.
 - The existing service-only incident store deduplicates by stable check ID and
-  recipient, independently of GitHub run IDs. Identical unresolved incidents
-  are quiet; escalation is delivered once and verified recovery re-arms a later
-  failure. Failed SMTP acceptance releases the lease for retry. Missing incident
-  storage fails closed rather than sending uncontrolled repeated emails.
+  recipient, independently of GitHub run IDs. One email is sent per unresolved
+  outage, including when its health status later becomes an error. Verified
+  recovery re-arms alerts for a later outage. Failed SMTP acceptance releases
+  the lease for retry. Missing incident storage prevents delivery.
   A recovery-window observation has a null incident level: it neither sends an
   email nor closes an existing incident. Only verified recovery closes it,
   silently; there are no success or recovery emails.
@@ -123,10 +122,10 @@ Another failed step, an unsuccessful capture, duplicate evidence or inconsistent
 timestamps cannot be reclassified as capacity-only attention. Missing evidence
 preserves any existing storage incident; only an explicit successful maintenance
 step on a verified run clears it. The original 30-hour backup deadline and
-48-hour escalation continue independently. Old workflow versions without the
-new step remain valid capture evidence but cannot prove maintenance recovery.
+48-hour health severity threshold continue independently. Older workflow
+versions can prove capture. Maintenance recovery requires its own successful step.
 
 Up to three earlier overall-failure runs are inspected alongside the successful
 run candidates: a capacity-only warning must remain valid capture history after
 a newer genuine backup failure. This avoids overstating the age of the last
-verified copy when calculating the missed-backup escalation.
+verified copy when calculating how overdue the backup is.
