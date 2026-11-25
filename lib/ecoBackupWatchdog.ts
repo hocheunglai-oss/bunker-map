@@ -274,7 +274,8 @@ export function evaluateEcoBackup(observation: BackupObservation): HealthCheck[]
   const severity = warning && lastSuccess !== null && now - lastSuccess >= 48 * HOUR ? 2 : 1
   return [
     check("eco-nightly-backup", warning ? (severity === 2 ? "error" : "warning") : "ok", message, observation.checkedAt, {
-      alertLevel: severity, incidentResolved: !warning && !pending,
+      // Health severity can increase during the same unresolved outage.
+      alertLevel: 1, incidentResolved: !warning && !pending,
       notificationEligible: warning && !inRecoveryWindow, lastSuccessfulRunAt: lastSuccess === null ? null : new Date(lastSuccess).toISOString(),
       action: "Review the ECO nightly backup workflow. A successful run is capture evidence; it is not a restoration test.",
     }),
@@ -302,5 +303,5 @@ export function buildEcoBackupAlertHtml(checks: HealthCheck[], checkedAt: string
       ${item.id === "eco-nightly-backup" ? `<p>Last verified backup run: ${escape(display(item.details?.lastSuccessfulRunAt))}.</p>` : ""}
       <p>${escape(String(item.details?.action ?? "Review the backup workflow."))}</p>`).join("")}
     <p><a href="https://github.com/${target.repository}/actions/workflows/${target.workflowPath.split("/").pop()}">VIEW ECO BACKUP RUNS</a></p>
-    <p>This check runs independently of the backup scheduler. Unchanged incidents are not repeatedly emailed; a verified recovery re-arms the next alert.</p></div>`
+    <p>This check runs independently of the backup scheduler. The monitor emails once per unresolved outage. A verified recovery re-arms the next alert.</p></div>`
 }
